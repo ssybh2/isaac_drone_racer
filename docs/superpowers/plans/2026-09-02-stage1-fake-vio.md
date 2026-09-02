@@ -27,9 +27,9 @@
 ### Task 1: State contracts and frame alignment
 
 **Files:**
-- Create: `tasks/drone_racer/estimation/__init__.py`
-- Create: `tasks/drone_racer/estimation/state_estimate.py`
-- Create: `tasks/drone_racer/estimation/frame_math.py`
+- Create: `estimation/__init__.py`
+- Create: `estimation/state_estimate.py`
+- Create: `estimation/frame_math.py`
 - Test: `tests/estimation/test_state_estimate.py`
 - Test: `tests/estimation/test_frame_math.py`
 
@@ -37,7 +37,7 @@
 - Produces: `SourceStatus`, `VioEstimate`, `ImuEstimate`, `StateEstimate`, `GroundTruthState` tensor dataclasses.
 - Produces: `compose_transform_w_b(position_w_v, orientation_w_v, position_v_b, orientation_v_b) -> tuple[Tensor, Tensor]` and `rotate_world_to_body(orientation_w_b, vector_w) -> Tensor`.
 
-- [ ] **Step 1: Write state-shape and quaternion validation tests**
+- [x] **Step 1: Write state-shape and quaternion validation tests**
 
 ```python
 def test_state_estimate_rejects_wrong_position_shape():
@@ -51,23 +51,23 @@ def test_state_estimate_rejects_non_finite_values():
         state.validate()
 ```
 
-- [ ] **Step 2: Run the contract tests and verify RED**
+- [x] **Step 2: Run the contract tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_state_estimate.py`
 
 Expected: collection fails because `tasks.drone_racer.estimation` does not exist.
 
-- [ ] **Step 3: Implement typed tensor contracts and validation**
+- [x] **Step 3: Implement typed tensor contracts and validation**
 
 Use dataclasses with batched tensors. `SourceStatus` contains `timestamp_s`, `age_s`, and `valid`; `VioEstimate` contains `position_v_b`, `orientation_v_b`, `linear_velocity_v_b`, and `status`; `ImuEstimate` contains `angular_velocity_b` and `status`; `StateEstimate` contains publish time, `T_WV`, world-aligned state, and both statuses. `validate()` checks batch shapes, common device, finite floating values, boolean validity, and unit quaternions within `1e-4`.
 
-- [ ] **Step 4: Run contract tests and verify GREEN**
+- [x] **Step 4: Run contract tests and verify GREEN**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_state_estimate.py`
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Write hand-derived frame-transform tests**
+- [x] **Step 5: Write hand-derived frame-transform tests**
 
 ```python
 def test_t_wb_equals_t_wv_times_t_vb_for_yaw_alignment():
@@ -81,24 +81,24 @@ def test_t_wb_equals_t_wv_times_t_vb_for_yaw_alignment():
     torch.testing.assert_close(q_w_b, yaw_quaternion_90_deg, atol=1e-6, rtol=0)
 ```
 
-- [ ] **Step 6: Run frame tests and verify RED**
+- [x] **Step 6: Run frame tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_frame_math.py`
 
 Expected: import fails because `frame_math.py` does not exist.
 
-- [ ] **Step 7: Implement normalized quaternion composition and vector rotation**
+- [x] **Step 7: Implement normalized quaternion composition and vector rotation**
 
 Implement scalar-first quaternion multiply, conjugate, normalize, rotate, transform composition, and world-to-body rotation using batched PyTorch operations only.
 
-- [ ] **Step 8: Run Task 1 tests and commit**
+- [x] **Step 8: Run Task 1 tests and commit**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_state_estimate.py tests/estimation/test_frame_math.py`
 
 Commit:
 
 ```bash
-git add tasks/drone_racer/estimation tests/estimation/test_state_estimate.py tests/estimation/test_frame_math.py
+git add estimation tests/estimation/test_state_estimate.py tests/estimation/test_frame_math.py
 git commit -m "feat: define Stage 1 state estimate contract"
 ```
 
@@ -107,8 +107,8 @@ git commit -m "feat: define Stage 1 state estimate contract"
 ### Task 2: Fake VIO phenomenological provider
 
 **Files:**
-- Create: `tasks/drone_racer/estimation/fake_sensor_cfg.py`
-- Create: `tasks/drone_racer/estimation/fake_vio.py`
+- Create: `estimation/fake_sensor_cfg.py`
+- Create: `estimation/fake_vio.py`
 - Test: `tests/estimation/test_fake_vio.py`
 
 **Interfaces:**
@@ -167,7 +167,7 @@ Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_vio.py`
 Commit:
 
 ```bash
-git add tasks/drone_racer/estimation/fake_sensor_cfg.py tasks/drone_racer/estimation/fake_vio.py tests/estimation/test_fake_vio.py
+git add estimation/fake_sensor_cfg.py estimation/fake_vio.py tests/estimation/test_fake_vio.py
 git commit -m "feat: add tensorized Fake VIO provider"
 ```
 
@@ -176,7 +176,7 @@ git commit -m "feat: add tensorized Fake VIO provider"
 ### Task 3: Fake IMU gyro provider
 
 **Files:**
-- Create: `tasks/drone_racer/estimation/fake_imu.py`
+- Create: `estimation/fake_imu.py`
 - Test: `tests/estimation/test_fake_imu.py`
 
 **Interfaces:**
@@ -212,7 +212,7 @@ Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_imu.py`
 Commit:
 
 ```bash
-git add tasks/drone_racer/estimation/fake_imu.py tests/estimation/test_fake_imu.py
+git add estimation/fake_imu.py tests/estimation/test_fake_imu.py
 git commit -m "feat: add independent Fake IMU gyro provider"
 ```
 
@@ -221,7 +221,7 @@ git commit -m "feat: add independent Fake IMU gyro provider"
 ### Task 4: State assembler and policy adapter
 
 **Files:**
-- Create: `tasks/drone_racer/estimation/state_estimate_assembler.py`
+- Create: `estimation/state_estimate_assembler.py`
 - Create: `tasks/drone_racer/mdp/stage1_observations.py`
 - Modify: `tasks/drone_racer/mdp/__init__.py`
 - Test: `tests/estimation/test_state_estimate_assembler.py`
@@ -263,7 +263,7 @@ Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_state_estimate_as
 Commit:
 
 ```bash
-git add tasks/drone_racer/estimation/state_estimate_assembler.py tasks/drone_racer/mdp/stage1_observations.py tasks/drone_racer/mdp/__init__.py tests/estimation/test_state_estimate_assembler.py tests/test_stage1_observations.py
+git add estimation/state_estimate_assembler.py tasks/drone_racer/mdp/stage1_observations.py tasks/drone_racer/mdp/__init__.py tests/estimation/test_state_estimate_assembler.py tests/test_stage1_observations.py
 git commit -m "feat: assemble Stage 1 policy state"
 ```
 
@@ -272,10 +272,10 @@ git commit -m "feat: assemble Stage 1 policy state"
 ### Task 5: Stage 1 pipeline and Isaac Lab lifecycle
 
 **Files:**
-- Create: `tasks/drone_racer/estimation/pipeline.py`
+- Create: `estimation/pipeline.py`
 - Create: `tasks/drone_racer/stage1_env.py`
 - Test: `tests/estimation/test_pipeline.py`
-- Test: `tests/test_stage1_env_source.py`
+- Test: `tests/test_stage1_env_lifecycle.py`
 
 **Interfaces:**
 - Produces: `Stage1StatePipeline` with `reset`, `ingest_imu`, `ingest_vio`, and `publish` methods.
@@ -293,13 +293,13 @@ Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_pipeline.py`
 
 `Stage1StatePipeline` owns Fake VIO, Fake IMU, assembler, identity `T_WV`, and current estimate. It accepts ground-truth tensors explicitly; it has no Isaac imports.
 
-- [ ] **Step 4: Add a failing source-level lifecycle guard**
+- [ ] **Step 4: Add a failing runtime lifecycle test**
 
-Parse `Stage1DroneRacerEnv.step` with `ast` and assert the subclass calls `ingest_imu` inside the physics decimation loop, calls `ingest_vio` after physics, publishes before `observation_manager.compute`, and does not change reward or termination configuration. This protects the locally copied Isaac Lab v2.1.0 step ordering.
+Launch one real Stage 1 environment with clean providers and inspect provider diagnostics after one action. Assert `imu_ingest_count` increases by `env.cfg.decimation`, `vio_delivery_count` follows the configured VIO period, the returned observation carries the most recently published timestamp, and the reward and termination managers expose the same term names as Stage 0.
 
 - [ ] **Step 5: Run lifecycle guard and verify RED**
 
-Run: `.conda-env/bin/python -m pytest -q tests/test_stage1_env_source.py`
+Run the test through the Isaac Sim Python launcher: `.conda-env/bin/python tests/test_stage1_env_lifecycle.py --headless`
 
 - [ ] **Step 6: Implement the pinned Stage 1 environment subclass**
 
@@ -307,12 +307,12 @@ Copy the v2.1.0 `ManagerBasedRLEnv.step` control flow into the subclass and make
 
 - [ ] **Step 7: Run Task 5 pure tests and commit**
 
-Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_pipeline.py tests/test_stage1_env_source.py`
+Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_pipeline.py` and `.conda-env/bin/python tests/test_stage1_env_lifecycle.py --headless`.
 
 Commit:
 
 ```bash
-git add tasks/drone_racer/estimation/pipeline.py tasks/drone_racer/stage1_env.py tests/estimation/test_pipeline.py tests/test_stage1_env_source.py
+git add estimation/pipeline.py tasks/drone_racer/stage1_env.py tests/estimation/test_pipeline.py tests/test_stage1_env_lifecycle.py
 git commit -m "feat: integrate Stage 1 estimator lifecycle"
 ```
 

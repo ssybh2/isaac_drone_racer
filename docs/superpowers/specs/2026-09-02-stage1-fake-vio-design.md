@@ -402,7 +402,7 @@ will propose thresholds based on Stage 0 degradation and achievable recovery.
 Expected implementation areas are:
 
 ```text
-tasks/drone_racer/estimation/
+estimation/
   state_estimate.py
   fake_vio.py
   fake_imu.py
