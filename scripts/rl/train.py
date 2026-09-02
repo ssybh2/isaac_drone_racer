@@ -118,6 +118,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         from estimation.fake_sensor_cfg import FakeSensorPipelineCfg
 
         env_cfg.fake_sensors = FakeSensorPipelineCfg.from_profile(args_cli.fake_sensor_profile)
+        agent_cfg["agent"]["experiment"]["experiment_name"] = (
+            f"stage1_{args_cli.fake_sensor_profile}"
+        )
 
     # multi-gpu training config
     if args_cli.distributed:
