@@ -21,6 +21,13 @@ parser.add_argument("--num_envs", type=int, default=None, help="Number of enviro
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
 parser.add_argument(
+    "--fake_sensor_profile",
+    type=str,
+    choices=["clean", "mild", "nominal", "stress"],
+    default=None,
+    help="Named Stage 1 Fake VIO/Fake IMU profile.",
+)
+parser.add_argument(
     "--use_pretrained_checkpoint",
     action="store_true",
     help="Use the pre-trained checkpoint from Nucleus.",
@@ -115,6 +122,12 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
+    if args_cli.fake_sensor_profile is not None:
+        if not hasattr(env_cfg, "fake_sensors"):
+            raise ValueError("--fake_sensor_profile requires a Stage 1 task")
+        from estimation.fake_sensor_cfg import FakeSensorPipelineCfg
+
+        env_cfg.fake_sensors = FakeSensorPipelineCfg.from_profile(args_cli.fake_sensor_profile)
     try:
         experiment_cfg = load_cfg_from_registry(args_cli.task, f"skrl_{algorithm}_cfg_entry_point")
     except ValueError:
