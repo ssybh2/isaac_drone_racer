@@ -232,31 +232,31 @@ git commit -m "feat: add independent Fake IMU gyro provider"
 - Produces: `StateEstimateAssembler.publish(vio, imu, publish_timestamp_s) -> StateEstimate`.
 - Produces: `estimated_drone_state(env) -> Tensor` with shape `(num_envs, 13)` and exact Stage 0 ordering.
 
-- [ ] **Step 1: Write failing identity and non-identity alignment tests**
+- [x] **Step 1: Write failing identity and non-identity alignment tests**
 
 Hand-check identity `T_WV` and a 90-degree yaw/translation case. Assert VIO and IMU timestamps, ages, and validity survive assembly unchanged.
 
-- [ ] **Step 2: Run assembler tests and verify RED**
+- [x] **Step 2: Run assembler tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_state_estimate_assembler.py`
 
-- [ ] **Step 3: Implement assembly and world alignment**
+- [x] **Step 3: Implement assembly and world alignment**
 
 Apply `T_WV` to pose and linear velocity. Copy gyro in body coordinates without rotation. Compute source ages from publish time minus each source timestamp and reject negative age.
 
-- [ ] **Step 4: Write failing 13-value adapter test**
+- [x] **Step 4: Write failing 13-value adapter test**
 
 Use a real `StateEstimate` fixture and an environment stub containing only `stage1_state_estimate`; assert the literal flattened output. The stub intentionally has no `scene` attribute so any ground-truth access fails.
 
-- [ ] **Step 5: Run adapter test and verify RED**
+- [x] **Step 5: Run adapter test and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/test_stage1_observations.py`
 
-- [ ] **Step 6: Implement the read-only adapter**
+- [x] **Step 6: Implement the read-only adapter**
 
 Rotate `linear_velocity_w_b` into B using `orientation_w_b`, concatenate position, quaternion, body linear velocity, and body gyro, then clone the result. The function does not update providers and does not accept `asset_cfg`.
 
-- [ ] **Step 7: Run Task 4 tests and commit**
+- [x] **Step 7: Run Task 4 tests and commit**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_state_estimate_assembler.py tests/test_stage1_observations.py`
 
