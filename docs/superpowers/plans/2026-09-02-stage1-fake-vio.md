@@ -1,6 +1,6 @@
 # Stage 1 Fake VIO Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution note:** Implement this plan directly, task by task. No `superpowers` skill may be used for this work. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a hardware-portable Stage 1 state-estimation path that replaces drone-state ground truth in the policy with independently timed Fake VIO and Fake IMU estimates while preserving the Stage 0 20-value policy interface and oracle gate-relative target.
 
@@ -115,7 +115,7 @@ git commit -m "feat: define Stage 1 state estimate contract"
 - Consumes: `GroundTruthState`, `VioEstimate`, quaternion helpers.
 - Produces: `Range(low: float, high: float)`, `FakeVioCfg`, and `FakeVio(num_envs, device, cfg, seed)` with `reset(env_ids, ground_truth, timestamp_s)` and `update(ground_truth, timestamp_s) -> VioEstimate`.
 
-- [ ] **Step 1: Write clean-profile, seeded-noise, and quaternion tests**
+- [x] **Step 1: Write clean-profile, seeded-noise, and quaternion tests**
 
 ```python
 def test_clean_vio_matches_ground_truth():
@@ -130,37 +130,37 @@ def test_vio_noise_is_seed_reproducible():
     torch.testing.assert_close(a.reset(ids, gt, 0.0).position_v_b, b.reset(ids, gt, 0.0).position_v_b)
 ```
 
-- [ ] **Step 2: Run the VIO tests and verify RED**
+- [x] **Step 2: Run the VIO tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_vio.py`
 
 Expected: import fails because `fake_vio.py` does not exist.
 
-- [ ] **Step 3: Implement clean output, sampled episode parameters, and quaternion perturbation**
+- [x] **Step 3: Implement clean output, sampled episode parameters, and quaternion perturbation**
 
 Sample profile ranges into `(num_envs, field_dim)` tensors at reset. Compose small-angle roll/pitch/yaw error as a quaternion and normalize the result. Never add noise directly to quaternion components.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_vio.py -k 'clean or seed or quaternion'`
 
 Expected: selected tests pass.
 
-- [ ] **Step 5: Add failing tests for update rate, latency, drift, dropout, and reset isolation**
+- [x] **Step 5: Add failing tests for update rate, latency, drift, dropout, and reset isolation**
 
 Use literal one-dimensional trajectories so a two-step latency must return the value from exactly two source samples earlier. Force dropout probability to `1.0` and assert hold-last plus increasing age. Reset only environment 0 and assert environment 1 drift/history tensors are unchanged.
 
-- [ ] **Step 6: Run temporal tests and verify RED**
+- [x] **Step 6: Run temporal tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_vio.py -k 'rate or latency or drift or dropout or isolation'`
 
 Expected: assertions fail because temporal behaviors are absent.
 
-- [ ] **Step 7: Implement tensorized temporal behavior**
+- [x] **Step 7: Implement tensorized temporal behavior**
 
 Maintain source clock, ring-buffer samples/timestamps, bias random walks, position/velocity/orientation drift, dropout burst counter, last-delivered sample, age, and validity per environment. Reject update periods below the ingestion period and latency larger than ring capacity. No `.cpu()`, `.item()`, NumPy conversion, or environment loop is allowed in `update`.
 
-- [ ] **Step 8: Run Task 2 tests and commit**
+- [x] **Step 8: Run Task 2 tests and commit**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_vio.py`
 

@@ -36,6 +36,19 @@ def quaternion_conjugate(quaternion: torch.Tensor) -> torch.Tensor:
     return result
 
 
+def quaternion_from_rotation_vector(rotation_vector: torch.Tensor) -> torch.Tensor:
+    """Convert axis-angle rotation vectors to scalar-first quaternions."""
+    angle = torch.linalg.vector_norm(rotation_vector, dim=-1, keepdim=True)
+    half_angle = 0.5 * angle
+    epsilon = torch.finfo(rotation_vector.dtype).eps
+    scale = torch.where(
+        angle > epsilon,
+        torch.sin(half_angle) / angle.clamp_min(epsilon),
+        0.5 - angle.square() / 48.0,
+    )
+    return normalize_quaternion(torch.cat((torch.cos(half_angle), rotation_vector * scale), dim=-1))
+
+
 def rotate_vector(quaternion: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
     """Rotate a vector with an active scalar-first quaternion."""
     q = normalize_quaternion(quaternion)
