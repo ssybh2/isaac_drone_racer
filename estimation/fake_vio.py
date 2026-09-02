@@ -21,7 +21,7 @@ class FakeVio:
         self.generator = torch.Generator(device=self.device)
         self.generator.manual_seed(seed)
 
-        history_length = math.ceil(cfg.latency_s.high / cfg.update_period_s) + 3
+        history_length = math.ceil(cfg.latency_s.high / cfg.min_update_period_s) + 3
         self._history_length = max(3, history_length)
         self._write_index = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self._history_timestamp_s = torch.full(
@@ -39,6 +39,9 @@ class FakeVio:
         self._last_call_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._last_source_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._next_update_timestamp_s = torch.zeros(num_envs, device=self.device)
+        self._update_period_s = torch.full(
+            (num_envs,), cfg.update_period_s, dtype=torch.float32, device=self.device
+        )
         self._valid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self._dropped = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
 
@@ -68,6 +71,11 @@ class FakeVio:
             value_range.high - value_range.low
         ) + value_range.low
 
+    def _sample_update_period(self, count: int) -> torch.Tensor:
+        if self.cfg.update_period_range_s is None:
+            return torch.full((count,), self.cfg.update_period_s, device=self.device)
+        return self._sample(self.cfg.update_period_range_s, (count,))
+
     def _normal(self, shape: tuple[int, ...]) -> torch.Tensor:
         return torch.randn(shape, generator=self.generator, device=self.device)
 
@@ -95,21 +103,6 @@ class FakeVio:
         )
         return position, orientation, velocity
 
-    def _write_history(
-        self,
-        env_ids: torch.Tensor,
-        timestamp_s: torch.Tensor,
-        position: torch.Tensor,
-        orientation: torch.Tensor,
-        velocity: torch.Tensor,
-    ) -> None:
-        slots = self._write_index[env_ids]
-        self._history_timestamp_s[slots, env_ids] = timestamp_s[env_ids]
-        self._history_position[slots, env_ids] = position
-        self._history_orientation[slots, env_ids] = orientation
-        self._history_velocity[slots, env_ids] = velocity
-        self._write_index[env_ids] = (slots + 1) % self._history_length
-
     def reset(
         self, env_ids: torch.Tensor, ground_truth: GroundTruthState, timestamp_s: float | torch.Tensor
     ) -> VioEstimate:
@@ -117,6 +110,7 @@ class FakeVio:
         timestamp = self._timestamp_tensor(timestamp_s)
         count = len(env_ids)
 
+        self._update_period_s[env_ids] = self._sample_update_period(count)
         self._position_bias[env_ids] = self._sample(self.cfg.position_bias_m, (count, 3))
         self._orientation_bias[env_ids] = self._sample(self.cfg.orientation_bias_rad, (count, 3))
         self._velocity_bias[env_ids] = self._sample(self.cfg.velocity_bias_mps, (count, 3))
@@ -154,7 +148,7 @@ class FakeVio:
         self._last_timestamp_s[env_ids] = timestamp[env_ids]
         self._last_call_timestamp_s[env_ids] = timestamp[env_ids]
         self._last_source_timestamp_s[env_ids] = timestamp[env_ids]
-        self._next_update_timestamp_s[env_ids] = timestamp[env_ids] + self.cfg.update_period_s
+        self._next_update_timestamp_s[env_ids] = timestamp[env_ids] + self._update_period_s[env_ids]
         self._valid[env_ids] = True
         self._dropped[env_ids] = False
         return self.estimate(timestamp)
@@ -204,11 +198,11 @@ class FakeVio:
         )
         self._write_index = torch.where(due, (slots + 1) % self._history_length, slots)
         periods = torch.floor(
-            (timestamp - self._next_update_timestamp_s) / self.cfg.update_period_s
+            (timestamp - self._next_update_timestamp_s) / self._update_period_s
         ).clamp_min(0.0) + 1.0
         self._next_update_timestamp_s = torch.where(
             due,
-            self._next_update_timestamp_s + periods * self.cfg.update_period_s,
+            self._next_update_timestamp_s + periods * self._update_period_s,
             self._next_update_timestamp_s,
         )
 
@@ -246,6 +240,11 @@ class FakeVio:
     def dropped(self) -> torch.Tensor:
         """Whether a deliverable source update was dropped on the last ingestion."""
         return self._dropped.clone()
+
+    @property
+    def update_period_s(self) -> torch.Tensor:
+        """Episode-sampled source period for each environment."""
+        return self._update_period_s.clone()
 
     def _timestamp_tensor(self, timestamp_s: float | torch.Tensor) -> torch.Tensor:
         if isinstance(timestamp_s, torch.Tensor):

@@ -26,10 +26,7 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
         self._stage1_pipeline = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
 
-        if cfg.fake_sensors.vio.update_period_s + 1.0e-9 < self.physics_dt:
-            raise ValueError("Fake VIO update period cannot be below the physics ingestion period")
-        if cfg.fake_sensors.imu.update_period_s + 1.0e-9 < self.physics_dt:
-            raise ValueError("Fake IMU update period cannot be below the physics ingestion period")
+        self._validate_fake_sensor_periods(cfg.fake_sensors)
         self._stage1_pipeline = self._make_stage1_pipeline(
             cfg.fake_sensors, int(cfg.seed or 0) + cfg.fake_sensors.seed_offset
         )
@@ -38,6 +35,12 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
             env_ids, self._fake_sensor_ground_truth(), self._stage1_timestamp_s()
         )
         self.stage1_evaluation_snapshot = None
+
+    def _validate_fake_sensor_periods(self, fake_sensors: FakeSensorPipelineCfg) -> None:
+        if fake_sensors.vio.min_update_period_s + 1.0e-9 < self.physics_dt:
+            raise ValueError("Fake VIO update period cannot be below the physics ingestion period")
+        if fake_sensors.imu.min_update_period_s + 1.0e-9 < self.physics_dt:
+            raise ValueError("Fake IMU update period cannot be below the physics ingestion period")
 
     def _make_stage1_pipeline(
         self, fake_sensors: FakeSensorPipelineCfg, seed: int
@@ -53,10 +56,7 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
     def set_fake_sensor_profile(self, profile: str, seed: int | None = None) -> None:
         """Switch evaluation profiles without rebuilding the Isaac scene."""
         fake_sensors = FakeSensorPipelineCfg.from_profile(profile)
-        if fake_sensors.vio.update_period_s + 1.0e-9 < self.physics_dt:
-            raise ValueError("Fake VIO update period cannot be below the physics ingestion period")
-        if fake_sensors.imu.update_period_s + 1.0e-9 < self.physics_dt:
-            raise ValueError("Fake IMU update period cannot be below the physics ingestion period")
+        self._validate_fake_sensor_periods(fake_sensors)
         self.cfg.fake_sensors = fake_sensors
         source_seed = int((self.cfg.seed or 0) if seed is None else seed) + fake_sensors.seed_offset
         self._stage1_pipeline = self._make_stage1_pipeline(fake_sensors, source_seed)
@@ -107,6 +107,7 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
         term_dones = self.termination_manager._term_dones
         self.stage1_evaluation_snapshot = {
             "gate_passed": target.gate_passed.clone(),
+            "next_gate_index": target.next_gate_idx.clone(),
             "position_error_m": position_error,
             "attitude_error_rad": attitude_error,
             "velocity_error_mps": velocity_error,

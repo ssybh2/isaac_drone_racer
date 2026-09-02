@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import asdict, dataclass
 from statistics import fmean
 
 
 @dataclass(frozen=True)
 class EpisodeRecord:
+    """One evaluation trial.
+
+    ``completed`` means the first full lap was completed before the trial
+    terminated. New evaluators populate ``lap_time_s`` for successful trials,
+    while ``None`` remains accepted for backward compatibility with older
+    records/tests. ``failure_gate`` is the 1-based physical gate index being
+    targeted when an unsuccessful trial ended.
+    """
+
     completed: bool
     gates_passed: int
     collision: bool
@@ -18,6 +28,8 @@ class EpisodeRecord:
     position_rmse_m: float
     attitude_rmse_rad: float
     velocity_rmse_mps: float
+    lap_time_s: float | None = None
+    failure_gate: int | None = None
     vio_age_s: tuple[float, ...] = ()
     imu_age_s: tuple[float, ...] = ()
     vio_valid: tuple[bool, ...] = ()
@@ -26,6 +38,12 @@ class EpisodeRecord:
     imu_dropped: tuple[bool, ...] = ()
 
     def __post_init__(self) -> None:
+        if not self.completed and self.lap_time_s is not None:
+            raise ValueError("unsuccessful first-lap record must not have lap_time_s")
+        if self.failure_gate is not None and self.failure_gate <= 0:
+            raise ValueError("failure_gate must be a positive 1-based gate index")
+        if self.completed and self.failure_gate is not None:
+            raise ValueError("completed first-lap record must not have failure_gate")
         if len(self.vio_age_s) != len(self.vio_valid):
             raise ValueError("VIO age and validity sample counts must match")
         if len(self.imu_age_s) != len(self.imu_valid):
@@ -66,7 +84,7 @@ class Stage1EpisodeAccumulator:
     def rows(self) -> list[dict]:
         return [asdict(record) for record in self.records]
 
-    def summary(self) -> dict[str, float | int]:
+    def summary(self) -> dict[str, object]:
         records = self.records
         count = len(records)
         vio_ages = [sample for record in records for sample in record.vio_age_s]
@@ -75,9 +93,19 @@ class Stage1EpisodeAccumulator:
         imu_valid = [sample for record in records for sample in record.imu_valid]
         vio_dropped = [sample for record in records for sample in record.vio_dropped]
         imu_dropped = [sample for record in records for sample in record.imu_dropped]
+        lap_times = [record.lap_time_s for record in records if record.lap_time_s is not None]
+        failure_gate_counts = Counter(
+            record.failure_gate for record in records if record.failure_gate is not None
+        )
+        completion_rate = _mean([float(record.completed) for record in records])
         return {
             "episodes": count,
-            "completion_rate": _mean([float(record.completed) for record in records]),
+            "completion_rate": completion_rate,
+            "first_lap_completion_rate": completion_rate,
+            "mean_lap_time_s": _mean([float(value) for value in lap_times]),
+            "failure_gate_counts": {
+                str(gate): failure_gate_counts[gate] for gate in sorted(failure_gate_counts)
+            },
             "collision_rate": _mean([float(record.collision) for record in records]),
             "flyaway_rate": _mean([float(record.flyaway) for record in records]),
             "mean_gates_passed": _mean([float(record.gates_passed) for record in records]),

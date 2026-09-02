@@ -26,7 +26,7 @@ parser.add_argument("--checkpoint", type=str, default=None, help="Path to model 
 parser.add_argument(
     "--fake_sensor_profile",
     type=str,
-    choices=["clean", "mild", "nominal", "stress"],
+    choices=["clean", "mild", "nominal", "mixed", "stress"],
     default=None,
     help="Named Stage 1 Fake VIO/Fake IMU profile.",
 )
