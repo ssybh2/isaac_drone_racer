@@ -4,8 +4,10 @@ import argparse
 import csv
 import hashlib
 import json
+import random
 import subprocess
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +30,7 @@ app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
 
 import gymnasium as gym
+import numpy as np
 import torch
 from skrl.utils.runner.torch import Runner
 
@@ -59,11 +62,26 @@ def _csv_row(
     }
 
 
+def _seed_case(seed: int) -> None:
+    """Seed runtime RNGs without invoking Isaac Sim's host-side Warp RNG built-in.
+
+    Isaac Sim 4.5's ``env.reset(seed=...)`` reaches ``wp.rand_init`` from host
+    Python in this environment and terminates the process. The racer reset and
+    command paths draw from the Python, NumPy, and Torch RNGs seeded here. Fake
+    VIO/Fake IMU use their own explicit per-case generator seed.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def evaluate_case(env, agent, profile: str, seed: int, episode_count: int):
     raw_env = env.unwrapped
+    _seed_case(seed)
     raw_env.set_fake_sensor_profile(profile, seed=seed)
-    observation_dict, _ = raw_env.reset(seed=seed)
-    observation = observation_dict["policy"]
+    observation, _ = env.reset()
     count = raw_env.num_envs
     device = raw_env.device
     returns = torch.zeros(count, device=device)
@@ -241,5 +259,8 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+    except BaseException:
+        traceback.print_exc()
+        raise
     finally:
         simulation_app.close()
