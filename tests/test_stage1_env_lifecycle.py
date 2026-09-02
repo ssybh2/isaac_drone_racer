@@ -76,6 +76,16 @@ def main() -> None:
             "lookat_next",
         ]
         assert unwrapped.termination_manager.active_terms == ["time_out", "flyaway", "collision"]
+        for name in (
+            "Stage1/position_error_mean_m",
+            "Stage1/attitude_error_mean_rad",
+            "Stage1/velocity_error_mean_mps",
+            "Stage1/vio_age_mean_s",
+            "Stage1/imu_age_mean_s",
+            "Stage1/vio_fresh_fraction",
+            "Stage1/imu_fresh_fraction",
+        ):
+            assert name in unwrapped.extras["log"]
         print("STAGE1_LIFECYCLE_OK")
     finally:
         env.close()

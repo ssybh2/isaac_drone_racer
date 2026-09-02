@@ -111,6 +111,21 @@ python3 scripts/rl/play.py \
   --checkpoint /absolute/path/to/stage1_best_agent.pt
 ```
 
+Run a fixed-seed robustness sweep after training:
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES python3 scripts/rl/evaluate_stage1.py \
+  --headless --num_envs 64 --episodes_per_case 128 \
+  --profiles clean,mild,nominal,stress --seeds 11,29,47 \
+  --checkpoint /absolute/path/to/stage1_best_agent.pt
+```
+
+The evaluator writes `summary.json` and `episodes.csv` under a new
+`logs/stage1_evaluations/<timestamp>/` directory. Results include the checkpoint
+hash, code revision, profile, seed, estimator RMSE/age/freshness, completion,
+passed gates, collision/flyaway rates, return, duration, and an explicit
+`oracle_gate_relative_guidance: true` marker.
+
 ## Verification evidence (2026-09-02)
 
 - Pure tests: 57 passed.

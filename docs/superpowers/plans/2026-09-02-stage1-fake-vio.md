@@ -420,23 +420,23 @@ git commit -m "test: verify Stage 1 checkpoint equivalence"
 - Produces episode aggregation for completion, passed gates, collisions, flyaways, return, duration, state errors, source age, and dropout statistics.
 - Produces CLI that evaluates a checkpoint across `clean,mild,nominal,stress` and fixed seeds, writing JSON and CSV into a new evaluation directory.
 
-- [ ] **Step 1: Write failing hand-derived metric tests**
+- [x] **Step 1: Write failing hand-derived metric tests**
 
 Feed two literal episode records and assert exact means/rates, including one collision, one completion, VIO dropout fraction, and 95th-percentile source age.
 
-- [ ] **Step 2: Run metric tests and verify RED**
+- [x] **Step 2: Run metric tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/test_stage1_metrics.py`
 
-- [ ] **Step 3: Implement streaming tensor-to-summary metrics**
+- [x] **Step 3: Implement streaming tensor-to-summary metrics**
 
 Only transfer completed aggregate tensors to CPU at reporting boundaries. Include `oracle_gate_relative_guidance: true`, checkpoint path/hash, profile, seed, and code revision in every output record.
 
-- [ ] **Step 4: Implement evaluation CLI and fixed output layout**
+- [x] **Step 4: Implement evaluation CLI and fixed output layout**
 
 Use `logs/stage1_evaluations/<timestamp>/summary.json` and `episodes.csv`. Require an explicit checkpoint and never write into its training run directory.
 
-- [ ] **Step 5: Run Task 8 tests and commit**
+- [x] **Step 5: Run Task 8 tests and commit**
 
 Run: `.conda-env/bin/python -m pytest -q tests/test_stage1_metrics.py`
 

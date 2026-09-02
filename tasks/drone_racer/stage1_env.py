@@ -8,6 +8,7 @@ from typing import Any
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
 
+from estimation.fake_sensor_cfg import FakeSensorPipelineCfg
 from estimation.pipeline import Stage1StatePipeline
 from estimation.state_estimate import GroundTruthState
 
@@ -29,13 +30,36 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
             raise ValueError("Fake VIO update period cannot be below the physics ingestion period")
         if cfg.fake_sensors.imu.update_period_s + 1.0e-9 < self.physics_dt:
             raise ValueError("Fake IMU update period cannot be below the physics ingestion period")
-        self._stage1_pipeline = Stage1StatePipeline(
+        self._stage1_pipeline = self._make_stage1_pipeline(
+            cfg.fake_sensors, int(cfg.seed or 0) + cfg.fake_sensors.seed_offset
+        )
+        env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+        self.stage1_state_estimate = self._stage1_pipeline.reset(
+            env_ids, self._fake_sensor_ground_truth(), self._stage1_timestamp_s()
+        )
+        self.stage1_evaluation_snapshot = None
+
+    def _make_stage1_pipeline(
+        self, fake_sensors: FakeSensorPipelineCfg, seed: int
+    ) -> Stage1StatePipeline:
+        return Stage1StatePipeline(
             num_envs=self.num_envs,
             device=self.device,
-            vio_cfg=cfg.fake_sensors.vio,
-            imu_cfg=cfg.fake_sensors.imu,
-            seed=int(cfg.seed or 0) + cfg.fake_sensors.seed_offset,
+            vio_cfg=fake_sensors.vio,
+            imu_cfg=fake_sensors.imu,
+            seed=seed,
         )
+
+    def set_fake_sensor_profile(self, profile: str, seed: int | None = None) -> None:
+        """Switch evaluation profiles without rebuilding the Isaac scene."""
+        fake_sensors = FakeSensorPipelineCfg.from_profile(profile)
+        if fake_sensors.vio.update_period_s + 1.0e-9 < self.physics_dt:
+            raise ValueError("Fake VIO update period cannot be below the physics ingestion period")
+        if fake_sensors.imu.update_period_s + 1.0e-9 < self.physics_dt:
+            raise ValueError("Fake IMU update period cannot be below the physics ingestion period")
+        self.cfg.fake_sensors = fake_sensors
+        source_seed = int((self.cfg.seed or 0) if seed is None else seed) + fake_sensors.seed_offset
+        self._stage1_pipeline = self._make_stage1_pipeline(fake_sensors, source_seed)
         env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
         self.stage1_state_estimate = self._stage1_pipeline.reset(
             env_ids, self._fake_sensor_ground_truth(), self._stage1_timestamp_s()
@@ -60,6 +84,52 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
             linear_velocity_w_b=robot.data.root_lin_vel_w,
             angular_velocity_b=robot.data.root_ang_vel_b,
         )
+
+    def _stage1_error_tensors(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        estimate = self.stage1_state_estimate
+        ground_truth = self._fake_sensor_ground_truth()
+        quaternion_dot = torch.sum(
+            estimate.orientation_w_b * ground_truth.orientation_w_b, dim=-1
+        ).abs()
+        attitude_error = 2.0 * torch.acos(quaternion_dot.clamp(0.0, 1.0))
+        position_error = torch.linalg.vector_norm(
+            estimate.position_w_b - ground_truth.position_w_b, dim=-1
+        )
+        velocity_error = torch.linalg.vector_norm(
+            estimate.linear_velocity_w_b - ground_truth.linear_velocity_w_b, dim=-1
+        )
+        return position_error, attitude_error, velocity_error
+
+    def _capture_stage1_evaluation_snapshot(self) -> None:
+        """Capture pre-reset truth diagnostics for out-of-policy evaluation."""
+        position_error, attitude_error, velocity_error = self._stage1_error_tensors()
+        target = self.command_manager.get_term("target")
+        term_dones = self.termination_manager._term_dones
+        self.stage1_evaluation_snapshot = {
+            "gate_passed": target.gate_passed.clone(),
+            "position_error_m": position_error,
+            "attitude_error_rad": attitude_error,
+            "velocity_error_mps": velocity_error,
+            "vio_age_s": self.stage1_state_estimate.vio_status.age_s,
+            "imu_age_s": self.stage1_state_estimate.imu_status.age_s,
+            "vio_valid": self.stage1_state_estimate.vio_status.valid,
+            "imu_valid": self.stage1_state_estimate.imu_status.valid,
+            "collision": term_dones["collision"].clone(),
+            "flyaway": term_dones["flyaway"].clone(),
+        }
+
+    def _update_stage1_log(self) -> None:
+        """Expose estimator health without feeding diagnostics into the policy."""
+        estimate = self.stage1_state_estimate
+        position_error, attitude_error, velocity_error = self._stage1_error_tensors()
+        log = self.extras.setdefault("log", {})
+        log["Stage1/position_error_mean_m"] = position_error.mean()
+        log["Stage1/attitude_error_mean_rad"] = attitude_error.mean()
+        log["Stage1/velocity_error_mean_mps"] = velocity_error.mean()
+        log["Stage1/vio_age_mean_s"] = estimate.vio_status.age_s.mean()
+        log["Stage1/imu_age_mean_s"] = estimate.imu_status.age_s.mean()
+        log["Stage1/vio_fresh_fraction"] = estimate.vio_status.valid.float().mean()
+        log["Stage1/imu_fresh_fraction"] = estimate.imu_status.valid.float().mean()
 
     def reset(
         self,
@@ -117,6 +187,7 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
         self.reset_terminated = self.termination_manager.terminated
         self.reset_time_outs = self.termination_manager.time_outs
         self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
+        self._capture_stage1_evaluation_snapshot()
 
         if len(self.recorder_manager.active_terms) > 0:
             self.obs_buf = self.observation_manager.compute()
@@ -139,5 +210,6 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
         if "interval" in self.event_manager.available_modes:
             self.event_manager.apply(mode="interval", dt=self.step_dt)
         self.stage1_state_estimate = self._stage1_pipeline.publish(timestamp_s)
+        self._update_stage1_log()
         self.obs_buf = self.observation_manager.compute()
         return self.obs_buf, self.reward_buf, self.reset_terminated, self.reset_time_outs, self.extras
