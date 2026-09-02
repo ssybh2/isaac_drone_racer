@@ -63,7 +63,8 @@ python3 -m pytest -q \
   tests/estimation \
   tests/test_stage1_observations.py \
   tests/test_checkpoint_validation.py \
-  tests/test_stage1_metrics.py
+  tests/test_stage1_metrics.py \
+  tests/test_training_overrides.py
 ```
 
 Real Isaac configuration and lifecycle tests:
@@ -102,6 +103,27 @@ Training output is isolated under
 warm-start nominal training from the selected mild checkpoint rather than from a
 model-only export.
 
+If the loaded run has accumulated excessive exploration variance or an elevated
+KL-adaptive learning rate, continuation can explicitly reset only those values
+while retaining the policy, value function, both RunningStandardScalers,
+optimizer moments, and all other checkpoint state:
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES python3 scripts/rl/train.py \
+  --task Isaac-Drone-Racer-Stage1-v0 \
+  --headless --num_envs 4096 \
+  --fake_sensor_profile nominal \
+  --checkpoint /absolute/path/to/stage1_mild_best_agent.pt \
+  --post_load_learning_rate 1e-4 \
+  --post_load_max_action_std 1.5 \
+  --entropy_loss_scale 0.001 \
+  --adaptive_lr_max 3e-4
+```
+
+The loaded values before and after the intervention are written to
+`params/continuation_overrides.yaml`; the entropy and scheduler settings are
+captured in `params/agent.yaml`.
+
 Playback can select the same profiles:
 
 ```bash
@@ -128,7 +150,7 @@ passed gates, collision/flyaway rates, return, duration, and an explicit
 
 ## Verification evidence (2026-09-02)
 
-- Pure tests: 57 passed.
+- Pure tests: 60 passed.
 - Real two-environment lifecycle: 4 IMU ingestions and 1 VIO ingestion per 10 ms policy step; observation shape `(2, 20)`.
 - Clean equivalence with the Stage 0 best checkpoint: maximum raw observation,
   preprocessed observation, deterministic mean-action, and value error all `0`.
@@ -136,5 +158,14 @@ passed gates, collision/flyaway rates, return, duration, and an explicit
 - 4,096-environment mild performance smoke: 48 training steps completed without
   OOM; observed training-loop throughput about 13.7 steps/s including the first
   optimization warm-up, with steady rollout sections above 30 steps/s.
+- Formal 4,096-environment mild warm start completed 50,000 steps in 27m55s.
+  The selected complete-agent checkpoint SHA-256 is
+  `a6f2e82700dbfeb1669b666b490389c47b39fff265b64f7f87ea9e3dd04dd1e8`.
+- Fixed-seed decision sweep of that mild checkpoint completed end to end. In a
+  deliberately small four-episode sample it completed 2/4 mild episodes but 0/4
+  nominal and 0/4 stress episodes, motivating nominal continuation; this sample
+  is not the final statistical evaluation.
+- 32- and 4,096-environment nominal continuation smokes both completed 48 steps
+  using the post-load learning-rate and exploration controls.
 - The repository's pre-existing `tests/test_dynamics.py` imports a removed
   `build_allocation_matrix` symbol and is not a Stage 1 regression.

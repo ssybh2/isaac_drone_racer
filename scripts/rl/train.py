@@ -30,6 +30,30 @@ parser.add_argument(
     default=None,
     help="Named Stage 1 Fake VIO/Fake IMU profile.",
 )
+parser.add_argument(
+    "--post_load_learning_rate",
+    type=float,
+    default=None,
+    help="Reset only the current optimizer/scheduler learning rate after loading a checkpoint.",
+)
+parser.add_argument(
+    "--post_load_max_action_std",
+    type=float,
+    default=None,
+    help="Clamp the loaded Gaussian policy exploration standard deviation before continuation.",
+)
+parser.add_argument(
+    "--entropy_loss_scale",
+    type=float,
+    default=None,
+    help="Override the PPO entropy loss scale for this run.",
+)
+parser.add_argument(
+    "--adaptive_lr_max",
+    type=float,
+    default=None,
+    help="Override the KL-adaptive scheduler maximum learning rate for this run.",
+)
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument(
     "--ml_framework",
@@ -100,6 +124,7 @@ from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import tasks  # noqa: F401
+from utils.training_overrides import apply_post_load_training_overrides
 
 # config shortcuts
 algorithm = args_cli.algorithm.lower()
@@ -121,6 +146,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         agent_cfg["agent"]["experiment"]["experiment_name"] = (
             f"stage1_{args_cli.fake_sensor_profile}"
         )
+    if args_cli.entropy_loss_scale is not None:
+        if args_cli.entropy_loss_scale < 0.0:
+            raise ValueError("--entropy_loss_scale must be non-negative")
+        agent_cfg["agent"]["entropy_loss_scale"] = args_cli.entropy_loss_scale
+    if args_cli.adaptive_lr_max is not None:
+        if args_cli.adaptive_lr_max <= 0.0:
+            raise ValueError("--adaptive_lr_max must be positive")
+        agent_cfg["agent"]["learning_rate_scheduler_kwargs"]["max_lr"] = (
+            args_cli.adaptive_lr_max
+        )
+    if (
+        args_cli.post_load_learning_rate is not None
+        and args_cli.adaptive_lr_max is not None
+        and args_cli.post_load_learning_rate > args_cli.adaptive_lr_max
+    ):
+        raise ValueError("--post_load_learning_rate cannot exceed --adaptive_lr_max")
 
     # multi-gpu training config
     if args_cli.distributed:
@@ -165,6 +206,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # get checkpoint path (to resume training)
     resume_path = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None
+    if (
+        args_cli.post_load_learning_rate is not None
+        or args_cli.post_load_max_action_std is not None
+    ) and resume_path is None:
+        raise ValueError("post-load training overrides require --checkpoint")
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -196,6 +242,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if resume_path:
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
         runner.agent.load(resume_path)
+        continuation_metadata = apply_post_load_training_overrides(
+            runner.agent,
+            learning_rate=args_cli.post_load_learning_rate,
+            max_action_std=args_cli.post_load_max_action_std,
+        )
+        if continuation_metadata:
+            continuation_metadata = {
+                "source_checkpoint": resume_path,
+                **continuation_metadata,
+            }
+            dump_yaml(
+                os.path.join(log_dir, "params", "continuation_overrides.yaml"),
+                continuation_metadata,
+            )
+            print_dict(continuation_metadata, nesting=4)
 
     # run training
     runner.run()
