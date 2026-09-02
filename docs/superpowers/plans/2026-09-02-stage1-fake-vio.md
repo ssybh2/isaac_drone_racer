@@ -373,23 +373,23 @@ git commit -m "feat: register Stage 1 Fake VIO tasks"
 - Produces: `required_skrl_modules(checkpoint: dict) -> set[str]` and `assert_complete_stage0_checkpoint(path)`.
 - Produces CLI comparing Stage 0 and Stage 1-clean observations, deterministic mean actions, and value outputs from the same complete checkpoint.
 
-- [ ] **Step 1: Write failing checkpoint completeness tests**
+- [x] **Step 1: Write failing checkpoint completeness tests**
 
 Load a small temporary PyTorch dictionary with literal module keys. Assert omission of `state_preprocessor` or `value_preprocessor` raises a named error, and the real `best_agent.pt` exposes policy, value, optimizer, state preprocessor, and value preprocessor.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/test_checkpoint_validation.py`
 
-- [ ] **Step 3: Implement checkpoint validation**
+- [x] **Step 3: Implement checkpoint validation**
 
 Use trusted local `torch.load(..., map_location="cpu", weights_only=False)`. Verify scaler states contain `current_count`, `running_mean`, and `running_variance`. Never rewrite the checkpoint.
 
-- [ ] **Step 4: Implement the integration comparison CLI**
+- [x] **Step 4: Implement the integration comparison CLI**
 
 Create Stage 0 and Stage 1-clean environments with one environment and identical seed. Load the same checkpoint through `runner.agent.load`, set eval mode, compare the raw 20-value observation, preprocessed state, deterministic `mean_actions`, and value output using `atol=1e-5`, `rtol=1e-5`. Exit nonzero and print maximum error for any mismatch.
 
-- [ ] **Step 5: Run unit tests and a headless two-environment integration check**
+- [x] **Step 5: Run unit tests and a headless two-environment integration check**
 
 Run:
 
@@ -400,7 +400,7 @@ Run:
 
 Expected: every checkpoint module is restored and all four maximum differences are within tolerance.
 
-- [ ] **Step 6: Commit Task 7**
+- [x] **Step 6: Commit Task 7**
 
 ```bash
 git add utils/checkpoint_validation.py scripts/rl/validate_stage1_equivalence.py tests/test_checkpoint_validation.py
