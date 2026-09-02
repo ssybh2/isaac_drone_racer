@@ -281,31 +281,31 @@ git commit -m "feat: assemble Stage 1 policy state"
 - Produces: `Stage1StatePipeline` with `reset`, `ingest_imu`, `ingest_vio`, and `publish` methods.
 - Produces: `Stage1DroneRacerEnv(ManagerBasedRLEnv)` that supplies `stage1_state_estimate` before observation computation.
 
-- [ ] **Step 1: Write failing pure pipeline tests**
+- [x] **Step 1: Write failing pure pipeline tests**
 
 Assert IMU can update four times while VIO updates once in 10 ms, publishing retains the latest independent timestamps, reset affects selected environment IDs only, and clean pipeline output matches ground truth.
 
-- [ ] **Step 2: Run pipeline tests and verify RED**
+- [x] **Step 2: Run pipeline tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_pipeline.py`
 
-- [ ] **Step 3: Implement provider orchestration**
+- [x] **Step 3: Implement provider orchestration**
 
 `Stage1StatePipeline` owns Fake VIO, Fake IMU, assembler, identity `T_WV`, and current estimate. It accepts ground-truth tensors explicitly; it has no Isaac imports.
 
-- [ ] **Step 4: Add a failing runtime lifecycle test**
+- [x] **Step 4: Add a failing runtime lifecycle test**
 
 Launch one real Stage 1 environment with clean providers and inspect provider diagnostics after one action. Assert `imu_ingest_count` increases by `env.cfg.decimation`, `vio_delivery_count` follows the configured VIO period, the returned observation carries the most recently published timestamp, and the reward and termination managers expose the same term names as Stage 0.
 
-- [ ] **Step 5: Run lifecycle guard and verify RED**
+- [x] **Step 5: Run lifecycle guard and verify RED**
 
 Run the test through the Isaac Sim Python launcher: `.conda-env/bin/python tests/test_stage1_env_lifecycle.py --headless`
 
-- [ ] **Step 6: Implement the pinned Stage 1 environment subclass**
+- [x] **Step 6: Implement the pinned Stage 1 environment subclass**
 
 Copy the v2.1.0 `ManagerBasedRLEnv.step` control flow into the subclass and make only these insertions: ingest Fake IMU immediately after each `scene.update(self.physics_dt)`; ingest Fake VIO once after the physics loop when its clock is due; reset affected provider rows after automatic environment resets; publish immediately before final observation computation. Override explicit `reset` to refresh providers after `sim.forward` and recompute the returned observation. Add a comment with the pinned upstream file and tag.
 
-- [ ] **Step 7: Run Task 5 pure tests and commit**
+- [x] **Step 7: Run Task 5 pure tests and commit**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_pipeline.py` and `.conda-env/bin/python tests/test_stage1_env_lifecycle.py --headless`.
 
