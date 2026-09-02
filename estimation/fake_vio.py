@@ -152,7 +152,6 @@ class FakeVio:
         self._last_timestamp_s[env_ids] = timestamp[env_ids]
         self._last_call_timestamp_s[env_ids] = timestamp[env_ids]
         self._next_update_timestamp_s[env_ids] = timestamp[env_ids] + self.cfg.update_period_s
-        self._valid[:] = False
         self._valid[env_ids] = True
         return self.estimate(timestamp)
 

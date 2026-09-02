@@ -183,29 +183,29 @@ git commit -m "feat: add tensorized Fake VIO provider"
 - Consumes: `GroundTruthState.angular_velocity_b`, `FakeImuCfg`, `ImuEstimate`.
 - Produces: `FakeImu(num_envs, device, cfg, seed)` with `reset(env_ids, angular_velocity_b, timestamp_s)` and `update(angular_velocity_b, timestamp_s) -> ImuEstimate`.
 
-- [ ] **Step 1: Write failing tests for clean gyro and independent bias**
+- [x] **Step 1: Write failing tests for clean gyro and independent bias**
 
 Assert clean output equals a literal gyro tensor, a fixed bias shifts only the selected axis, and two identical seeds produce identical white noise.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_imu.py`
 
 Expected: import fails because `fake_imu.py` does not exist.
 
-- [ ] **Step 3: Implement gyro noise, episode bias, and bias random walk**
+- [x] **Step 3: Implement gyro noise, episode bias, and bias random walk**
 
 Keep all buffers `(num_envs, 3)` on the configured device. Apply white noise per emitted sample and bias random walk proportional to `sqrt(dt)`.
 
-- [ ] **Step 4: Add and verify RED tests for physics-rate timing, latency, dropout, and selective reset**
+- [x] **Step 4: Add and verify RED tests for physics-rate timing, latency, dropout, and selective reset**
 
 Feed samples at timestamps `0.0000`, `0.0025`, `0.0050`, and `0.0075`; use a 5 ms latency and assert the last delivery at 7.5 ms contains the 2.5 ms measurement. Force dropout to verify hold-last without affecting VIO state.
 
-- [ ] **Step 5: Implement independent source clock and history**
+- [x] **Step 5: Implement independent source clock and history**
 
 Use the same observable delivery semantics as Fake VIO but separate configuration, RNG, timestamps, buffers, and validity.
 
-- [ ] **Step 6: Run Task 3 tests and commit**
+- [x] **Step 6: Run Task 3 tests and commit**
 
 Run: `.conda-env/bin/python -m pytest -q tests/estimation/test_fake_imu.py`
 
