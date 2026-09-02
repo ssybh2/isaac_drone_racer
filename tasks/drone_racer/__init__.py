@@ -29,3 +29,23 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
     },
 )
+
+gym.register(
+    id="Isaac-Drone-Racer-Stage1-v0",
+    entry_point=f"{__name__}.stage1_env:Stage1DroneRacerEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_racer_stage1_env_cfg:DroneRacerStage1EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Isaac-Drone-Racer-Stage1-Play-v0",
+    entry_point=f"{__name__}.stage1_env:Stage1DroneRacerEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_racer_stage1_env_cfg:DroneRacerStage1EnvCfg_PLAY",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
+    },
+)

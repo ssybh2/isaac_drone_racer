@@ -23,6 +23,13 @@ parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint to resume training.")
+parser.add_argument(
+    "--fake_sensor_profile",
+    type=str,
+    choices=["clean", "mild", "nominal", "stress"],
+    default=None,
+    help="Named Stage 1 Fake VIO/Fake IMU profile.",
+)
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument(
     "--ml_framework",
@@ -105,6 +112,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+    if args_cli.fake_sensor_profile is not None:
+        if not hasattr(env_cfg, "fake_sensors"):
+            raise ValueError("--fake_sensor_profile requires a Stage 1 task")
+        from estimation.fake_sensor_cfg import FakeSensorPipelineCfg
+
+        env_cfg.fake_sensors = FakeSensorPipelineCfg.from_profile(args_cli.fake_sensor_profile)
 
     # multi-gpu training config
     if args_cli.distributed:

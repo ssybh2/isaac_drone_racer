@@ -329,11 +329,11 @@ git commit -m "feat: integrate Stage 1 estimator lifecycle"
 - Produces: `DroneRacerStage1EnvCfg` and `DroneRacerStage1EnvCfg_PLAY`.
 - Produces Gym IDs: `Isaac-Drone-Racer-Stage1-v0` and `Isaac-Drone-Racer-Stage1-Play-v0` using entry point `tasks.drone_racer.stage1_env:Stage1DroneRacerEnv`.
 
-- [ ] **Step 1: Write failing configuration behavior tests**
+- [x] **Step 1: Write failing configuration behavior tests**
 
 Instantiate Stage 0 and Stage 1 configs. Assert Stage 0 observation terms remain unchanged, Stage 1 has `estimated_drone_state + target_pos_b + actions`, concatenated size is 20, camera/Isaac IMU remain disabled, Stage 1 defaults to `clean`, and `target_pos_b` is the existing ground-truth term.
 
-- [ ] **Step 2: Run config tests and verify RED**
+- [x] **Step 2: Run config tests and verify RED**
 
 Run with Isaac Lab paths:
 
@@ -341,15 +341,15 @@ Run with Isaac Lab paths:
 PYTHONPATH=/home/donglei/isaac_projects/IsaacLab-v2.1.0/source/isaaclab:/home/donglei/isaac_projects/IsaacLab-v2.1.0/source/isaaclab_tasks .conda-env/bin/python -m pytest -q tests/test_stage1_config.py
 ```
 
-- [ ] **Step 3: Implement profile factories and Stage 1 configs**
+- [x] **Step 3: Implement profile factories and Stage 1 configs**
 
 Inherit the Stage 0 scene/actions/commands/rewards/terminations, replace only policy state observation terms, and carry a `FakeSensorPipelineCfg`. Define `clean`, `mild`, `nominal`, and `stress` factories with the numeric envelopes from the spec. Use `clean` as the default until an explicit profile is supplied.
 
-- [ ] **Step 4: Register both new task IDs without editing Stage 0 registrations**
+- [x] **Step 4: Register both new task IDs without editing Stage 0 registrations**
 
 Use the existing SKRL YAML entry point. Keep training at 4,096 environments and playback overrideable to one.
 
-- [ ] **Step 5: Run Task 6 tests and commit**
+- [x] **Step 5: Run Task 6 tests and commit**
 
 Run the Task 6 test command plus `.conda-env/bin/python -m pytest -q tests/estimation tests/test_stage1_observations.py`.
 
