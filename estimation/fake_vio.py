@@ -37,6 +37,7 @@ class FakeVio:
         self._last_velocity = torch.zeros(num_envs, 3, device=self.device)
         self._last_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._last_call_timestamp_s = torch.zeros(num_envs, device=self.device)
+        self._last_source_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._next_update_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._valid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
 
@@ -151,6 +152,7 @@ class FakeVio:
         self._last_velocity[env_ids] = velocity
         self._last_timestamp_s[env_ids] = timestamp[env_ids]
         self._last_call_timestamp_s[env_ids] = timestamp[env_ids]
+        self._last_source_timestamp_s[env_ids] = timestamp[env_ids]
         self._next_update_timestamp_s[env_ids] = timestamp[env_ids] + self.cfg.update_period_s
         self._valid[env_ids] = True
         return self.estimate(timestamp)
@@ -164,7 +166,8 @@ class FakeVio:
         due = timestamp >= self._next_update_timestamp_s - 1.0e-7
         self._valid[:] = False
         env_ids = torch.arange(self.num_envs, device=self.device)
-        due_dt = dt.sqrt().unsqueeze(-1)
+        source_dt = (timestamp - self._last_source_timestamp_s).clamp_min(0.0)
+        due_dt = source_dt.sqrt().unsqueeze(-1)
         position_drift = self._position_drift + (
             self._normal((self.num_envs, 3)) * self._position_drift_std * due_dt
         )
@@ -179,6 +182,9 @@ class FakeVio:
         self._position_drift = torch.where(due.unsqueeze(-1), position_drift, self._position_drift)
         self._orientation_drift = torch.where(due.unsqueeze(-1), orientation_drift, self._orientation_drift)
         self._velocity_drift = torch.where(due.unsqueeze(-1), velocity_drift, self._velocity_drift)
+        self._last_source_timestamp_s = torch.where(
+            due, timestamp, self._last_source_timestamp_s
+        )
 
         position, orientation, velocity = self._measurement(ground_truth, env_ids)
         slots = self._write_index

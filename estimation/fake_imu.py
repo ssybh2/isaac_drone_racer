@@ -33,6 +33,7 @@ class FakeImu:
         self._last_angular_velocity = torch.zeros(num_envs, 3, device=self.device)
         self._last_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._last_call_timestamp_s = torch.zeros(num_envs, device=self.device)
+        self._last_source_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._next_update_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._valid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
 
@@ -93,6 +94,7 @@ class FakeImu:
         self._last_angular_velocity[env_ids] = measurement
         self._last_timestamp_s[env_ids] = timestamp[env_ids]
         self._last_call_timestamp_s[env_ids] = timestamp[env_ids]
+        self._last_source_timestamp_s[env_ids] = timestamp[env_ids]
         self._next_update_timestamp_s[env_ids] = timestamp[env_ids] + self.cfg.update_period_s
         self._valid[env_ids] = True
         return self.estimate(timestamp)
@@ -108,13 +110,17 @@ class FakeImu:
         due = timestamp >= self._next_update_timestamp_s - 1.0e-7
         self._valid[:] = False
         env_ids = torch.arange(self.num_envs, device=self.device)
+        source_dt = (timestamp - self._last_source_timestamp_s).clamp_min(0.0)
         next_bias_random_walk = self._bias_random_walk + (
             self._normal((self.num_envs, 3))
             * self._bias_random_walk_std
-            * dt.sqrt().unsqueeze(-1)
+            * source_dt.sqrt().unsqueeze(-1)
         )
         self._bias_random_walk = torch.where(
             due.unsqueeze(-1), next_bias_random_walk, self._bias_random_walk
+        )
+        self._last_source_timestamp_s = torch.where(
+            due, timestamp, self._last_source_timestamp_s
         )
 
         measurement = self._measurement(angular_velocity_b, env_ids)

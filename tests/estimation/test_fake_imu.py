@@ -95,6 +95,25 @@ def test_imu_bias_random_walk_accumulates_without_motion():
     assert not torch.allclose(output.angular_velocity_b, initial.angular_velocity_b)
 
 
+def test_imu_bias_random_walk_uses_source_period_not_last_ingestion_period():
+    cfg = FakeImuCfg.clean(update_period_s=0.005)
+    cfg.bias_random_walk_std_radps_per_sqrt_s = UniformRange(0.5, 0.5)
+    with_intermediate_ingest = FakeImu(2, "cpu", cfg, seed=31)
+    direct_source_update = FakeImu(2, "cpu", cfg, seed=31)
+    with_intermediate_ingest.reset(torch.arange(2), gyro((0.0, 0.0)), 0.0)
+    direct_source_update.reset(torch.arange(2), gyro((0.0, 0.0)), 0.0)
+
+    with_intermediate_ingest.update(gyro((0.0, 0.0)), 0.0025)
+    with_intermediate_ingest.generator.manual_seed(101)
+    direct_source_update.generator.manual_seed(101)
+    with_intermediate_ingest.update(gyro((0.0, 0.0)), 0.005)
+    direct_source_update.update(gyro((0.0, 0.0)), 0.005)
+
+    torch.testing.assert_close(
+        with_intermediate_ingest._bias_random_walk, direct_source_update._bias_random_walk
+    )
+
+
 def test_imu_reset_of_one_environment_preserves_other_delivery():
     cfg = FakeImuCfg.clean(update_period_s=0.0025)
     cfg.bias_random_walk_std_radps_per_sqrt_s = UniformRange(0.5, 0.5)

@@ -102,6 +102,25 @@ def test_vio_random_walk_drift_accumulates_without_ground_truth_motion():
     assert not torch.allclose(output.position_v_b, initial.position_v_b)
 
 
+def test_vio_random_walk_uses_source_period_not_last_ingestion_period():
+    cfg = FakeVioCfg.clean(update_period_s=0.02)
+    cfg.position_drift_std_m_per_sqrt_s = UniformRange(0.5, 0.5)
+    with_intermediate_ingest = FakeVio(2, "cpu", cfg, seed=31)
+    direct_source_update = FakeVio(2, "cpu", cfg, seed=31)
+    with_intermediate_ingest.reset(torch.arange(2), ground_truth((0.0, 0.0)), 0.0)
+    direct_source_update.reset(torch.arange(2), ground_truth((0.0, 0.0)), 0.0)
+
+    with_intermediate_ingest.update(ground_truth((0.0, 0.0)), 0.01)
+    with_intermediate_ingest.generator.manual_seed(101)
+    direct_source_update.generator.manual_seed(101)
+    with_intermediate_ingest.update(ground_truth((0.0, 0.0)), 0.02)
+    direct_source_update.update(ground_truth((0.0, 0.0)), 0.02)
+
+    torch.testing.assert_close(
+        with_intermediate_ingest._position_drift, direct_source_update._position_drift
+    )
+
+
 def test_vio_reset_of_one_environment_preserves_other_delivery():
     cfg = FakeVioCfg.clean(update_period_s=0.01)
     cfg.position_drift_std_m_per_sqrt_s = UniformRange(0.5, 0.5)
