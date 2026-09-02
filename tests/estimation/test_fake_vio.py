@@ -59,6 +59,7 @@ def test_vio_update_rate_marks_intermediate_snapshot_stale():
     fresh = vio.update(ground_truth((6.0, 7.0)), 0.02)
 
     assert stale.status.valid.tolist() == [False, False]
+    assert vio.dropped.tolist() == [False, False]
     torch.testing.assert_close(stale.position_v_b[:, 0], torch.tensor([1.0, 2.0]))
     assert fresh.status.valid.tolist() == [True, True]
     torch.testing.assert_close(fresh.position_v_b[:, 0], torch.tensor([6.0, 7.0]))
@@ -89,6 +90,7 @@ def test_vio_dropout_holds_last_delivered_sample_and_increases_age():
     torch.testing.assert_close(output.position_v_b, initial.position_v_b)
     torch.testing.assert_close(output.status.age_s, torch.tensor([0.01, 0.01]))
     assert output.status.valid.tolist() == [False, False]
+    assert vio.dropped.tolist() == [True, True]
 
 
 def test_vio_random_walk_drift_accumulates_without_ground_truth_motion():

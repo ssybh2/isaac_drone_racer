@@ -20,6 +20,8 @@ def test_two_episode_summary_matches_hand_derived_metrics():
             imu_age_s=(0.0, 0.0025),
             vio_valid=(True, False),
             imu_valid=(True, True),
+            vio_dropped=(False, True),
+            imu_dropped=(False, False),
         )
     )
     accumulator.add(
@@ -37,6 +39,8 @@ def test_two_episode_summary_matches_hand_derived_metrics():
             imu_age_s=(0.005, 0.0075),
             vio_valid=(True, True),
             imu_valid=(False, True),
+            vio_dropped=(False, False),
+            imu_dropped=(True, False),
         )
     )
 
@@ -52,6 +56,8 @@ def test_two_episode_summary_matches_hand_derived_metrics():
     assert summary["mean_position_rmse_m"] == 0.2
     assert summary["vio_dropout_fraction"] == 0.25
     assert summary["imu_dropout_fraction"] == 0.25
+    assert summary["vio_fresh_fraction"] == 0.75
+    assert summary["imu_fresh_fraction"] == 0.75
     assert math.isclose(summary["vio_age_p95_s"], 0.0285)
     assert math.isclose(summary["imu_age_p95_s"], 0.007125)
 

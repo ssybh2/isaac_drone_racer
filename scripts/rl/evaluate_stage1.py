@@ -77,6 +77,8 @@ def evaluate_case(env, agent, profile: str, seed: int, episode_count: int):
     imu_age_history = torch.zeros(history_length, count, device=device)
     vio_valid_history = torch.zeros(history_length, count, dtype=torch.bool, device=device)
     imu_valid_history = torch.zeros(history_length, count, dtype=torch.bool, device=device)
+    vio_dropout_history = torch.zeros(history_length, count, dtype=torch.bool, device=device)
+    imu_dropout_history = torch.zeros(history_length, count, dtype=torch.bool, device=device)
     env_ids = torch.arange(count, device=device)
     accumulator = Stage1EpisodeAccumulator()
     maximum_steps = max(10_000, episode_count * raw_env.max_episode_length * 2)
@@ -100,6 +102,8 @@ def evaluate_case(env, agent, profile: str, seed: int, episode_count: int):
         imu_age_history[history_indices, env_ids] = snapshot["imu_age_s"]
         vio_valid_history[history_indices, env_ids] = snapshot["vio_valid"]
         imu_valid_history[history_indices, env_ids] = snapshot["imu_valid"]
+        vio_dropout_history[history_indices, env_ids] = snapshot["vio_dropped"]
+        imu_dropout_history[history_indices, env_ids] = snapshot["imu_dropped"]
 
         done_ids = done.nonzero(as_tuple=False).flatten().detach().cpu().tolist()
         for env_index in done_ids:
@@ -135,6 +139,12 @@ def evaluate_case(env, agent, profile: str, seed: int, episode_count: int):
                         ),
                         imu_valid=tuple(
                             imu_valid_history[history_slice, env_index].detach().cpu().tolist()
+                        ),
+                        vio_dropped=tuple(
+                            vio_dropout_history[history_slice, env_index].detach().cpu().tolist()
+                        ),
+                        imu_dropped=tuple(
+                            imu_dropout_history[history_slice, env_index].detach().cpu().tolist()
                         ),
                     )
                 )

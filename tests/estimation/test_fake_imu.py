@@ -52,6 +52,7 @@ def test_imu_update_rate_marks_intermediate_snapshot_stale():
     fresh = imu.update(gyro((6.0, 7.0)), 0.005)
 
     assert stale.status.valid.tolist() == [False, False]
+    assert imu.dropped.tolist() == [False, False]
     torch.testing.assert_close(stale.angular_velocity_b[:, 0], torch.tensor([1.0, 2.0]))
     assert fresh.status.valid.tolist() == [True, True]
     torch.testing.assert_close(fresh.angular_velocity_b[:, 0], torch.tensor([6.0, 7.0]))
@@ -82,6 +83,7 @@ def test_imu_dropout_holds_last_delivered_sample_and_increases_age():
     torch.testing.assert_close(output.angular_velocity_b, initial.angular_velocity_b)
     torch.testing.assert_close(output.status.age_s, torch.tensor([0.0025, 0.0025]))
     assert output.status.valid.tolist() == [False, False]
+    assert imu.dropped.tolist() == [True, True]
 
 
 def test_imu_bias_random_walk_accumulates_without_motion():

@@ -40,6 +40,7 @@ class FakeVio:
         self._last_source_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._next_update_timestamp_s = torch.zeros(num_envs, device=self.device)
         self._valid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
+        self._dropped = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
 
         self._position_bias = torch.zeros(num_envs, 3, device=self.device)
         self._orientation_bias = torch.zeros(num_envs, 3, device=self.device)
@@ -155,6 +156,7 @@ class FakeVio:
         self._last_source_timestamp_s[env_ids] = timestamp[env_ids]
         self._next_update_timestamp_s[env_ids] = timestamp[env_ids] + self.cfg.update_period_s
         self._valid[env_ids] = True
+        self._dropped[env_ids] = False
         return self.estimate(timestamp)
 
     def update(self, ground_truth: GroundTruthState, timestamp_s: float | torch.Tensor) -> VioEstimate:
@@ -225,6 +227,7 @@ class FakeVio:
         )
         self._burst_time_left_s = torch.where(starts_burst, self._burst_duration_s, self._burst_time_left_s)
         deliver = fresh & ~independent_dropout & (self._burst_time_left_s <= 0.0)
+        self._dropped = fresh & ~deliver
 
         self._last_position = torch.where(
             deliver.unsqueeze(-1), self._history_position[candidate_slots, env_ids], self._last_position
@@ -238,6 +241,11 @@ class FakeVio:
         self._last_timestamp_s = torch.where(deliver, candidate_timestamp, self._last_timestamp_s)
         self._valid = deliver
         return self.estimate(timestamp)
+
+    @property
+    def dropped(self) -> torch.Tensor:
+        """Whether a deliverable source update was dropped on the last ingestion."""
+        return self._dropped.clone()
 
     def _timestamp_tensor(self, timestamp_s: float | torch.Tensor) -> torch.Tensor:
         if isinstance(timestamp_s, torch.Tensor):

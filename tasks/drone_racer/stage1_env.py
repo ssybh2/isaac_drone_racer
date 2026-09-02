@@ -114,6 +114,8 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
             "imu_age_s": self.stage1_state_estimate.imu_status.age_s,
             "vio_valid": self.stage1_state_estimate.vio_status.valid,
             "imu_valid": self.stage1_state_estimate.imu_status.valid,
+            "vio_dropped": self._stage1_pipeline.vio.dropped,
+            "imu_dropped": self._stage1_pipeline.imu.dropped,
             "collision": term_dones["collision"].clone(),
             "flyaway": term_dones["flyaway"].clone(),
         }

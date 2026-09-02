@@ -22,12 +22,18 @@ class EpisodeRecord:
     imu_age_s: tuple[float, ...] = ()
     vio_valid: tuple[bool, ...] = ()
     imu_valid: tuple[bool, ...] = ()
+    vio_dropped: tuple[bool, ...] = ()
+    imu_dropped: tuple[bool, ...] = ()
 
     def __post_init__(self) -> None:
         if len(self.vio_age_s) != len(self.vio_valid):
             raise ValueError("VIO age and validity sample counts must match")
         if len(self.imu_age_s) != len(self.imu_valid):
             raise ValueError("IMU age and validity sample counts must match")
+        if self.vio_dropped and len(self.vio_age_s) != len(self.vio_dropped):
+            raise ValueError("VIO age and dropout sample counts must match")
+        if self.imu_dropped and len(self.imu_age_s) != len(self.imu_dropped):
+            raise ValueError("IMU age and dropout sample counts must match")
 
 
 def _mean(values: list[float]) -> float:
@@ -67,6 +73,8 @@ class Stage1EpisodeAccumulator:
         imu_ages = [sample for record in records for sample in record.imu_age_s]
         vio_valid = [sample for record in records for sample in record.vio_valid]
         imu_valid = [sample for record in records for sample in record.imu_valid]
+        vio_dropped = [sample for record in records for sample in record.vio_dropped]
+        imu_dropped = [sample for record in records for sample in record.imu_dropped]
         return {
             "episodes": count,
             "completion_rate": _mean([float(record.completed) for record in records]),
@@ -82,10 +90,12 @@ class Stage1EpisodeAccumulator:
             "vio_age_p95_s": _quantile(vio_ages, 0.95),
             "imu_age_mean_s": _mean(imu_ages),
             "imu_age_p95_s": _quantile(imu_ages, 0.95),
-            "vio_dropout_fraction": 1.0 - _mean([float(value) for value in vio_valid])
-            if vio_valid
+            "vio_fresh_fraction": _mean([float(value) for value in vio_valid]),
+            "imu_fresh_fraction": _mean([float(value) for value in imu_valid]),
+            "vio_dropout_fraction": _mean([float(value) for value in vio_dropped])
+            if vio_dropped
             else 0.0,
-            "imu_dropout_fraction": 1.0 - _mean([float(value) for value in imu_valid])
-            if imu_valid
+            "imu_dropout_fraction": _mean([float(value) for value in imu_dropped])
+            if imu_dropped
             else 0.0,
         }
