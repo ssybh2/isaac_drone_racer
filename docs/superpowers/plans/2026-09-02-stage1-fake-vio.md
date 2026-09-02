@@ -466,11 +466,11 @@ Run: `.conda-env/bin/python -m pytest -q tests/estimation tests/test_dynamics.py
 
 Expected: zero failures.
 
-- [ ] **Step 2: Run a small headless Stage 1 environment smoke test**
+- [x] **Step 2: Run a small headless Stage 1 environment smoke test**
 
 Run Stage 1 playback for a bounded number of steps using the Stage 0 checkpoint, clean profile, two environments, and no UI. Assert observation shape `(2, 20)`, finite actions, and no simulator error.
 
-- [ ] **Step 3: Run a small training smoke test into a new run directory**
+- [x] **Step 3: Run a small training smoke test into a new run directory**
 
 Run:
 
@@ -484,7 +484,7 @@ Verify a new Stage 1 checkpoint exists and the Stage 0 checkpoint hash is unchan
 
 Launch the Stage 1 task headlessly for a bounded step count with profile `nominal`, capture peak GPU memory and environment-step throughput, and assert there is no out-of-memory error or provider-side CPU synchronization.
 
-- [ ] **Step 5: Document commands, limitations, and oracle-target interpretation**
+- [x] **Step 5: Document commands, limitations, and oracle-target interpretation**
 
 Document task IDs, profiles, warm-start command, evaluation command, frame notation, separate source rates, full-checkpoint requirement, output locations, and the fact that Stage 1 is an upper-bound state-error robustness test under perfect gate-relative guidance.
 

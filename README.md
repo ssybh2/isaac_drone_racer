@@ -25,6 +25,7 @@ Key highlights of the Isaac Drone Racer project:
 4. **Onboard Sensor Suite** — Includes simulated fisheye camera, IMU and collision detection.
 5. **Track Generator** — Dynamically generate custom race tracks.
 6. **Logger and Plotter** — Integrated tools for monitoring and visualizing flight behavior.
+7. **Stage 1 Estimator Training** — Hardware-portable Fake VIO and Fake IMU providers with independent noise, bias, drift, latency, dropout, and clocks.
 
 ## Requirements
 This framework has been tested on x64 based Linux systems, specifically Ubuntu 22.04. But it should also work on Windows 10/11.
@@ -84,6 +85,27 @@ python3 scripts/rl/play.py --task Isaac-Drone-Racer-Play-v0 --num_envs 1
 ```
 
 This will launch a single agent with the latest checkpoint and play the trained policy in the racing environment. All the same CLI and Hydra configuration options used during training are supported here as well.
+
+### Stage 1: Fake VIO + Fake IMU
+
+Stage 1 replaces only the drone's ground-truth state observation. It preserves the
+same 20-value policy interface and still uses ground truth for the next gate's
+relative position. Start a 4,096-environment mild-profile warm start from a
+complete Stage 0 checkpoint with:
+
+```bash
+python3 scripts/rl/train.py \
+  --task Isaac-Drone-Racer-Stage1-v0 \
+  --headless --num_envs 4096 \
+  --fake_sensor_profile mild \
+  --checkpoint /absolute/path/to/best_agent.pt
+```
+
+Use `Isaac-Drone-Racer-Stage1-Play-v0` for playback. Available profiles are
+`clean`, `mild`, `nominal`, and `stress`. The checkpoint must include the policy,
+value, optimizer, state `RunningStandardScaler`, and value
+`RunningStandardScaler`. See [docs/stage1.md](docs/stage1.md) for architecture,
+validation, and exact commands.
 
 ## Next Steps
 
