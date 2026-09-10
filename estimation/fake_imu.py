@@ -24,19 +24,20 @@ class FakeImu:
         self._history_length = max(3, history_length)
         self._write_index = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self._history_timestamp_s = torch.full(
-            (self._history_length, num_envs), -torch.inf, device=self.device
+            (self._history_length, num_envs), -torch.inf, device=self.device, dtype=torch.float64
         )
         self._history_angular_velocity = torch.zeros(
             self._history_length, num_envs, 3, device=self.device
         )
 
         self._last_angular_velocity = torch.zeros(num_envs, 3, device=self.device)
-        self._last_timestamp_s = torch.zeros(num_envs, device=self.device)
-        self._last_call_timestamp_s = torch.zeros(num_envs, device=self.device)
-        self._last_source_timestamp_s = torch.zeros(num_envs, device=self.device)
-        self._next_update_timestamp_s = torch.zeros(num_envs, device=self.device)
+        # Absolute clocks need more precision than the float32 observations.
+        self._last_timestamp_s = torch.zeros(num_envs, device=self.device, dtype=torch.float64)
+        self._last_call_timestamp_s = torch.zeros(num_envs, device=self.device, dtype=torch.float64)
+        self._last_source_timestamp_s = torch.zeros(num_envs, device=self.device, dtype=torch.float64)
+        self._next_update_timestamp_s = torch.zeros(num_envs, device=self.device, dtype=torch.float64)
         self._update_period_s = torch.full(
-            (num_envs,), cfg.update_period_s, dtype=torch.float32, device=self.device
+            (num_envs,), cfg.update_period_s, dtype=torch.float64, device=self.device
         )
         self._valid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self._dropped = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
@@ -60,8 +61,8 @@ class FakeImu:
 
     def _sample_update_period(self, count: int) -> torch.Tensor:
         if self.cfg.update_period_range_s is None:
-            return torch.full((count,), self.cfg.update_period_s, device=self.device)
-        return self._sample(self.cfg.update_period_range_s, (count,))
+            return torch.full((count,), self.cfg.update_period_s, device=self.device, dtype=torch.float64)
+        return self._sample(self.cfg.update_period_range_s, (count,)).double()
 
     def _normal(self, shape: tuple[int, ...]) -> torch.Tensor:
         return torch.randn(shape, generator=self.generator, device=self.device)
@@ -76,7 +77,8 @@ class FakeImu:
         )
 
     def reset(
-        self, env_ids: torch.Tensor, angular_velocity_b: torch.Tensor, timestamp_s: float | torch.Tensor
+        self, env_ids: torch.Tensor, angular_velocity_b: torch.Tensor, timestamp_s: float | torch.Tensor,
+        *, clean_mask: torch.Tensor | None = None,
     ) -> ImuEstimate:
         env_ids = env_ids.to(device=self.device, dtype=torch.long)
         timestamp = self._timestamp_tensor(timestamp_s)
@@ -97,6 +99,15 @@ class FakeImu:
         self._burst_duration_s[env_ids] = self._sample(self.cfg.burst_duration_s, (count,))
         self._burst_time_left_s[env_ids] = 0.0
 
+        if clean_mask is not None:
+            clean_ids = env_ids[clean_mask]
+            self._update_period_s[clean_ids] = 0.0025
+            for parameter in (
+                self._bias, self._noise_std, self._bias_random_walk_std, self._latency_s,
+                self._dropout_probability, self._burst_probability, self._burst_duration_s,
+            ):
+                parameter[clean_ids] = 0.0
+
         measurement = self._measurement(angular_velocity_b, env_ids)
         self._history_timestamp_s[:, env_ids] = timestamp[env_ids].unsqueeze(0)
         self._history_angular_velocity[:, env_ids] = measurement.unsqueeze(0)
@@ -114,14 +125,14 @@ class FakeImu:
         self, angular_velocity_b: torch.Tensor, timestamp_s: float | torch.Tensor
     ) -> ImuEstimate:
         timestamp = self._timestamp_tensor(timestamp_s)
-        dt = (timestamp - self._last_call_timestamp_s).clamp_min(0.0)
+        dt = (timestamp - self._last_call_timestamp_s).clamp_min(0.0).float()
         self._last_call_timestamp_s = timestamp
         self._burst_time_left_s = (self._burst_time_left_s - dt).clamp_min(0.0)
 
         due = timestamp >= self._next_update_timestamp_s - 1.0e-7
         self._valid[:] = False
         env_ids = torch.arange(self.num_envs, device=self.device)
-        source_dt = (timestamp - self._last_source_timestamp_s).clamp_min(0.0)
+        source_dt = (timestamp - self._last_source_timestamp_s).clamp_min(0.0).float()
         next_bias_random_walk = self._bias_random_walk + (
             self._normal((self.num_envs, 3))
             * self._bias_random_walk_std
@@ -189,25 +200,25 @@ class FakeImu:
     @property
     def update_period_s(self) -> torch.Tensor:
         """Episode-sampled source period for each environment."""
-        return self._update_period_s.clone()
+        return self._update_period_s.float()
 
     def _timestamp_tensor(self, timestamp_s: float | torch.Tensor) -> torch.Tensor:
         if isinstance(timestamp_s, torch.Tensor):
-            value = timestamp_s.to(device=self.device, dtype=torch.float32)
+            value = timestamp_s.to(device=self.device, dtype=torch.float64)
             if value.ndim == 0:
                 return value.expand(self.num_envs).clone()
             if tuple(value.shape) != (self.num_envs,):
                 raise ValueError(f"timestamp must have shape ({self.num_envs},)")
             return value
-        return torch.full((self.num_envs,), float(timestamp_s), device=self.device)
+        return torch.full((self.num_envs,), float(timestamp_s), device=self.device, dtype=torch.float64)
 
     def estimate(self, publish_timestamp_s: float | torch.Tensor) -> ImuEstimate:
         publish_timestamp = self._timestamp_tensor(publish_timestamp_s)
         return ImuEstimate(
             angular_velocity_b=self._last_angular_velocity.clone(),
             status=SourceStatus(
-                timestamp_s=self._last_timestamp_s.clone(),
-                age_s=(publish_timestamp - self._last_timestamp_s).clamp_min(0.0),
+                timestamp_s=self._last_timestamp_s.float(),
+                age_s=(publish_timestamp - self._last_timestamp_s).clamp_min(0.0).float(),
                 valid=self._valid.clone(),
             ),
         )

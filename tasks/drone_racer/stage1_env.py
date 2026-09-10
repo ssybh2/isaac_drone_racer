@@ -51,6 +51,7 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
             vio_cfg=fake_sensors.vio,
             imu_cfg=fake_sensors.imu,
             seed=seed,
+            clean_episode_probability=fake_sensors.clean_episode_probability,
         )
 
     def set_fake_sensor_profile(self, profile: str, seed: int | None = None) -> None:
@@ -133,6 +134,7 @@ class Stage1DroneRacerEnv(ManagerBasedRLEnv):
         log["Stage1/imu_age_mean_s"] = estimate.imu_status.age_s.mean()
         log["Stage1/vio_fresh_fraction"] = estimate.vio_status.valid.float().mean()
         log["Stage1/imu_fresh_fraction"] = estimate.imu_status.valid.float().mean()
+        log["Stage1/clean_episode_fraction"] = self._stage1_pipeline.clean_episode_mask.float().mean()
 
     def reset(
         self,

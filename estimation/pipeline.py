@@ -25,9 +25,15 @@ class Stage1StatePipeline:
         vio_cfg: FakeVioCfg,
         imu_cfg: FakeImuCfg,
         seed: int,
+        clean_episode_probability: float = 0.0,
     ) -> None:
         self.num_envs = num_envs
         self.device = torch.device(device)
+        if not 0.0 <= clean_episode_probability <= 1.0:
+            raise ValueError("clean_episode_probability must be in [0, 1]")
+        self.clean_episode_probability = clean_episode_probability
+        self._regime_generator = torch.Generator(device=self.device).manual_seed(seed + 3)
+        self.clean_episode_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.vio = FakeVio(num_envs, self.device, vio_cfg, seed=seed + 1)
         self.imu = FakeImu(num_envs, self.device, imu_cfg, seed=seed + 2)
         self.assembler = StateEstimateAssembler.identity(num_envs, self.device)
@@ -43,9 +49,15 @@ class Stage1StatePipeline:
         ground_truth: GroundTruthState,
         timestamp_s: float | torch.Tensor,
     ) -> StateEstimate:
-        self._vio_estimate = self.vio.reset(env_ids, ground_truth, timestamp_s)
+        env_ids = env_ids.to(device=self.device, dtype=torch.long)
+        clean_mask = None
+        if self.clean_episode_probability > 0.0:
+            clean_mask = torch.rand(len(env_ids), generator=self._regime_generator,
+                                    device=self.device) < self.clean_episode_probability
+            self.clean_episode_mask[env_ids] = clean_mask
+        self._vio_estimate = self.vio.reset(env_ids, ground_truth, timestamp_s, clean_mask=clean_mask)
         self._imu_estimate = self.imu.reset(
-            env_ids, ground_truth.angular_velocity_b, timestamp_s
+            env_ids, ground_truth.angular_velocity_b, timestamp_s, clean_mask=clean_mask
         )
         return self.publish(timestamp_s)
 

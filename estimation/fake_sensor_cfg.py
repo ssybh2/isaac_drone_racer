@@ -153,11 +153,13 @@ class FakeSensorPipelineCfg:
     vio: FakeVioCfg = field(default_factory=FakeVioCfg.clean)
     imu: FakeImuCfg = field(default_factory=FakeImuCfg.clean)
     seed_offset: int = 10_000
+    clean_episode_probability: float = 0.0
 
     @classmethod
     def from_profile(cls, profile: str) -> FakeSensorPipelineCfg:
         vio, imu = fake_sensor_profile(profile)
-        return cls(profile=profile, vio=vio, imu=imu)
+        return cls(profile=profile, vio=vio, imu=imu,
+                   clean_episode_probability=0.25 if profile == "mixed" else 0.0)
 
 
 def fake_sensor_profile(profile: str) -> tuple[FakeVioCfg, FakeImuCfg]:

@@ -109,6 +109,13 @@ validation, and exact commands.
 
 ## Next Steps
 
+Latest Stage 1.5 results (verified September 10, 2026): the recovered mixed
+policy completes the first lap in 81.5% / 83.3% / 85.2% of clean / mild / nominal
+trials (384 trials per profile); stress remains at 6.0%. These use oracle
+gate-relative guidance and randomized starts. Download the complete checkpoints
+with Git LFS and see [the results and reproduction commands](artifacts/stage1_recovery_20260905/README.md)
+and [the audit report](docs/2026-09-05-fake-vio-audit.md).
+
 - [ ] **Data-driven aerodynamic model pipeline** - integrate tools for data driven system identification, calibration and include the learned aerodynamic forces into the simulation environment.
 - [ ] **Power consumption model**  - incorporate a detailed power model that accounts for battery discharge based on current draw.
 - [ ] **Policy learning using onboard sensors** - explore and implement methods to transition away from full-state observations by instead using only onboard sensor data (e.g camera + IMU).

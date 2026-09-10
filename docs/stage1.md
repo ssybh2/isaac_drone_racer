@@ -52,6 +52,9 @@ autonomy system. Stage 2 will replace gate truth.
 - `clean`: zero corruption and Stage 0 compatibility validation.
 - `mild`: curriculum entry with low noise and short latency.
 - `nominal`: the documented Stage 1 engineering envelope.
+- `mixed`: episode-randomized sensor errors; since the September 5 audit,
+  each reset has a 25% chance of jointly clean VIO and IMU. Remaining episodes
+  retain the Stage 1.5 broad distribution. Stress remains held out.
 - `stress`: held-out evaluation only; do not train gradients on this profile.
 
 ## Validation
@@ -147,6 +150,20 @@ The evaluator writes `summary.json` and `episodes.csv` under a new
 hash, code revision, profile, seed, estimator RMSE/age/freshness, completion,
 passed gates, collision/flyaway rates, return, duration, and an explicit
 `oracle_gate_relative_guidance: true` marker.
+
+Since September 5, evaluation preassigns episode quotas to each environment
+(`fixed_per_environment_quotas_v2`). It waits for every assigned trial, including
+successful laps whose underlying environment has not yet terminated. Earlier
+results selected the first globally finished episodes and were biased toward
+short failures. Do not compare those rates directly with the corrected protocol.
+The evaluation uses randomized training starts and disables push disturbances;
+first-lap success means passing seven gates from that randomized start, not
+necessarily a race from the fixed starting line. It does not measure multi-lap
+survival or real VIO performance.
+
+Fake source scheduling now uses float64 internal clocks to prevent occasional
+missed clean updates as absolute simulation time grows. Measurements and policy
+observations remain float32.
 
 ## Verification evidence (2026-09-02)
 

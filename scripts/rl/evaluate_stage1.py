@@ -114,6 +114,7 @@ def _run_isolated_profile_sweep(profiles: list[str]) -> None:
                     "oracle_gate_relative_guidance",
                     "seeds",
                     "episodes_per_case",
+                    "sampling_protocol",
                 )
             }
         combined_summaries.update(worker_summary["summaries"])
@@ -211,6 +212,11 @@ def evaluate_case(env, agent, profile: str, seed: int, episode_count: int):
     count = raw_env.num_envs
     device = raw_env.device
     num_gates = raw_env.command_manager.get_term("target").num_gates
+    # Predetermine each slot's contribution so fast crashes cannot crowd out
+    # slower successful trials. Keep the normal environment reset lifecycle.
+    quotas = [episode_count // count + int(i < episode_count % count) for i in range(count)]
+    accepted = [0] * count
+    collecting = torch.tensor([q > 0 for q in quotas], device=device)
 
     returns = torch.zeros(count, device=device)
     trial_steps = torch.zeros(count, dtype=torch.long, device=device)
@@ -240,7 +246,7 @@ def evaluate_case(env, agent, profile: str, seed: int, episode_count: int):
 
         snapshot = raw_env.stage1_evaluation_snapshot
         done = (terminated | truncated).reshape(-1)
-        active_before_step = ~first_lap_completed
+        active_before_step = ~first_lap_completed & collecting
         active_ids = active_before_step.nonzero(as_tuple=False).flatten()
 
         if len(active_ids) > 0:
@@ -266,7 +272,9 @@ def evaluate_case(env, agent, profile: str, seed: int, episode_count: int):
 
         done_ids = done.nonzero(as_tuple=False).flatten().detach().cpu().tolist()
         for env_index in done_ids:
-            if len(accumulator.records) < episode_count:
+            if accepted[env_index] < quotas[env_index]:
+                accepted[env_index] += 1
+                collecting[env_index] = accepted[env_index] < quotas[env_index]
                 completed = bool(first_lap_completed[env_index].item())
                 sample_count = max(1, int(trial_steps[env_index].item()))
                 lap_time_s = (
@@ -361,6 +369,7 @@ def main() -> None:
         "checkpoint_sha256": checkpoint_hash,
         "code_revision": code_revision,
         "oracle_gate_relative_guidance": True,
+        "sampling_protocol": "fixed_per_environment_quotas_v2",
     }
     profiles = _split_profiles(args.profiles)
     seeds = _split_seeds(args.seeds)

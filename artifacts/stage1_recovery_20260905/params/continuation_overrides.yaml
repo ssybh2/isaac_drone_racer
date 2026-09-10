@@ -1,0 +1,5 @@
+source_checkpoint: /home/donglei/isaac_projects/isaac_drone_racer/.worktrees/stage1-fake-vio/logs/skrl/drone_racer/2026-09-02_20-09-09_ppo_torch_stage1_mixed/checkpoints/agent_50010.pt
+optimizer_learning_rate_before:
+- 0.0003
+optimizer_learning_rate_after:
+- 0.0001
