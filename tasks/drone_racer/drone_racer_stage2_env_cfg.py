@@ -8,19 +8,29 @@ from isaaclab.utils import configclass
 
 from .drone_racer_env_cfg import DroneRacerEnvCfg, DroneRacerSceneCfg
 
+from perception.stage2_calibration import (
+    CAMERA_MODEL,
+    CAMERA_OFFSET_CONVENTION,
+    CAMERA_OFFSET_POS_B,
+    CAMERA_OFFSET_ROT_WXYZ,
+)
+
 
 def stage2_reference_camera_cfg() -> TiledCameraCfg:
     """Pinhole reference camera for Stage2A calibration and Stage2B labels.
 
-    The mount position mirrors the existing repository camera placeholder.
-    Treat it as a parameter to validate with the Stage2A extrinsic metric.
+    The mount and optical transform are authoritative values from
+    ``perception.stage2_calibration`` and are checked against Isaac truth by
+    the Stage2A overlay diagnostic.
     """
+    if CAMERA_MODEL != "pinhole":
+        raise ValueError(f"Stage2 reference camera requires pinhole calibration, got {CAMERA_MODEL!r}")
     return TiledCameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/body/camera",
         offset=TiledCameraCfg.OffsetCfg(
-            pos=(0.14, 0.0, 0.05),
-            rot=(1.0, 0.0, 0.0, 0.0),
-            convention="world",
+            pos=CAMERA_OFFSET_POS_B,
+            rot=CAMERA_OFFSET_ROT_WXYZ,
+            convention=CAMERA_OFFSET_CONVENTION,
         ),
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(),

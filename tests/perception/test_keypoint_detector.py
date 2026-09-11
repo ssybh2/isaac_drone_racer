@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from perception.keypoint_detector import GateKeypointNet, Stage2KeypointDataset, TorchGateCornerDetector
+from perception.torchvision_keypoint_detector import TorchvisionStage2KeypointDataset
 
 
 def _write_sample(root, sample_id="sample"):
@@ -46,3 +47,18 @@ def test_detector_checkpoint_implements_corner_protocol(tmp_path):
     assert result.corners_uv.shape == (4, 2)
     assert result.visible.shape == (4,)
     assert np.all(np.isfinite(result.corners_uv))
+
+
+def test_torchvision_dataset_emits_box_and_ordered_keypoints(tmp_path):
+    _write_sample(tmp_path)
+    image, target, sample_id = TorchvisionStage2KeypointDataset(tmp_path)[0]
+    assert image.shape == (3, 48, 64)
+    assert sample_id == "sample"
+    assert target["boxes"].shape == (1, 4)
+    assert target["labels"].tolist() == [1]
+    assert target["keypoints"].shape == (1, 4, 3)
+    torch.testing.assert_close(
+        target["keypoints"][0, :, :2],
+        torch.tensor([[8, 40], [56, 40], [56, 8], [8, 8]], dtype=torch.float32),
+    )
+    assert target["keypoints"][0, :, 2].tolist() == [2.0, 2.0, 2.0, 2.0]

@@ -61,6 +61,12 @@ def evaluate(model, loader, device):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument(
+        "--validation_dataset",
+        type=Path,
+        default=None,
+        help="Independent validation dataset. When set, all --dataset samples are used for training.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=64)
@@ -75,9 +81,23 @@ def main() -> None:
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    train_ids, validation_ids = split_ids(args.dataset, args.validation_fraction, args.seed)
+    if args.validation_dataset is None:
+        train_ids, validation_ids = split_ids(args.dataset, args.validation_fraction, args.seed)
+        validation_root = args.dataset
+        validation_mode = "shuffled_split"
+    else:
+        train_ids = sorted(path.stem for path in (args.dataset / "labels").glob("*.json"))
+        validation_ids = sorted(
+            path.stem for path in (args.validation_dataset / "labels").glob("*.json")
+        )
+        if not train_ids or not validation_ids:
+            raise ValueError("Training and independent validation datasets must both be non-empty")
+        validation_root = args.validation_dataset
+        validation_mode = "independent_dataset"
     train_dataset = Stage2KeypointDataset(args.dataset, train_ids, input_size=args.input_size)
-    validation_dataset = Stage2KeypointDataset(args.dataset, validation_ids, input_size=args.input_size)
+    validation_dataset = Stage2KeypointDataset(
+        validation_root, validation_ids, input_size=args.input_size
+    )
     generator = torch.Generator().manual_seed(args.seed)
     train_loader = DataLoader(
         train_dataset,
@@ -120,6 +140,8 @@ def main() -> None:
                 "schema": "isaac_drone_racer.stage2b_detector.v1",
                 "architecture": "spatial_heatmap_softargmax",
                 "dataset": str(args.dataset.resolve()),
+                "validation_dataset": str(validation_root.resolve()),
+                "validation_mode": validation_mode,
                 "train_samples": len(train_dataset),
                 "validation_samples": len(validation_dataset),
                 "epoch": epoch,

@@ -1,0 +1,11 @@
+{
+  "schema": "isaac_drone_racer.stage2b_torchvision_detector.v1",
+  "architecture": "torchvision_keypointrcnn_resnet50_fpn",
+  "dataset": "/home/donglei/isaac_projects/isaac_drone_racer/logs/stage2/datasets/2026-09-11_multigate_dr_seed1_train_20480",
+  "validation_dataset": "/home/donglei/isaac_projects/isaac_drone_racer/logs/stage2/datasets/2026-09-11_oracle_gate_256_seed2_validation",
+  "train_samples": 20480,
+  "validation_samples": 2048,
+  "epoch": 3,
+  "seed": 1,
+  "corner_rmse_px_at_original_resolution": 7.216516977784872
+}

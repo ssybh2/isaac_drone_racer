@@ -6,20 +6,12 @@ pytest.importorskip("cv2")
 from perception.camera_model import CameraCalibration
 from perception.gate_geometry import GateGeometry
 from perception.rigid_transform import RigidTransform, rotation_error_rad, translation_error_m
+from perception.stage2_calibration import stage2_camera_to_body
 from perception.stage2a_pipeline import Stage2APerceptionPipeline, Stage2ATruth
 
 
 def _camera_to_body() -> RigidTransform:
-    # Optical camera: x right, y down, z forward.
-    # Body: x forward, y left, z up.
-    R_bc = np.array(
-        [
-            [0.0, 0.0, 1.0],
-            [-1.0, 0.0, 0.0],
-            [0.0, -1.0, 0.0],
-        ]
-    )
-    return RigidTransform(R_bc, np.array([0.14, 0.0, 0.05]), to_frame="B", from_frame="C")
+    return stage2_camera_to_body()
 
 
 def _calibration() -> CameraCalibration:

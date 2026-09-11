@@ -7,11 +7,12 @@ with a batched implementation while preserving the same perception contract.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from perception.gate_geometry import GateGeometry
 from perception.isaac_adapter import IsaacStage2TruthAdapter
 from perception.rigid_transform import RigidTransform
+from perception.stage2_calibration import stage2_camera_to_body
 from perception.stage2a_pipeline import Stage2APerceptionPipeline, Stage2AResult
 
 
@@ -21,7 +22,7 @@ class Stage2AOracleRuntime:
 
     env: object
     geometry: GateGeometry
-    T_bc: RigidTransform
+    T_bc: RigidTransform = field(default_factory=stage2_camera_to_body)
     robot_name: str = "robot"
     track_name: str = "track"
     camera_name: str = "tiled_camera"
@@ -50,7 +51,7 @@ def stage2a_target_observation(
     env,
     *,
     geometry: GateGeometry,
-    T_bc: RigidTransform,
+    T_bc: RigidTransform | None = None,
     env_id: int = 0,
 ):
     """Reference replacement for the oracle ``target_pos_b`` observation.
@@ -59,4 +60,6 @@ def stage2a_target_observation(
     The complete Stage2A result remains available through Stage2AOracleRuntime
     for calibration/error analysis.
     """
-    return Stage2AOracleRuntime(env, geometry, T_bc).evaluate(env_id).solution.target_pos_b
+    return Stage2AOracleRuntime(env, geometry, T_bc or stage2_camera_to_body()).evaluate(
+        env_id
+    ).solution.target_pos_b

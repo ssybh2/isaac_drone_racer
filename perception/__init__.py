@@ -13,6 +13,7 @@ from .keypoint_detector import GateKeypointNet, Stage2KeypointDataset, TorchGate
 from .planar_pnp import OpenCvPlanarPnP, PnPBackend, PnPResult
 from .pose_recovery import GatePoseRecovery, GatePoseSolution
 from .rigid_transform import RigidTransform
+from .stage2_calibration import load_stage2_gate_geometry, stage2_camera_to_body
 from .stage2a_pipeline import Stage2APerceptionPipeline, Stage2AResult, Stage2ATruth
 from .stage2b_pipeline import Stage2BPerceptionPipeline, Stage2BResult
 
@@ -37,4 +38,6 @@ __all__ = [
     "Stage2DatasetWriter",
     "Stage2KeypointDataset",
     "TorchGateCornerDetector",
+    "load_stage2_gate_geometry",
+    "stage2_camera_to_body",
 ]

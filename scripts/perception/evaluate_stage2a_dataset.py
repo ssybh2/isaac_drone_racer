@@ -13,9 +13,9 @@ import numpy as np
 
 from perception.camera_model import CameraCalibration
 from perception.corner_detection import CornerObservation
-from perception.gate_usd_config import load_gate_keypoint_calibration
 from perception.pose_recovery import GatePoseRecovery
 from perception.rigid_transform import RigidTransform, rotation_error_rad, translation_error_m
+from perception.stage2_calibration import load_stage2_gate_geometry, stage2_camera_to_body
 
 
 def transform_from_json(payload: dict) -> RigidTransform:
@@ -36,13 +36,8 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
-    geometry = load_gate_keypoint_calibration("assets/gate/gate_keypoints.json")
-    T_bc = RigidTransform(
-        np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]),
-        np.array([0.14, 0.0, 0.05]),
-        to_frame="B",
-        from_frame="C",
-    )
+    geometry = load_stage2_gate_geometry()
+    T_bc = stage2_camera_to_body()
     reprojection, gate_t, gate_r, body_t, body_r = [], [], [], [], []
     total = 0
 
