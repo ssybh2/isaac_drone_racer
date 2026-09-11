@@ -1,0 +1,10 @@
+{
+  "schema": "isaac_drone_racer.stage2b_detector.v1",
+  "dataset": "/home/donglei/isaac_projects/isaac_drone_racer/logs/stage2/datasets/2026-09-11_oracle_gate_256_seed1",
+  "train_samples": 1638,
+  "validation_samples": 410,
+  "epoch": 53,
+  "seed": 1,
+  "corner_rmse_px_at_input_resolution": 1.7751669006509434,
+  "visibility_accuracy": 0.9823170731707317
+}

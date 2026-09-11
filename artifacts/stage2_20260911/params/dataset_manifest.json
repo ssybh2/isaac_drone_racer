@@ -1,0 +1,15 @@
+{
+  "schema": "isaac_drone_racer.stage2_dataset_manifest.v1",
+  "samples": 2048,
+  "seed": 1,
+  "image_width": 256,
+  "image_height": 256,
+  "num_envs": 32,
+  "batches": 64,
+  "distance_m": [
+    2.5,
+    8.0
+  ],
+  "gate_calibration": "assets/gate/gate_keypoints.json",
+  "camera_model": "pinhole"
+}

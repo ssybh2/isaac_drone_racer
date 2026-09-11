@@ -1,0 +1,23 @@
+{
+  "schema": "isaac_drone_racer.stage2b_evaluation.v1",
+  "dataset": "/home/donglei/isaac_projects/isaac_drone_racer/logs/stage2/datasets/2026-09-11_oracle_gate_256_seed1",
+  "checkpoint": "/home/donglei/isaac_projects/isaac_drone_racer/logs/stage2/models/2026-09-11_gate_heatmap_seed1/best_detector.pt",
+  "checkpoint_sha256": "8ab096899aef8b3993ba69ac35dc438f94d22043219b4ba09c3eb25ca8478950",
+  "validation_samples": 410,
+  "ground_truth_complete_samples": 378,
+  "predicted_complete_samples": 375,
+  "pnp_successful_samples": 375,
+  "complete_detection_rate": 0.9920634920634921,
+  "pnp_success_rate": 0.9920634920634921,
+  "corner_error_px_mean": 1.6401782896882062,
+  "corner_error_px_rmse": 3.5737282097996497,
+  "corner_error_px_p95": 3.1055749136198187,
+  "gate_translation_error_m_mean": 0.13241767647311714,
+  "gate_translation_error_m_p95": 0.3747566478005342,
+  "gate_rotation_error_deg_mean": 9.14330083964886,
+  "gate_rotation_error_deg_p95": 23.14564970033436,
+  "body_translation_error_m_mean": 0.9956800429247284,
+  "body_translation_error_m_p95": 2.5338846767908954,
+  "body_rotation_error_deg_mean": 9.143300530598394,
+  "body_rotation_error_deg_p95": 23.14564065521553
+}
