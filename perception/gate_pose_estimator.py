@@ -1,16 +1,42 @@
-import numpy as np
-from .planar_pnp import solve_gate_pnp
+"""Compatibility facade for direct gate PnP estimation."""
+
+from __future__ import annotations
+
+from .camera_model import CameraCalibration
+from .corner_detection import CornerObservation
+from .gate_geometry import GateGeometry
+from .planar_pnp import OpenCvPlanarPnP, PnPBackend, PnPResult
 
 
 class GatePoseEstimator:
-    def __init__(self, geometry, K):
-        self.geometry = geometry
-        self.K = K
+    """Estimate ``T_cg`` from four gate pixels.
 
-    def estimate(self, corners_uv):
-        R, t = solve_gate_pnp(
-            self.geometry.corners_g().cpu().numpy(),
-            np.asarray(corners_uv),
-            self.K,
+    New code should usually use :class:`GatePoseRecovery`, which also applies
+    camera/body extrinsics and optional world-map recovery.
+    """
+
+    def __init__(
+        self,
+        geometry: GateGeometry,
+        camera: CameraCalibration,
+        *,
+        backend: PnPBackend | None = None,
+    ):
+        self.geometry = geometry
+        self.camera = camera
+        self.backend = backend or OpenCvPlanarPnP()
+
+    def estimate(self, corners_uv) -> PnPResult:
+        observation = (
+            corners_uv
+            if isinstance(corners_uv, CornerObservation)
+            else CornerObservation(corners_uv, source="external")
         )
-        return R, t
+        if not observation.complete:
+            raise ValueError("Four visible gate corners are required by the Stage2 reference PnP backend")
+        return self.backend.solve(
+            self.geometry.object_points_g,
+            observation.corners_uv,
+            self.camera.K,
+            self.camera.dist_coeffs,
+        )

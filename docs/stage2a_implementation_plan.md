@@ -1,47 +1,31 @@
-# Stage2A Perfect Corner Projection + PnP
+# Stage2A implementation plan
 
-## Objective
-Replace oracle gate relative position with a perception-derived estimate.
+The canonical Stage2A/Stage2B architecture is documented in
+[`stage2_perception_architecture.md`](stage2_perception_architecture.md).
 
-## Coordinate convention
+Stage2A is now treated as a geometric reference pipeline:
 
-Gate frame G:
-
-- Origin: gate opening center
-- X: right direction through gate
-- Y: upward direction
-- Z: gate normal
-
-Corner order:
-
-0 left-bottom
-1 right-bottom
-2 right-top
-3 left-top
-
-## Pipeline
-
-```
-Gate USD pose
-    |
-3D corners in world
-    |
-Camera projection
-    |
-Perfect 2D corners
-    |
-Planar PnP
-    |
-T_camera_gate
-    |
-Camera-to-body transform
-    |
-Estimated target_pos_b
+```text
+Isaac actor/link gate pose + optical camera pose/K
+    -> exact gate-corner pixels
+    -> shared CornerObservation
+    -> planar PnP
+    -> T_cg
+    -> calibrated T_bc
+    -> T_bg / target_pos_b
+    -> optional T_wb estimate
+    -> compare with Isaac truth
 ```
 
-## Future work
+The remaining local calibration tasks are deliberately explicit:
 
-- Extract exact dimensions from assets/gate/gate.usd
-- Add oracle-vs-PnP equivalence tests
-- Add Isaac Lab TiledCamera dataset generation
-- Add Stage2B corner noise/dropout simulation
+1. extract/measure the four opening corners from `assets/gate/gate.usd` in the
+   **gate actor frame** and save `assets/gate/gate_keypoints.json`;
+2. use a consistent camera model (pinhole, or explicit fisheye undistortion);
+3. validate the camera optical convention and `T_bc`;
+4. run oracle-vs-PnP equivalence across many randomized poses;
+5. only then replace the policy's oracle `target_pos_b`.
+
+Stage2B plugs a learned RGB corner detector into the same
+`CornerObservation -> GatePoseRecovery` backend and uses Stage2A projections as
+training/evaluation labels.

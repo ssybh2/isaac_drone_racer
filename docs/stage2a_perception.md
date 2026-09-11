@@ -1,61 +1,36 @@
-# Stage 2A Perfect Corner Projection
+# Stage2A perfect-corner perception
 
-## Goal
+Stage2A is the **oracle-corner reference path** for the Stage 2 perception
+stack. It is not a learned correction model.
 
-Remove oracle gate position observation.
-Replace:
-
-`world gate pose -> target_pos_b`
-
-with:
-
-`gate 3D corners -> camera projection -> 2D corners -> PnP -> gate pose`
-
-## Gate Frame
-
-Standard frame G:
-
-- origin: gate opening center
-- X: horizontal right
-- Y: vertical up
-- Z: gate normal
-
-Corner ordering:
-
-```
-0: left-bottom
-1: right-bottom
-2: right-top
-3: left-top
+```text
+Isaac truth geometry/poses
+        |
+        v
+exact 2D gate corners  ---- Stage2A ends its oracle access here
+        |
+        v
+CornerObservation
+        |
+        +---------------- same boundary used by Stage2B detector output
+        |
+        v
+shared planar PnP -> T_cg -> camera/body transform -> target_pos_b
 ```
 
-## Pipeline
+The simulator body/camera/gate poses are retained only for calibration metrics:
+PnP pose error, camera pose error, body pose error and camera extrinsic error.
 
-```
-Isaac truth pose
-      |
-3D gate corners
-      |
-Camera projection
-      |
-PerfectGateCornerSensor
-      |
-solvePnP(IPPE)
-      |
-Gate pose in camera frame
-      |
-Camera-body extrinsic
-      |
-Estimated target_pos_b
-```
+Important constraints:
 
-## Next steps
+- gate 3D keypoints must be calibrated in the gate **actor/link frame**, not
+  guessed from a 1 m square and not paired with the COM pose;
+- image pixels, camera intrinsics and PnP must use the same optical convention
+  and distortion model;
+- the current repository's fisheye camera cannot be silently treated as an
+  ideal pinhole camera;
+- OpenCV IPPE is a correctness backend. Parallel RL should later provide a
+  batched implementation through the same `PnPBackend` interface.
 
-Stage2B will add:
-
-- pixel noise
-- latency
-- missing corners
-- partial visibility
-
-Stage3A will enable IsaacLab tiled camera rendering and automatically generate RGB + keypoint labels.
+See [`stage2_perception_architecture.md`](stage2_perception_architecture.md) for
+the complete Stage2A/Stage2B design and calibration milestones.
