@@ -77,6 +77,13 @@ class IsaacStage2TruthAdapter:
         camera = self._camera()
         command = self.env.command_manager.get_term(self.command_name)
 
+        # Isaac Lab v2.1 TiledCamera stores its initialization pose unless the
+        # pose buffer is explicitly refreshed. The config flag documents that
+        # Stage2 requires the latest frame pose, while this pinned-version shim
+        # keeps RGB labels aligned with a moving drone.
+        if getattr(camera.cfg, "return_latest_camera_pose", False) and hasattr(camera, "_update_poses"):
+            camera._update_poses(camera._ALL_INDICES)
+
         gate_index = int(_to_numpy(command.next_gate_idx[env_id]).item())
 
         # IMPORTANT: use actor/link pose, not COM pose. PnP object points are

@@ -36,7 +36,10 @@ def load_gate_keypoint_calibration(path: str | Path) -> GateGeometry:
             "Run the USD inspection tool and save the actual opening corners; "
             "Stage2A must not fall back to guessed dimensions."
         )
-    payload = json.loads(path.read_text())
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    frame = payload.get("frame")
+    if frame != "gate_actor":
+        raise ValueError(f"Expected calibration frame 'gate_actor', got {frame!r}")
     names = tuple(payload.get("corner_order", CORNER_NAMES))
     if names != CORNER_NAMES:
         raise ValueError(f"Expected corner_order {CORNER_NAMES}, got {names}")
@@ -63,4 +66,4 @@ def save_gate_keypoint_calibration(
     }
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

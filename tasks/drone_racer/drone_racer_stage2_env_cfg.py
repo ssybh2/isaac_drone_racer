@@ -26,6 +26,10 @@ def stage2_reference_camera_cfg() -> TiledCameraCfg:
         spawn=sim_utils.PinholeCameraCfg(),
         width=1000,
         height=1000,
+        # Stage2 labels and extrinsic metrics require the pose associated with
+        # every rendered frame. TiledCamera otherwise exposes only its
+        # initialization pose even while the drone moves.
+        return_latest_camera_pose=True,
     )
 
 

@@ -77,3 +77,47 @@ def test_wrong_camera_mount_is_visible_in_extrinsic_metric():
     assert result.metrics.gate_translation_error_m < 1e-5
     assert result.metrics.extrinsic_translation_error_m == pytest.approx(0.02, abs=1e-8)
     assert result.metrics.body_translation_error_m == pytest.approx(0.02, abs=1e-5)
+
+
+def test_target_is_opening_center_not_gate_actor_origin():
+    base = GateGeometry.rectangular_x_normal(
+        1.5,
+        1.5,
+        x_offset_m=-0.05,
+        source="synthetic_offset_test",
+    )
+    geometry = GateGeometry(
+        base.object_points_g + np.array([0.0, 0.0, 1.2]),
+        source="synthetic_offset_test",
+    )
+    T_bc = _camera_to_body()
+    T_wb = RigidTransform(np.eye(3), np.zeros(3), to_frame="W", from_frame="B")
+    T_wc = T_wb @ T_bc
+    T_wg = RigidTransform(np.eye(3), np.array([4.0, 0.0, 0.0]), to_frame="W", from_frame="G")
+
+    result = Stage2APerceptionPipeline(geometry, _calibration(), T_bc).process_truth(
+        Stage2ATruth(T_wg=T_wg, T_wc=T_wc, T_wb=T_wb)
+    )
+
+    expected = T_bc @ result.T_cg_truth
+    assert result.solution.target_pos_b == pytest.approx(
+        expected.transform_points(geometry.center_g), abs=1e-5
+    )
+    assert not np.allclose(result.solution.target_pos_b, result.solution.T_bg.t)
+
+
+def test_rear_facing_gate_is_reported_as_invisible_not_projection_failure():
+    geometry = GateGeometry.rectangular_x_normal(1.5, 1.5, source="synthetic_test")
+    pipeline = Stage2APerceptionPipeline(geometry, _calibration(), _camera_to_body())
+    T_cg = RigidTransform(
+        np.eye(3),
+        np.array([0.0, 0.0, -3.0]),
+        to_frame="C",
+        from_frame="G",
+    )
+
+    observation = pipeline.project_perfect_corners(T_cg)
+
+    assert not observation.complete
+    assert not np.any(observation.visible)
+    assert np.all(observation.corners_uv == -1.0)

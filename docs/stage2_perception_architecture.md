@@ -247,15 +247,15 @@ geometry/extrinsic calibration stays outside the learned model.
   signal;
 - measure racing performance separately from perception metrics.
 
-## 8. Local debug items intentionally left explicit
+## 8. Remaining explicit calibration and training items
 
-The framework does not invent values for:
+The repository now checks in measured gate corners and a validated reference
+pinhole mount. The following still require task-specific decisions or broader
+calibration data:
 
-- the exact four gate opening coordinates in `gate.usd`;
-- the final camera projection model/distortion;
-- the measured/static camera-to-body transform;
 - detector architecture and loss weights;
 - acceptable pixel/pose thresholds.
 
-Those are calibration/tuning tasks. The code structure makes each one an
-explicit input so local debugging cannot silently change the geometry contract.
+The baseline detector and its measured errors are documented in
+[`stage2_training.md`](stage2_training.md). The code structure keeps these
+choices explicit so tuning cannot silently change the geometry contract.

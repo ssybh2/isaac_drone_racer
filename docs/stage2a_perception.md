@@ -33,4 +33,6 @@ Important constraints:
   batched implementation through the same `PnPBackend` interface.
 
 See [`stage2_perception_architecture.md`](stage2_perception_architecture.md) for
-the complete Stage2A/Stage2B design and calibration milestones.
+the complete Stage2A/Stage2B design and calibration milestones. See
+[`stage2_training.md`](stage2_training.md) for the calibrated repository values,
+dataset commands, detector training, and current validation results.

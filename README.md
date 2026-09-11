@@ -107,6 +107,14 @@ value, optimizer, state `RunningStandardScaler`, and value
 `RunningStandardScaler`. See [docs/stage1.md](docs/stage1.md) for architecture,
 validation, and exact commands.
 
+### Stage 2: Gate perception
+
+Stage2A projects calibrated gate-asset corners into an explicit pinhole camera
+and validates the shared planar PnP/body-pose recovery path. Stage2B trains an
+RGB ordered-corner detector against those labels. See
+[`docs/stage2_training.md`](docs/stage2_training.md) for dataset collection,
+training, evaluation commands, and the current accuracy/closed-loop limitations.
+
 ## Next Steps
 
 Latest Stage 1.5 results (verified September 10, 2026): the recovered mixed

@@ -137,3 +137,27 @@ def project_with_calibration(points_c, calibration: CameraCalibration) -> np.nda
         calibration.K,
         distortion=calibration.dist_coeffs,
     )
+
+
+def project_visible_with_calibration(
+    points_c,
+    calibration: CameraCalibration,
+    *,
+    min_depth_m: float = 1.0e-6,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project only forward-facing points and mark all other pixels invalid.
+
+    A dataset frame may legitimately contain a partially visible or rear-facing
+    gate. Standard pinhole projection is undefined at/behind the optical plane,
+    so those entries receive ``(-1, -1)`` and must be ignored through the
+    returned visibility mask.
+    """
+    points = np.asarray(points_c, dtype=np.float64)
+    if points.shape != (4, 3):
+        raise ValueError("Stage2 gate points must have shape (4, 3)")
+    forward = points[:, 2] > min_depth_m
+    pixels = np.full((4, 2), -1.0, dtype=np.float64)
+    if np.any(forward):
+        pixels[forward] = project_with_calibration(points[forward], calibration)
+    visible = forward & calibration.in_image(pixels)
+    return pixels, visible

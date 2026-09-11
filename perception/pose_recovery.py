@@ -73,7 +73,10 @@ class GatePoseRecovery:
         T_cg = pnp.T_cg
         T_gc = T_cg.inverse()
         T_bg = self.T_bc @ T_cg
-        target_pos_b = T_bg.t.copy()
+        # The gate actor origin is not necessarily the opening center. The
+        # repository gate actor is rooted at floor level, so use the calibrated
+        # opening centroid as the navigation target.
+        target_pos_b = T_bg.transform_points(self.geometry.center_g)
 
         T_wc_est = None
         T_wb_est = None

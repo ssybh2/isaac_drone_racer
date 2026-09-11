@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .camera_model import CameraCalibration, project_with_calibration
+from .camera_model import CameraCalibration, project_visible_with_calibration, project_with_calibration
 from .corner_detection import CornerObservation
 from .gate_geometry import GateGeometry
 from .pose_recovery import GatePoseRecovery, GatePoseSolution
@@ -68,12 +68,11 @@ class Stage2APerceptionPipeline:
 
     def project_perfect_corners(self, T_cg: RigidTransform, *, timestamp_s: float = 0.0) -> CornerObservation:
         points_c = T_cg.transform_points(self.geometry.object_points_g)
-        uv = project_with_calibration(points_c, self.camera)
-        visible = (points_c[:, 2] > 0.0) & self.camera.in_image(uv)
+        uv, visible = project_visible_with_calibration(points_c, self.camera)
         return CornerObservation(
             uv,
             visible=visible,
-            confidence=np.ones(4),
+            confidence=visible.astype(np.float64),
             timestamp_s=timestamp_s,
             source="isaac_oracle_projection",
         )
