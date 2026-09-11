@@ -1,0 +1,42 @@
+{
+  "schema": "isaac_drone_racer.stage2_dataset_manifest.v1",
+  "samples": 2048,
+  "seed": 3,
+  "image_width": 256,
+  "image_height": 256,
+  "num_envs": 32,
+  "batches": 64,
+  "distance_m": [
+    2.5,
+    8.0
+  ],
+  "lateral_offset_m": [
+    -1.25,
+    1.25
+  ],
+  "vertical_offset_m": [
+    -0.8,
+    0.8
+  ],
+  "yaw_perturbation_rad": [
+    -0.22,
+    0.22
+  ],
+  "pitch_perturbation_rad": [
+    -0.15,
+    0.15
+  ],
+  "roll_rad": [
+    -0.18,
+    0.18
+  ],
+  "gate_indices": [
+    0
+  ],
+  "complete_samples": 1805,
+  "partial_samples": 243,
+  "fully_out_of_frame_samples": 0,
+  "visibility_semantics": "geometric_in_front_and_in_frame",
+  "gate_calibration": "assets/gate/gate_keypoints.json",
+  "camera_model": "pinhole"
+}

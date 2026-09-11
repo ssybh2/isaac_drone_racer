@@ -1,0 +1,1635 @@
+{
+  "schema": "isaac_drone_racer.stage2a_rgb_overlay.v1",
+  "camera_model": "pinhole",
+  "camera_optical_convention": "opencv_ros_x_right_y_down_z_forward",
+  "gate_calibration": "/home/donglei/isaac_projects/isaac_drone_racer/assets/gate/gate_keypoints.json",
+  "samples": 32,
+  "complete_samples": 25,
+  "gate_indices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "distance_range_m": [
+    2.6689987230116143,
+    7.894984522023686
+  ],
+  "projected_gate_width_range_px": [
+    57.93193528669747,
+    159.86000623074108
+  ],
+  "configured_vs_truth_extrinsic_translation_error_m": {
+    "mean": 1.8712788948931407e-07,
+    "max": 4.195290973096472e-07
+  },
+  "configured_vs_truth_extrinsic_rotation_error_deg": {
+    "mean": 1.0963697679193653e-05,
+    "max": 1.9318692315611825e-05
+  },
+  "records": [
+    {
+      "sample_id": 0,
+      "gate_index": 0,
+      "distance_to_opening_center_m": 2.6689987510189503,
+      "projected_gate_width_px": 159.86000047288297,
+      "corners_uv": [
+        [
+          -33.92001175808787,
+          224.74797827916532
+        ],
+        [
+          136.43430792134214,
+          262.8508141699483
+        ],
+        [
+          165.92993123313317,
+          82.6303828999325
+        ],
+        [
+          21.022226178455526,
+          74.1355145786961
+        ]
+      ],
+      "visible": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 3.9645793423650967e-08,
+      "extrinsic_rotation_error_deg": 8.18910913293408e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_000.png"
+    },
+    {
+      "sample_id": 1,
+      "gate_index": 1,
+      "distance_to_opening_center_m": 3.3463714262200153,
+      "projected_gate_width_px": 132.6955182987222,
+      "corners_uv": [
+        [
+          29.257053297837743,
+          188.49739902736042
+        ],
+        [
+          160.9950183059139,
+          204.43619176470298
+        ],
+        [
+          174.64272172457044,
+          68.41402054913934
+        ],
+        [
+          42.396950362462036,
+          57.53649365078172
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.310507650272135e-07,
+      "extrinsic_rotation_error_deg": 1.8548711416805456e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_001.png"
+    },
+    {
+      "sample_id": 2,
+      "gate_index": 2,
+      "distance_to_opening_center_m": 4.839019300656631,
+      "projected_gate_width_px": 92.87097670876268,
+      "corners_uv": [
+        [
+          83.31682999041423,
+          145.1167275196317
+        ],
+        [
+          172.68320119246084,
+          145.1167109639158
+        ],
+        [
+          176.18779438020093,
+          52.86743445605342
+        ],
+        [
+          79.81221216472468,
+          52.8674481816021
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 3.660626668849725e-07,
+      "extrinsic_rotation_error_deg": 1.5926940848252804e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_002.png"
+    },
+    {
+      "sample_id": 3,
+      "gate_index": 3,
+      "distance_to_opening_center_m": 6.329183140461737,
+      "projected_gate_width_px": 70.95086327463565,
+      "corners_uv": [
+        [
+          121.71145722570986,
+          151.1239670435886
+        ],
+        [
+          191.4165455881959,
+          144.09230278133398
+        ],
+        [
+          185.8983998308194,
+          73.4111748649439
+        ],
+        [
+          114.41314578192865,
+          80.570515039047
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 9.348116044150988e-08,
+      "extrinsic_rotation_error_deg": 1.4438622495364691e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_003.png"
+    },
+    {
+      "sample_id": 4,
+      "gate_index": 4,
+      "distance_to_opening_center_m": 7.894983021456136,
+      "projected_gate_width_px": 57.93194362152424,
+      "corners_uv": [
+        [
+          161.86370137611652,
+          167.6745968235056
+        ],
+        [
+          219.18624240971974,
+          156.16402290662367
+        ],
+        [
+          206.19194801473134,
+          99.75946816800305
+        ],
+        [
+          149.98496761835128,
+          111.3870502193347
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.6069143682006036e-07,
+      "extrinsic_rotation_error_deg": 1.1768457563181822e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_004.png"
+    },
+    {
+      "sample_id": 5,
+      "gate_index": 5,
+      "distance_to_opening_center_m": 2.6689987230116143,
+      "projected_gate_width_px": 159.85999083370328,
+      "corners_uv": [
+        [
+          -33.91993515948718,
+          224.74798844705575
+        ],
+        [
+          136.43437091470463,
+          262.8508571775096
+        ],
+        [
+          165.93001091744193,
+          82.63042082050744
+        ],
+        [
+          21.022319339300637,
+          74.13554764334506
+        ]
+      ],
+      "visible": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.2839259181157834e-07,
+      "extrinsic_rotation_error_deg": 1.3606912857609226e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_005.png"
+    },
+    {
+      "sample_id": 6,
+      "gate_index": 6,
+      "distance_to_opening_center_m": 3.346371493276924,
+      "projected_gate_width_px": 132.695511877311,
+      "corners_uv": [
+        [
+          29.257095177085702,
+          188.49734124462566
+        ],
+        [
+          160.99505255284853,
+          204.4361397953894
+        ],
+        [
+          174.64276012543777,
+          68.41396882470619
+        ],
+        [
+          42.39699450770851,
+          57.53644484167323
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.0667821656282312e-07,
+      "extrinsic_rotation_error_deg": 1.6903855776160324e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_006.png"
+    },
+    {
+      "sample_id": 7,
+      "gate_index": 0,
+      "distance_to_opening_center_m": 4.839017774875363,
+      "projected_gate_width_px": 92.87100635540418,
+      "corners_uv": [
+        [
+          83.31678897606692,
+          145.1167319569905
+        ],
+        [
+          172.6831845878102,
+          145.116724515751
+        ],
+        [
+          176.18778785533152,
+          52.867420360780145
+        ],
+        [
+          79.81217075626697,
+          52.8674269136168
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 6.020900834950397e-08,
+      "extrinsic_rotation_error_deg": 6.502146373618258e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_007.png"
+    },
+    {
+      "sample_id": 8,
+      "gate_index": 1,
+      "distance_to_opening_center_m": 6.329183131133911,
+      "projected_gate_width_px": 70.95086379209758,
+      "corners_uv": [
+        [
+          121.71143163907131,
+          151.12386951127112
+        ],
+        [
+          191.41651786215124,
+          144.09219720560907
+        ],
+        [
+          185.8983668856301,
+          73.41106759085
+        ],
+        [
+          114.41311125633473,
+          80.57041562913788
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 9.466589339149669e-08,
+      "extrinsic_rotation_error_deg": 5.122641877509565e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_008.png"
+    },
+    {
+      "sample_id": 9,
+      "gate_index": 2,
+      "distance_to_opening_center_m": 7.894984522023686,
+      "projected_gate_width_px": 57.93193528669747,
+      "corners_uv": [
+        [
+          161.8637525441427,
+          167.674577014698
+        ],
+        [
+          219.18628501402074,
+          156.16400410929276
+        ],
+        [
+          206.19199118222224,
+          99.75945839707109
+        ],
+        [
+          149.98501900623592,
+          111.38704032771186
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 3.6360697689578583e-07,
+      "extrinsic_rotation_error_deg": 1.0526028440638427e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_009.png"
+    },
+    {
+      "sample_id": 10,
+      "gate_index": 3,
+      "distance_to_opening_center_m": 2.668998923483688,
+      "projected_gate_width_px": 159.8599888734089,
+      "corners_uv": [
+        [
+          -33.920021764389844,
+          224.74786305326444
+        ],
+        [
+          136.43427610866834,
+          262.85070040000966
+        ],
+        [
+          165.929920216009,
+          82.63030765866489
+        ],
+        [
+          21.02221841906713,
+          74.13542197707928
+        ]
+      ],
+      "visible": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 1.1397356782739848e-07,
+      "extrinsic_rotation_error_deg": 7.143182815269534e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_010.png"
+    },
+    {
+      "sample_id": 11,
+      "gate_index": 4,
+      "distance_to_opening_center_m": 3.3463709567379443,
+      "projected_gate_width_px": 132.6955369664414,
+      "corners_uv": [
+        [
+          29.25703608015135,
+          188.4974071545187
+        ],
+        [
+          160.99501957508795,
+          204.4362025231598
+        ],
+        [
+          174.64272497786897,
+          68.41401153247742
+        ],
+        [
+          42.39693498399566,
+          57.53648344707206
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 4.195290973096472e-07,
+      "extrinsic_rotation_error_deg": 1.8548711416805456e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_011.png"
+    },
+    {
+      "sample_id": 12,
+      "gate_index": 5,
+      "distance_to_opening_center_m": 4.83901809993235,
+      "projected_gate_width_px": 92.87100049050643,
+      "corners_uv": [
+        [
+          83.31680078500091,
+          145.1167113591566
+        ],
+        [
+          172.68319181570098,
+          145.11671139143965
+        ],
+        [
+          176.1877988132117,
+          52.86740942977339
+        ],
+        [
+          79.81218886289895,
+          52.86741179379882
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 6.446991008852544e-08,
+      "extrinsic_rotation_error_deg": 5.915117333884395e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_012.png"
+    },
+    {
+      "sample_id": 13,
+      "gate_index": 6,
+      "distance_to_opening_center_m": 6.329182866420962,
+      "projected_gate_width_px": 70.95086665489242,
+      "corners_uv": [
+        [
+          121.71145435431326,
+          151.12394213411744
+        ],
+        [
+          191.41654599721508,
+          144.0922775588339
+        ],
+        [
+          185.89839998411486,
+          73.41114559129457
+        ],
+        [
+          114.41314248511492,
+          80.5704860896135
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 1.7968800404600657e-07,
+      "extrinsic_rotation_error_deg": 1.3553236463535334e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_013.png"
+    },
+    {
+      "sample_id": 14,
+      "gate_index": 0,
+      "distance_to_opening_center_m": 7.894982540348543,
+      "projected_gate_width_px": 57.93194733816972,
+      "corners_uv": [
+        [
+          161.86370405756023,
+          167.6746044400078
+        ],
+        [
+          219.18624881176925,
+          156.16402982429415
+        ],
+        [
+          206.19195347541728,
+          99.75947138053088
+        ],
+        [
+          149.9849695017775,
+          111.38705414680135
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.2002469217258099e-07,
+      "extrinsic_rotation_error_deg": 1.1768457563181822e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_014.png"
+    },
+    {
+      "sample_id": 15,
+      "gate_index": 1,
+      "distance_to_opening_center_m": 2.6689989895743853,
+      "projected_gate_width_px": 159.85998599306623,
+      "corners_uv": [
+        [
+          -33.919987057356025,
+          224.7479663322014
+        ],
+        [
+          136.43431652420585,
+          262.85079542908426
+        ],
+        [
+          165.92993527679417,
+          82.63038536224921
+        ],
+        [
+          21.02224198558241,
+          74.13551744573962
+        ]
+      ],
+      "visible": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 3.964579449354665e-08,
+      "extrinsic_rotation_error_deg": 8.18910913293408e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_015.png"
+    },
+    {
+      "sample_id": 16,
+      "gate_index": 2,
+      "distance_to_opening_center_m": 3.346372145359308,
+      "projected_gate_width_px": 132.69547989031167,
+      "corners_uv": [
+        [
+          29.257197806491348,
+          188.49730727117003
+        ],
+        [
+          160.99511965305504,
+          204.43612571366145
+        ],
+        [
+          174.64284214231452,
+          68.4139791594958
+        ],
+        [
+          42.39710825252351,
+          57.53644871259303
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 1.8563186804605445e-07,
+      "extrinsic_rotation_error_deg": 1.344524082641768e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_016.png"
+    },
+    {
+      "sample_id": 17,
+      "gate_index": 3,
+      "distance_to_opening_center_m": 4.839017673357844,
+      "projected_gate_width_px": 92.87101130143199,
+      "corners_uv": [
+        [
+          83.31673715511926,
+          145.1166349875571
+        ],
+        [
+          172.68313639665877,
+          145.11663202445584
+        ],
+        [
+          176.18774615836656,
+          52.86731890687979
+        ],
+        [
+          79.81212279704218,
+          52.86731583449671
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 3.743806896557515e-08,
+      "extrinsic_rotation_error_deg": 3.4150945850063763e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_017.png"
+    },
+    {
+      "sample_id": 18,
+      "gate_index": 4,
+      "distance_to_opening_center_m": 6.329182894211604,
+      "projected_gate_width_px": 70.95086646395845,
+      "corners_uv": [
+        [
+          121.71143155151019,
+          151.1238715022979
+        ],
+        [
+          191.41652036598632,
+          144.09219893381504
+        ],
+        [
+          185.89836924285436,
+          73.41106666853565
+        ],
+        [
+          114.41311088811129,
+          80.57041497928094
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 1.8309313296484095e-07,
+      "extrinsic_rotation_error_deg": 5.122641877509565e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_018.png"
+    },
+    {
+      "sample_id": 19,
+      "gate_index": 5,
+      "distance_to_opening_center_m": 7.8949832355250065,
+      "projected_gate_width_px": 57.931950909091924,
+      "corners_uv": [
+        [
+          161.86381384377262,
+          167.67470662103034
+        ],
+        [
+          219.18636444260147,
+          156.16412982607375
+        ],
+        [
+          206.19205742671943,
+          99.7595707869735
+        ],
+        [
+          149.98507367050158,
+          111.38715945451781
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.3078256456905065e-07,
+      "extrinsic_rotation_error_deg": 1.569643750643458e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_019.png"
+    },
+    {
+      "sample_id": 20,
+      "gate_index": 6,
+      "distance_to_opening_center_m": 2.668998785287875,
+      "projected_gate_width_px": 159.86000623074108,
+      "corners_uv": [
+        [
+          -33.92003672568791,
+          224.74795345397243
+        ],
+        [
+          136.4342892605592,
+          262.85079975528697
+        ],
+        [
+          165.9299267828077,
+          82.63038321316554
+        ],
+        [
+          21.022219826270245,
+          74.13549455751134
+        ]
+      ],
+      "visible": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.3797208516109592e-07,
+      "extrinsic_rotation_error_deg": 9.80911239371097e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_020.png"
+    },
+    {
+      "sample_id": 21,
+      "gate_index": 0,
+      "distance_to_opening_center_m": 3.3463714933815036,
+      "projected_gate_width_px": 132.69551569446594,
+      "corners_uv": [
+        [
+          29.257019544146047,
+          188.4973846550252
+        ],
+        [
+          160.99498200660838,
+          204.43617668675552
+        ],
+        [
+          174.6426852966907,
+          68.41400675268572
+        ],
+        [
+          42.39691648958616,
+          57.536480466348124
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 1.6279369833255375e-07,
+      "extrinsic_rotation_error_deg": 1.9318692315611825e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_021.png"
+    },
+    {
+      "sample_id": 22,
+      "gate_index": 1,
+      "distance_to_opening_center_m": 4.839017708149276,
+      "projected_gate_width_px": 92.87100848481197,
+      "corners_uv": [
+        [
+          83.31678650589724,
+          145.11670512821632
+        ],
+        [
+          172.68318408656478,
+          145.11669768697706
+        ],
+        [
+          176.18778739804182,
+          52.86738923591108
+        ],
+        [
+          79.81216800908597,
+          52.86739578874737
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 6.212256111985336e-08,
+      "extrinsic_rotation_error_deg": 5.399738656763834e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_022.png"
+    },
+    {
+      "sample_id": 23,
+      "gate_index": 2,
+      "distance_to_opening_center_m": 6.32918425893053,
+      "projected_gate_width_px": 70.95084807465334,
+      "corners_uv": [
+        [
+          121.71139076518628,
+          151.12391065094545
+        ],
+        [
+          191.41646238025606,
+          144.09223556815311
+        ],
+        [
+          185.89830790464646,
+          73.41112301462215
+        ],
+        [
+          114.4130694150107,
+          80.57046979819742
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 3.475742703820958e-07,
+      "extrinsic_rotation_error_deg": 9.2743557084027e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_023.png"
+    },
+    {
+      "sample_id": 24,
+      "gate_index": 3,
+      "distance_to_opening_center_m": 7.8949827128403545,
+      "projected_gate_width_px": 57.93195236286569,
+      "corners_uv": [
+        [
+          161.8638097677892,
+          167.6746615844431
+        ],
+        [
+          219.18635822045962,
+          156.16407119415445
+        ],
+        [
+          206.19204079260726,
+          99.75951285598666
+        ],
+        [
+          149.98505703494212,
+          111.38711304343789
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 1.8014632755525522e-07,
+      "extrinsic_rotation_error_deg": 1.4388049231413678e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_024.png"
+    },
+    {
+      "sample_id": 25,
+      "gate_index": 4,
+      "distance_to_opening_center_m": 2.6689989828044483,
+      "projected_gate_width_px": 159.85999132835275,
+      "corners_uv": [
+        [
+          -33.92003635987308,
+          224.747945098827
+        ],
+        [
+          136.4342695852992,
+          262.85079250522756
+        ],
+        [
+          165.9299132768552,
+          82.630387126812
+        ],
+        [
+          21.02221695131678,
+          74.13549634171503
+        ]
+      ],
+      "visible": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.3194550108002018e-07,
+      "extrinsic_rotation_error_deg": 4.829673078902934e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_025.png"
+    },
+    {
+      "sample_id": 26,
+      "gate_index": 5,
+      "distance_to_opening_center_m": 3.3463719790110895,
+      "projected_gate_width_px": 132.69548136653322,
+      "corners_uv": [
+        [
+          29.25719699414553,
+          188.497304516275
+        ],
+        [
+          160.9951131050853,
+          204.43614290870602
+        ],
+        [
+          174.6428507653841,
+          68.41398348178143
+        ],
+        [
+          42.39711109159627,
+          57.536447109142884
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.0114002320859022e-07,
+      "extrinsic_rotation_error_deg": 8.537736462515945e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_026.png"
+    },
+    {
+      "sample_id": 27,
+      "gate_index": 6,
+      "distance_to_opening_center_m": 4.839017619215068,
+      "projected_gate_width_px": 92.87101189755435,
+      "corners_uv": [
+        [
+          83.31673687952159,
+          145.11664993403082
+        ],
+        [
+          172.68313667225647,
+          145.11664697092857
+        ],
+        [
+          176.18774647889123,
+          52.86733441203788
+        ],
+        [
+          79.81212247651752,
+          52.867331339655806
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 6.254390295894622e-08,
+      "extrinsic_rotation_error_deg": 1.7075472925031877e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_027.png"
+    },
+    {
+      "sample_id": 28,
+      "gate_index": 0,
+      "distance_to_opening_center_m": 6.329182884997795,
+      "projected_gate_width_px": 70.95086650963646,
+      "corners_uv": [
+        [
+          121.71142886462033,
+          151.12387180431625
+        ],
+        [
+          191.41651772339907,
+          144.0921992313423
+        ],
+        [
+          185.89836652953895,
+          73.41106692955552
+        ],
+        [
+          114.41310812820181,
+          80.57041524495943
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 1.8208482720340095e-07,
+      "extrinsic_rotation_error_deg": 4.517745487845102e-06,
+      "overlay_path": "outputs/stage2a_overlay/overlay_028.png"
+    },
+    {
+      "sample_id": 29,
+      "gate_index": 1,
+      "distance_to_opening_center_m": 7.894982785941715,
+      "projected_gate_width_px": 57.93194540295407,
+      "corners_uv": [
+        [
+          161.86370198490954,
+          167.6745972685648
+        ],
+        [
+          219.18624479796807,
+          156.16402299772042
+        ],
+        [
+          206.19194996416465,
+          99.75946654192674
+        ],
+        [
+          149.98496785689727,
+          111.38704895425703
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.0634731477328503e-07,
+      "extrinsic_rotation_error_deg": 1.3115919625095442e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_029.png"
+    },
+    {
+      "sample_id": 30,
+      "gate_index": 2,
+      "distance_to_opening_center_m": 2.668999576902458,
+      "projected_gate_width_px": 159.85996125124552,
+      "corners_uv": [
+        [
+          -33.91988723193333,
+          224.748016466894
+        ],
+        [
+          136.43438972416973,
+          262.8508652256222
+        ],
+        [
+          165.93000600503527,
+          82.63049751188522
+        ],
+        [
+          21.022342143931255,
+          74.13560246406875
+        ]
+      ],
+      "visible": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.8101576887369867e-07,
+      "extrinsic_rotation_error_deg": 1.870524340221744e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_030.png"
+    },
+    {
+      "sample_id": 31,
+      "gate_index": 3,
+      "distance_to_opening_center_m": 3.3463711508345155,
+      "projected_gate_width_px": 132.69552584410025,
+      "corners_uv": [
+        [
+          29.257077158346206,
+          188.49739854379618
+        ],
+        [
+          160.99504816453737,
+          204.436201042394
+        ],
+        [
+          174.6427572213461,
+          68.41401527898606
+        ],
+        [
+          42.39697786479273,
+          57.53648842848881
+        ]
+      ],
+      "visible": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "camera_K": [
+        [
+          293.19970703125,
+          0.0,
+          128.0
+        ],
+        [
+          0.0,
+          293.19970703125,
+          128.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "extrinsic_translation_error_m": 2.1364497291743391e-07,
+      "extrinsic_rotation_error_deg": 1.6903855776160324e-05,
+      "overlay_path": "outputs/stage2a_overlay/overlay_031.png"
+    }
+  ]
+}

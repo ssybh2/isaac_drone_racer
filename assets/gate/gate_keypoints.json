@@ -1,0 +1,19 @@
+{
+  "usd_path": "assets/gate/gate.usd",
+  "frame": "gate_actor",
+  "corner_order": [
+    "left_bottom",
+    "right_bottom",
+    "right_top",
+    "left_top"
+  ],
+  "object_points_gate_actor_m": [
+    [-0.0661411, 0.761999965, 0.304800034],
+    [-0.0661411, -0.761999965, 0.304800034],
+    [-0.0661411, -0.761999965, 1.828799963],
+    [-0.0661411, 0.761999965, 1.828799963]
+  ],
+  "opening_width_m": 1.52399993,
+  "opening_height_m": 1.523999929,
+  "notes": "Measured from /gate/geometry/mesh in gate.usd. Points are the opening corners on the approach-side (-X) face; the actor origin is at floor level, so the opening center is z=1.0668 m."
+}

@@ -1,0 +1,75 @@
+{
+  "schema": "isaac_drone_racer.stage2_dataset_manifest.v2",
+  "samples": 20480,
+  "seed": 1,
+  "image_width": 256,
+  "image_height": 256,
+  "num_envs": 64,
+  "batches": 320,
+  "distance_m": [
+    2.5,
+    8.0
+  ],
+  "lateral_offset_m": [
+    -1.8,
+    1.8
+  ],
+  "vertical_offset_m": [
+    -1.2,
+    1.2
+  ],
+  "yaw_perturbation_rad": [
+    -0.35,
+    0.35
+  ],
+  "pitch_perturbation_rad": [
+    -0.25,
+    0.25
+  ],
+  "roll_rad": [
+    -0.3,
+    0.3
+  ],
+  "gate_sampling": "uniform_random",
+  "gate_indices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "complete_samples": 11843,
+  "partial_samples": 8637,
+  "fully_out_of_frame_samples": 0,
+  "visibility_semantics": "geometric_in_front_and_in_frame",
+  "domain_randomization": {
+    "dome_light_intensity": [
+      1800.0,
+      4200.0
+    ],
+    "dome_light_color_rgb": [
+      0.65,
+      1.0
+    ],
+    "brightness_gain": [
+      0.65,
+      1.35
+    ],
+    "contrast": [
+      0.8,
+      1.2
+    ],
+    "image_noise_std_8bit": [
+      0.0,
+      6.0
+    ],
+    "gaussian_blur_probability": 0.15,
+    "motion_blur_probability": 0.1,
+    "gate_material": null,
+    "camera_calibration": null
+  },
+  "gate_calibration": "assets/gate/gate_keypoints.json",
+  "camera_model": "pinhole"
+}
