@@ -8,6 +8,8 @@ from .pipeline import Stage1StatePipeline
 from .policy_adapter import policy_drone_state
 from .state_estimate import GroundTruthState, ImuEstimate, SourceStatus, StateEstimate, VioEstimate
 from .state_estimate_assembler import StateEstimateAssembler
+from .swift_fusion import SwiftFusionResult, SwiftPerceptionFusion
+from .swift_vio_drift import FusedWorldEstimate, VioDriftKalmanFilter, VioWorldEstimate
 
 __all__ = [
     "FakeImu",
@@ -15,14 +17,19 @@ __all__ = [
     "FakeSensorPipelineCfg",
     "FakeVio",
     "FakeVioCfg",
+    "FusedWorldEstimate",
     "GroundTruthState",
     "ImuEstimate",
     "SourceStatus",
     "Stage1StatePipeline",
     "StateEstimate",
     "StateEstimateAssembler",
+    "SwiftFusionResult",
+    "SwiftPerceptionFusion",
     "UniformRange",
+    "VioDriftKalmanFilter",
     "VioEstimate",
+    "VioWorldEstimate",
     "compose_transform_w_b",
     "policy_drone_state",
     "rotate_world_to_body",

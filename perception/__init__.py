@@ -16,13 +16,24 @@ from .rigid_transform import RigidTransform
 from .stage2_calibration import load_stage2_gate_geometry, stage2_camera_to_body
 from .stage2a_pipeline import Stage2APerceptionPipeline, Stage2AResult, Stage2ATruth
 from .stage2b_pipeline import Stage2BPerceptionPipeline, Stage2BResult
+from .swift_gate_measurement import (
+    CornerPerturbationConfig,
+    GatePoseMeasurement,
+    GatePoseMeasurementBuilder,
+)
+from .swift_isaac_adapter import active_gate_index_from_isaac, track_layout_from_isaac
+from .track_layout import GateAssociation, TrackLayout
 
 __all__ = [
     "CameraCalibration",
     "CornerObservation",
+    "CornerPerturbationConfig",
+    "GateAssociation",
     "GateCornerDetector",
     "GateGeometry",
     "GateKeypointNet",
+    "GatePoseMeasurement",
+    "GatePoseMeasurementBuilder",
     "GatePoseRecovery",
     "GatePoseSolution",
     "IsaacStage2DatasetCollector",
@@ -38,6 +49,9 @@ __all__ = [
     "Stage2DatasetWriter",
     "Stage2KeypointDataset",
     "TorchGateCornerDetector",
+    "TrackLayout",
+    "active_gate_index_from_isaac",
     "load_stage2_gate_geometry",
     "stage2_camera_to_body",
+    "track_layout_from_isaac",
 ]
