@@ -22,6 +22,7 @@ from .swift_gate_measurement import (
     GatePoseMeasurementBuilder,
 )
 from .swift_isaac_adapter import active_gate_index_from_isaac, track_layout_from_isaac
+from .torchvision_keypoint_detector import TorchvisionGateCornerDetector, TorchvisionStage2KeypointDataset
 from .track_layout import GateAssociation, TrackLayout
 
 __all__ = [
@@ -49,6 +50,8 @@ __all__ = [
     "Stage2DatasetWriter",
     "Stage2KeypointDataset",
     "TorchGateCornerDetector",
+    "TorchvisionGateCornerDetector",
+    "TorchvisionStage2KeypointDataset",
     "TrackLayout",
     "active_gate_index_from_isaac",
     "load_stage2_gate_geometry",

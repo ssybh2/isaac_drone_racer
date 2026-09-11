@@ -1,0 +1,19 @@
+%YAML:1.0
+
+# OpenVINS T_cam_imu maps IMU -> OpenCV optical camera.
+# Repository Stage2 T_bc maps camera -> body. With simulator I == B:
+# T_cam_imu = inverse(T_bc).
+cam0:
+  T_cam_imu:
+    - [0.0, -1.0,  0.0,  0.0]
+    - [0.0,  0.0, -1.0,  0.05]
+    - [1.0,  0.0,  0.0, -0.14]
+    - [0.0,  0.0,  0.0,  1.0]
+  cam_overlaps: []
+  camera_model: pinhole
+  distortion_coeffs: [0.0, 0.0, 0.0, 0.0]
+  distortion_model: radtan
+  intrinsics: [293.19970703125, 293.19970703125, 128.0, 128.0]
+  resolution: [256, 256]
+  rostopic: /swift/camera/image_raw
+  timeshift_cam_imu: 0.0

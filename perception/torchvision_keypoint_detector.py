@@ -27,6 +27,65 @@ def build_keypoint_rcnn(*, image_size: int = 128):
     )
 
 
+def _decode_keypoint_visibility(
+    corners_uv: np.ndarray,
+    *,
+    image_width: int,
+    image_height: int,
+    keypoint_logits: np.ndarray | None,
+    instance_score: float,
+    confidence_threshold: float,
+    min_quad_area_px2: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Conservatively convert Keypoint R-CNN outputs into the Stage2 visibility contract.
+
+    Torchvision's ``keypoints_scores`` are heatmap peak logits, not calibrated
+    visibility probabilities.  We therefore use sigmoid(logit) only as a
+    monotonic confidence heuristic, multiply it by the instance score, require
+    the point to be physically inside the image, and reject the full
+    observation if the ordered LB/RB/RT/LT polygon is not a plausible convex
+    quadrilateral.
+
+    This removes the previous unsafe ``visible=np.ones(4)`` behavior.  It does
+    not claim to solve every hallucinated-corner case; downstream IPPE
+    reprojection and Kalman innovation gates remain required.
+    """
+    corners = np.asarray(corners_uv, dtype=np.float64).reshape(4, 2)
+    finite = np.all(np.isfinite(corners), axis=1)
+    in_frame = (
+        finite
+        & (corners[:, 0] >= 0.0)
+        & (corners[:, 0] < float(image_width))
+        & (corners[:, 1] >= 0.0)
+        & (corners[:, 1] < float(image_height))
+    )
+
+    if keypoint_logits is None:
+        # Fail closed.  Current torchvision exposes keypoints_scores; silently
+        # treating a missing confidence signal as four visible corners would
+        # reintroduce the original closed-loop bug.
+        confidence = np.zeros(4, dtype=np.float64)
+    else:
+        logits = np.asarray(keypoint_logits, dtype=np.float64).reshape(4)
+        confidence = 1.0 / (1.0 + np.exp(-np.clip(logits, -60.0, 60.0)))
+        confidence *= float(np.clip(instance_score, 0.0, 1.0))
+
+    visible = in_frame & (confidence >= float(confidence_threshold))
+
+    # PnP is only useful when the four ordered corners form a physical gate
+    # opening.  Reject the whole observation rather than guessing which
+    # hallucinated point caused an impossible polygon.
+    if np.all(visible):
+        contour = corners.astype(np.float32).reshape(-1, 1, 2)
+        area = abs(float(cv2.contourArea(contour)))
+        convex = bool(cv2.isContourConvex(contour))
+        edge_lengths = np.linalg.norm(np.roll(corners, -1, axis=0) - corners, axis=1)
+        if (not convex) or area < float(min_quad_area_px2) or np.any(edge_lengths < 1.0):
+            visible[:] = False
+
+    return visible, confidence
+
+
 class TorchvisionStage2KeypointDataset(Dataset):
     """Adapt Stage2 labels to torchvision's box/keypoint target contract."""
 
@@ -83,6 +142,8 @@ class TorchvisionGateCornerDetector:
         *,
         device: str = "cpu",
         detection_threshold: float = 0.5,
+        keypoint_confidence_threshold: float = 0.5,
+        min_quad_area_px2: float = 16.0,
     ):
         payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
         self.device = torch.device(device)
@@ -91,6 +152,8 @@ class TorchvisionGateCornerDetector:
         self.model.load_state_dict(payload["model_state_dict"])
         self.model.eval()
         self.detection_threshold = float(detection_threshold)
+        self.keypoint_confidence_threshold = float(keypoint_confidence_threshold)
+        self.min_quad_area_px2 = float(min_quad_area_px2)
         self.metadata = dict(payload["metadata"])
 
     @torch.inference_mode()
@@ -108,11 +171,27 @@ class TorchvisionGateCornerDetector:
                 timestamp_s=timestamp_s,
                 source="torchvision_keypoint_rcnn",
             )
-        confidence = torch.sigmoid(output["keypoints_scores"][0])
+
+        corners = output["keypoints"][0, :, :2].detach().cpu().numpy()
+        raw_keypoint_scores = output.get("keypoints_scores")
+        logits = None
+        if raw_keypoint_scores is not None and len(raw_keypoint_scores):
+            logits = raw_keypoint_scores[0].detach().cpu().numpy()
+        instance_score = float(output["scores"][0].detach().cpu())
+
+        visible, confidence = _decode_keypoint_visibility(
+            corners,
+            image_width=int(image.shape[1]),
+            image_height=int(image.shape[0]),
+            keypoint_logits=logits,
+            instance_score=instance_score,
+            confidence_threshold=self.keypoint_confidence_threshold,
+            min_quad_area_px2=self.min_quad_area_px2,
+        )
         return CornerObservation(
-            corners_uv=output["keypoints"][0, :, :2].cpu().numpy(),
-            visible=np.ones(4, dtype=bool),
-            confidence=confidence.cpu().numpy(),
+            corners_uv=corners,
+            visible=visible,
+            confidence=confidence,
             timestamp_s=timestamp_s,
             source="torchvision_keypoint_rcnn",
         )
