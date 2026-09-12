@@ -19,6 +19,26 @@ parser.add_argument(
     "--detector_device", type=str, default="cuda", help="Torch device for the optional detector."
 )
 parser.add_argument(
+    "--oracle_gate_index",
+    action="store_true",
+    help=(
+        "Diagnostic ablation only: use Isaac task next_gate_idx instead of Swift-style "
+        "known-map/VIO gate association."
+    ),
+)
+parser.add_argument(
+    "--rejection_dump_dir",
+    type=str,
+    default=None,
+    help="Optional directory for rejected detector/IPPE/Kalman RGB frames and JSON reasons.",
+)
+parser.add_argument(
+    "--rejection_dump_limit",
+    type=int,
+    default=200,
+    help="Maximum number of rejected frames to persist during one diagnostic run.",
+)
+parser.add_argument(
     "--task",
     type=str,
     default="Isaac-Drone-Racer-Swift-OpenVINS-v0",
@@ -40,10 +60,17 @@ import tasks  # noqa: F401
 
 
 def main() -> None:
+    if args_cli.rejection_dump_limit < 0:
+        raise ValueError("--rejection_dump_limit must be non-negative")
+
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
     if args_cli.detector_checkpoint is not None:
         env_cfg.swift_detector_checkpoint = args_cli.detector_checkpoint
         env_cfg.swift_detector_device = args_cli.detector_device
+    env_cfg.swift_use_oracle_gate_index = bool(args_cli.oracle_gate_index)
+    env_cfg.swift_rejection_dump_dir = args_cli.rejection_dump_dir
+    env_cfg.swift_rejection_dump_limit = int(args_cli.rejection_dump_limit)
+
     env = gym.make(args_cli.task, cfg=env_cfg)
     raw_env = env.unwrapped
     env.reset()
@@ -65,9 +92,16 @@ def main() -> None:
                     print(f"[OpenVINS] step={step}: waiting for initialized odometry")
                 else:
                     age = max(0.0, raw_env._timestamp_s() - estimate.timestamp_s)
+                    drained = raw_env._openvins_bridge.last_drain_count
                     print(
                         f"[OpenVINS] step={step}: aligned={raw_env.openvins_alignment is not None} "
-                        f"age={age:.4f}s pos={estimate.position_w_b.tolist()}"
+                        f"age={age:.4f}s drained={drained} pos={estimate.position_w_b.tolist()}"
+                    )
+                fusion = raw_env.swift_last_fusion_result
+                if fusion is not None and not fusion.measurement_accepted:
+                    print(
+                        f"[SwiftFusion] rejected: {fusion.rejection_reason} "
+                        f"d2={fusion.innovation_mahalanobis2}"
                     )
             if bool(torch.as_tensor(terminated).any()) or bool(torch.as_tensor(truncated).any()):
                 print(
@@ -76,6 +110,8 @@ def main() -> None:
                 )
                 break
     finally:
+        if raw_env._rejection_dump_count:
+            print(f"[SwiftFusion] wrote {raw_env._rejection_dump_count} rejected-frame records")
         env.close()
 
 
