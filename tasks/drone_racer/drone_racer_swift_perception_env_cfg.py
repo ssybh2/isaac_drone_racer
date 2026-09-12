@@ -73,6 +73,12 @@ class DroneRacerSwiftPerceptionEnvCfg(DroneRacerEnvCfg):
     # task-level next_gate_idx as an oracle identity to isolate association error.
     swift_use_oracle_gate_index: bool = False
 
+    # Optional failure corpus for tuning detector visibility/reprojection/NIS
+    # gates. Each consumed rejected camera observation is saved as RGB + JSON
+    # with its reason and innovation diagnostics until the configured limit.
+    swift_rejection_dump_dir: str | None = None
+    swift_rejection_dump_limit: int = 200
+
     def __post_init__(self) -> None:
         super().__post_init__()
         self.scene.tiled_camera = swift_openvins_camera_cfg()
