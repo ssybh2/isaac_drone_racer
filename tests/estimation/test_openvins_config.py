@@ -9,7 +9,7 @@ CAMERA_CONFIG = PROJECT_ROOT / "config" / "openvins" / "swift_sim" / "kalibr_imu
 
 
 def _scalar(text: str, key: str) -> str:
-    match = re.search(rf"^{re.escape(key)}:\s*([^#\n]+)", text, flags=re.MULTILINE)
+    match = re.search(rf"^\s*{re.escape(key)}:\s*([^#\n]+)", text, flags=re.MULTILINE)
     assert match is not None, f"Missing OpenVINS config key: {key}"
     return match.group(1).strip()
 
