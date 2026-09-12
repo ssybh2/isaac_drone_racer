@@ -65,6 +65,12 @@ class DroneRacerSwiftPerceptionEnvCfg(DroneRacerEnvCfg):
     swift_detection_threshold: float = 0.5
     swift_keypoint_confidence_threshold: float = 0.5
 
+    # False is the sensor-faithful default: an unlabeled detected gate is
+    # associated against the known track using the timestamp-aligned VIO pose.
+    # True is only for controlled diagnostics that intentionally use Isaac's
+    # task-level next_gate_idx as an oracle identity to isolate association error.
+    swift_use_oracle_gate_index: bool = False
+
     def __post_init__(self) -> None:
         super().__post_init__()
         self.scene.tiled_camera = swift_openvins_camera_cfg()
