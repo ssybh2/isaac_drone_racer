@@ -13,8 +13,9 @@ This patch closes the estimator/runtime issues found during the `swift1` review.
 7. **200 Hz odometry backlog** — the ROS bridge now drains queued OpenVINS odometry callbacks before each 100 Hz control/fusion update. Without this, a single `spin_once()` per control cycle could service at most half of the propagated odometry callbacks and gradually consume stale state.
 8. **Oracle gate identity leak** — learned detections are unlabeled by default and are associated to the closest gate in the known track layout using the timestamp-aligned VIO pose, matching the Swift method. Isaac `next_gate_idx` is available only behind the explicit `swift_use_oracle_gate_index=True` diagnostic ablation switch.
 9. **Asynchronous Kalman process noise** — Swift's `sigma_pos=0.05` and `sigma_vel=0.1` remain the covariance added over one nominal 100 Hz interval, but process noise is scaled by elapsed time. Splitting a 10 ms interval around a camera-time update no longer injects the full process covariance twice, and repeated prediction at the same timestamp adds no noise.
-10. **Camera calibration drift guard** — the validated 256x256 pinhole contract (`fx=fy=293.19970703125`, `cx=cy=128`) is centralized in `perception/stage2_calibration.py`. The OpenVINS diagnostic checks Isaac's runtime resolution and intrinsic matrix before publishing the first frame and fails closed on mismatch. A regression test also checks that `kalibr_imucam_chain.yaml` stays synchronized with the authoritative values.
+10. **Camera calibration drift guard** — the validated 256x256 pinhole contract (`fx=fy=293.19970703125`, `cx=cy=128`) is centralized in `perception/stage2_calibration.py`. The OpenVINS diagnostic checks Isaac's runtime resolution and intrinsic matrix before publishing the first frame and fails closed on mismatch. Regression tests also check that `kalibr_imucam_chain.yaml` stays synchronized with both the intrinsics and `T_cam_imu = inverse(T_bc)` convention.
 11. **Rejected-frame corpus** — the optional detector/fusion runtime can persist every consumed rejected observation as the matching RGB PNG plus JSON containing the corner coordinates, visibility/confidence, rejection reason, NIS/Mahalanobis value, associated gate index, and nominal reprojection RMSE. This provides the data needed to tune visibility, IPPE and innovation thresholds instead of guessing from aggregate metrics.
+12. **Stationary OpenVINS startup** — the diagnostic sends a stationary hover command. Upstream OpenVINS sets `wait_for_jerk=true` when no ZUPT updater exists, which can leave a genuinely stationary simulation waiting indefinitely for an acceleration jerk. The simulator config now enables ZUPT only during the beginning/static initialization phase (`try_zupt=true`, `zupt_only_at_beginning=true`), allowing static initialization and disabling zero-velocity updates after motion begins.
 
 ## Diagnostic run
 
@@ -55,6 +56,7 @@ The diagnostic environment is not a PPO training task. If Isaac resets/teleports
 
 ```bash
 PYTHONPATH=. pytest -q \
+  tests/estimation/test_openvins_config.py \
   tests/estimation/test_openvins_bridge.py \
   tests/estimation/test_vio_time_buffer.py \
   tests/estimation/test_swift_vio_drift.py \
