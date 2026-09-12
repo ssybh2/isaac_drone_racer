@@ -12,6 +12,7 @@ from perception.stage2_calibration import (
     CAMERA_OFFSET_CONVENTION,
     CAMERA_OFFSET_POS_B,
     CAMERA_OFFSET_ROT_WXYZ,
+    OPENVINS_CAMERA_RESOLUTION,
 )
 
 from . import mdp
@@ -21,6 +22,7 @@ from .drone_racer_env_cfg import DroneRacerEnvCfg, DroneRacerSceneCfg, RewardsCf
 def swift_openvins_camera_cfg() -> TiledCameraCfg:
     if CAMERA_MODEL != "pinhole":
         raise ValueError(f"Swift/OpenVINS camera requires pinhole calibration, got {CAMERA_MODEL!r}")
+    image_width, image_height = OPENVINS_CAMERA_RESOLUTION
     return TiledCameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/body/camera",
         offset=TiledCameraCfg.OffsetCfg(
@@ -30,8 +32,8 @@ def swift_openvins_camera_cfg() -> TiledCameraCfg:
         ),
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(),
-        width=256,
-        height=256,
+        width=image_width,
+        height=image_height,
         return_latest_camera_pose=True,
     )
 
