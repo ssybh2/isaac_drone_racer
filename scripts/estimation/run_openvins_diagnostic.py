@@ -58,7 +58,7 @@ def main() -> None:
         for step in range(int(args_cli.steps)):
             if not simulation_app.is_running():
                 break
-            _, _, terminated, truncated, info = env.step(actions)
+            _, _, terminated, truncated, _info = env.step(actions)
             if step % 100 == 0:
                 estimate = raw_env.openvins_vio_estimate
                 if estimate is None:
