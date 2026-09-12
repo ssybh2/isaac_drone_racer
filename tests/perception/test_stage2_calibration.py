@@ -1,5 +1,5 @@
-from pathlib import Path
 import re
+from pathlib import Path
 
 import numpy as np
 
@@ -53,10 +53,14 @@ def test_openvins_256px_camera_contract_matches_validated_overlay():
     )
 
 
-def test_openvins_yaml_matches_authoritative_camera_contract():
+def _openvins_camera_yaml_text() -> str:
     project_root = GATE_KEYPOINT_CALIBRATION_PATH.parents[2]
     yaml_path = project_root / "config" / "openvins" / "swift_sim" / "kalibr_imucam_chain.yaml"
-    text = yaml_path.read_text(encoding="utf-8")
+    return yaml_path.read_text(encoding="utf-8")
+
+
+def test_openvins_yaml_matches_authoritative_camera_contract():
+    text = _openvins_camera_yaml_text()
 
     intrinsics_match = re.search(r"intrinsics:\s*\[([^\]]+)\]", text)
     resolution_match = re.search(r"resolution:\s*\[([^\]]+)\]", text)
@@ -68,3 +72,24 @@ def test_openvins_yaml_matches_authoritative_camera_contract():
 
     np.testing.assert_allclose(yaml_intrinsics, OPENVINS_CAMERA_INTRINSICS, atol=0.0)
     assert yaml_resolution == OPENVINS_CAMERA_RESOLUTION
+
+
+def test_openvins_yaml_extrinsic_is_inverse_of_authoritative_camera_to_body():
+    text = _openvins_camera_yaml_text()
+    matrix_block = text.split("T_cam_imu:", 1)[1].split("cam_overlaps:", 1)[0]
+    rows = re.findall(r"-\s*\[([^\]]+)\]", matrix_block)
+    assert len(rows) == 4
+    T_cam_imu_yaml = np.asarray(
+        [[float(value.strip()) for value in row.split(",")] for row in rows],
+        dtype=np.float64,
+    )
+
+    # Simulation uses I == B. Stage2 stores T_bc (camera -> body), whereas
+    # OpenVINS expects T_cam_imu (IMU -> optical camera), so the YAML must hold
+    # exactly inverse(T_bc).
+    T_cb = stage2_camera_to_body().inverse()
+    T_cam_imu_expected = np.eye(4, dtype=np.float64)
+    T_cam_imu_expected[:3, :3] = T_cb.R
+    T_cam_imu_expected[:3, 3] = T_cb.t
+
+    np.testing.assert_allclose(T_cam_imu_yaml, T_cam_imu_expected, atol=1e-12)
