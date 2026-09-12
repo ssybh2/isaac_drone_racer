@@ -281,6 +281,8 @@ class OpenVinsRos2Bridge:
         self.imu_frame_id = imu_frame_id
         self._latest_lock = Lock()
         self._latest: OpenVinsOdomSample | None = None
+        self._odom_callback_count = 0
+        self.last_drain_count = 0
 
     @property
     def node(self):
@@ -290,6 +292,11 @@ class OpenVinsRos2Bridge:
     def latest(self) -> OpenVinsOdomSample | None:
         with self._latest_lock:
             return self._latest
+
+    @property
+    def odom_callback_count(self) -> int:
+        with self._latest_lock:
+            return int(self._odom_callback_count)
 
     def _on_odom(self, msg) -> None:
         stamp = msg.header.stamp
@@ -309,6 +316,7 @@ class OpenVinsRos2Bridge:
         )
         with self._latest_lock:
             self._latest = sample
+            self._odom_callback_count += 1
 
     def publish_rgb(self, rgb_image: np.ndarray, *, timestamp_s: float) -> None:
         image = np.asarray(rgb_image)
@@ -346,6 +354,30 @@ class OpenVinsRos2Bridge:
 
     def spin_once(self, timeout_sec: float = 0.0) -> OpenVinsOdomSample | None:
         self._rclpy.spin_once(self._node, timeout_sec=float(timeout_sec))
+        return self.latest
+
+    def drain_latest(self, *, max_callbacks: int = 32) -> OpenVinsOdomSample | None:
+        """Drain queued odometry callbacks and return the newest sample.
+
+        OpenVINS publishes propagated ``odomimu`` at the IMU rate (200 Hz),
+        while the Isaac control loop normally consumes state at 100 Hz. Calling
+        ``spin_once`` only once per control cycle would therefore service at
+        most half the odometry callbacks and can build an ever-growing stale
+        queue. This bounded non-blocking drain collapses queued odometry to the
+        newest sample before control/fusion consumes it.
+        """
+        if max_callbacks < 1:
+            raise ValueError("max_callbacks must be at least 1")
+
+        processed = 0
+        for _ in range(int(max_callbacks)):
+            before = self.odom_callback_count
+            self._rclpy.spin_once(self._node, timeout_sec=0.0)
+            after = self.odom_callback_count
+            if after == before:
+                break
+            processed += after - before
+        self.last_drain_count = processed
         return self.latest
 
     def close(self) -> None:
