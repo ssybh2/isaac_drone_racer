@@ -10,6 +10,9 @@ This patch closes the estimator/runtime issues found during the `swift1` review.
 4. **Double camera throttling** — OpenVINS `track_frequency` is raised to 100 Hz because the repository already gates the source stream to 30 Hz.
 5. **Gate outlier rejection** — nominal IPPE reprojection has a finite 5 px default limit; the drift Kalman filter applies a 3-D Mahalanobis/NIS gate and uses a Joseph covariance update.
 6. **Isaac/OpenVINS runtime wiring** — `Isaac-Drone-Racer-Swift-OpenVINS-v0` publishes Isaac IMU at 200 Hz and rendered RGB at a phase-preserved 30 Hz, consumes `/ov_msckf/odomimu`, and performs one-time timestamp-matched simulator alignment.
+7. **200 Hz odometry backlog** — the ROS bridge now drains queued OpenVINS odometry callbacks before each 100 Hz control/fusion update. Without this, a single `spin_once()` per control cycle could service at most half of the propagated odometry callbacks and gradually consume stale state.
+8. **Oracle gate identity leak** — learned detections are unlabeled by default and are associated to the closest gate in the known track layout using the timestamp-aligned VIO pose, matching the Swift method. Isaac `next_gate_idx` is available only behind the explicit `swift_use_oracle_gate_index=True` diagnostic ablation switch.
+9. **Asynchronous Kalman process noise** — Swift's `sigma_pos=0.05` and `sigma_vel=0.1` remain the covariance added over one nominal 100 Hz interval, but process noise is scaled by elapsed time. Splitting a 10 ms interval around a camera-time update no longer injects the full process covariance twice, and repeated prediction at the same timestamp adds no noise.
 
 ## Diagnostic run
 
@@ -28,8 +31,13 @@ Check transport rates separately:
 ```bash
 ros2 topic hz /swift/imu
 ros2 topic hz /swift/camera/image_raw
+ros2 topic hz /ov_msckf/odomimu
 ros2 topic echo /ov_msckf/odomimu --once
 ```
+
+During the diagnostic, `OpenVINS/drained_odom_callbacks` should normally remain small (about 0-3 callbacks per 100 Hz control cycle after startup) and `OpenVINS/age_s` should stay bounded rather than growing monotonically. A persistent drain count at the configured maximum indicates the ROS consumer is not keeping up.
+
+The detector/fusion path uses VIO/map association by default. Set `env.swift_use_oracle_gate_index=True` only for a controlled ablation that intentionally supplies task-level gate identity.
 
 The diagnostic environment is not a PPO training task. If Isaac resets/teleports the vehicle, restart `ov_msckf`; the environment exposes `OpenVINS/restart_required` in logs.
 
