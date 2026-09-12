@@ -184,13 +184,19 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         if self.swift_fusion is not None:
             observation = self._latest_gate_observation
             gate_index = self._latest_gate_index
-            self._latest_gate_observation = None
-            self._latest_gate_index = None
-            self.swift_last_fusion_result = self.swift_fusion.step(
-                world,
-                gate_observation=observation,
-                gate_index=gate_index,
-            )
+            if observation is not None and observation.timestamp_s > world.timestamp_s + 1.0e-6:
+                # OpenVINS may trail the just-rendered camera frame by one ROS
+                # spin. Keep the observation pending until VIO brackets its
+                # timestamp instead of discarding it as a future measurement.
+                self.swift_last_fusion_result = self.swift_fusion.step(world)
+            else:
+                self._latest_gate_observation = None
+                self._latest_gate_index = None
+                self.swift_last_fusion_result = self.swift_fusion.step(
+                    world,
+                    gate_observation=observation,
+                    gate_index=gate_index,
+                )
             self.swift_fused_estimate = self.swift_last_fusion_result.fused_state
 
     def _update_openvins_log(self) -> None:
