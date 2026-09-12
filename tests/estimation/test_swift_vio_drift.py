@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from estimation.swift_vio_drift import VioDriftKalmanFilter, VioWorldEstimate
 
@@ -97,3 +98,41 @@ def test_joseph_update_keeps_covariance_symmetric_positive_semidefinite():
     )
     np.testing.assert_allclose(filt.P, filt.P.T, atol=1e-12)
     assert np.linalg.eigvalsh(filt.P).min() >= -1e-12
+
+
+def test_same_timestamp_prediction_does_not_add_process_noise():
+    filt = VioDriftKalmanFilter()
+    filt.reset(1.0)
+
+    filt.predict(1.0)
+    np.testing.assert_allclose(filt.P, np.zeros((6, 6)), atol=0.0)
+
+
+def test_nominal_100hz_step_matches_paper_process_covariance():
+    filt = VioDriftKalmanFilter(sigma_pos=0.05, sigma_vel=0.1, nominal_rate_hz=100.0)
+    filt.reset(0.0)
+
+    filt.predict(0.01)
+
+    np.testing.assert_allclose(np.diag(filt.P)[:3], np.full(3, 0.05), atol=1e-12)
+    np.testing.assert_allclose(np.diag(filt.P)[3:], np.full(3, 0.1), atol=1e-12)
+
+
+def test_split_timestamp_alignment_does_not_double_process_noise():
+    single = VioDriftKalmanFilter(sigma_pos=0.05, sigma_vel=0.1, nominal_rate_hz=100.0)
+    single.reset(0.0)
+    single.predict(0.01)
+
+    split = VioDriftKalmanFilter(sigma_pos=0.05, sigma_vel=0.1, nominal_rate_hz=100.0)
+    split.reset(0.0)
+    split.predict(0.005)
+    split.predict(0.01)
+
+    # Splitting a 10 ms interval around a camera update should contribute about
+    # one nominal step of process uncertainty, not two full Q additions.
+    assert np.trace(split.P) == pytest.approx(np.trace(single.P), rel=1.0e-3)
+
+
+def test_invalid_nominal_rate_is_rejected():
+    with pytest.raises(ValueError, match="nominal_rate_hz"):
+        VioDriftKalmanFilter(nominal_rate_hz=0.0)
