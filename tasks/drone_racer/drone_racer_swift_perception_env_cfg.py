@@ -13,6 +13,7 @@ from perception.stage2_calibration import (
     CAMERA_OFFSET_POS_B,
     CAMERA_OFFSET_ROT_WXYZ,
     OPENVINS_CAMERA_RESOLUTION,
+    load_stage2_gate_geometry,
 )
 
 from . import mdp
@@ -63,9 +64,17 @@ class DroneRacerSwiftPerceptionEnvCfg(DroneRacerEnvCfg):
     # validation. Supplying a checkpoint enables detector->IPPE->drift fusion,
     # but this diagnostic path is not authorized for PPO training yet.
     swift_detector_checkpoint: str | None = None
+    # Optional compact model used only as a learned visibility guard. The
+    # seed-2 validation calibration selected 0.75 (0.89% partial false accepts,
+    # 97.8% complete-sample recall); the R-CNN still owns corner coordinates.
+    swift_visibility_checkpoint: str | None = None
     swift_detector_device: str = "cuda"
     swift_detection_threshold: float = 0.5
     swift_keypoint_confidence_threshold: float = 0.5
+    swift_visibility_threshold: float = 0.75
+    # Robust pixel-noise calibration on the seed-2 validation corpus after
+    # hybrid visibility gating (see artifacts/swift1_detector_calibration).
+    swift_corner_sigma_px: float = 0.8472250465393066
 
     # False is the sensor-faithful default: an unlabeled detected gate is
     # associated against the known track using the timestamp-aligned VIO pose.
@@ -81,6 +90,23 @@ class DroneRacerSwiftPerceptionEnvCfg(DroneRacerEnvCfg):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        # Deterministic, level pose four metres before gate 0. Three metres is
+        # close enough for the outer right frame to be cropped at 256x256,
+        # which correctly fails the calibrated all-corners-visible guard.
+        # Gate actor origins are at floor level, so derive the camera-visible
+        # opening center from the authoritative geometry instead of using
+        # actor z.
+        # The base racing command randomizes both the previous gate and
+        # attitude during reset, which is unsuitable for OpenVINS' stationary
+        # initialization window.
+        gate_opening_center_g = load_stage2_gate_geometry().center_g
+        self.scene.robot.init_state.pos = (
+            -4.0,
+            0.0,
+            1.0 + float(gate_opening_center_g[2]),
+        )
+        self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
+        self.commands.target.randomise_start = None
         self.scene.tiled_camera = swift_openvins_camera_cfg()
         self.scene.imu = ImuCfg(
             prim_path="{ENV_REGEX_NS}/Robot/body",

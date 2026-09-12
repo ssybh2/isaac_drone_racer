@@ -22,6 +22,7 @@ def test_stationary_diagnostic_can_use_static_initializer_without_waiting_for_je
     # while preventing zero-velocity updates from remaining active in flight.
     assert _scalar(text, "try_zupt") == "true"
     assert _scalar(text, "zupt_only_at_beginning") == "true"
+    assert float(_scalar(text, "init_max_disparity")) == 15.0
 
 
 def test_external_30hz_camera_is_not_throttled_again_inside_openvins():

@@ -16,6 +16,10 @@ This patch closes the estimator/runtime issues found during the `swift1` review.
 10. **Camera calibration drift guard** — the validated 256x256 pinhole contract (`fx=fy=293.19970703125`, `cx=cy=128`) is centralized in `perception/stage2_calibration.py`. The OpenVINS diagnostic checks Isaac's runtime resolution and intrinsic matrix before publishing the first frame and fails closed on mismatch. Regression tests also check that `kalibr_imucam_chain.yaml` stays synchronized with both the intrinsics and `T_cam_imu = inverse(T_bc)` convention.
 11. **Rejected-frame corpus** — the optional detector/fusion runtime can persist every consumed rejected observation as the matching RGB PNG plus JSON containing the corner coordinates, visibility/confidence, rejection reason, NIS/Mahalanobis value, associated gate index, and nominal reprojection RMSE. This provides the data needed to tune visibility, IPPE and innovation thresholds instead of guessing from aggregate metrics.
 12. **Stationary OpenVINS startup** — the diagnostic sends a stationary hover command. Upstream OpenVINS sets `wait_for_jerk=true` when no ZUPT updater exists, which can leave a genuinely stationary simulation waiting indefinitely for an acceleration jerk. The simulator config now enables ZUPT only during the beginning/static initialization phase (`try_zupt=true`, `zupt_only_at_beginning=true`), allowing static initialization and disabling zero-velocity updates after motion begins.
+13. **Calibrated learned visibility guard** — validation showed that Keypoint R-CNN heatmap confidence alone cannot reject partially visible gates safely (56.9% partial false accepts at the safest tested threshold). The compact detector's dedicated visibility head now guards the R-CNN coordinates. On the held-out seed-2 validation split, threshold `0.75` gives 0.89% partial false accepts and 97.8% complete-sample recall. The same accepted set gives a robust ordinary corner noise estimate of `0.8472 px`, which is now used by the 20-sample IPPE covariance propagation path.
+14. **Measured static-initialization tolerance** — a deterministic attitude/position hold keeps the simulated vehicle within 1.6 cm over three seconds, while OpenVINS reports 8–13 px aggregate KLT disparity from the rendered scene and small attitude corrections. The startup-only `init_max_disparity` is therefore calibrated to `15 px`; the static initializer still requires low IMU variance, and beginning-only ZUPT keeps its stricter post-initialization disparity gate.
+15. **Fully-visible gate diagnostic start** — gate actor origins are at floor level, not at the opening center. The deterministic diagnostic pose now derives its height from the authoritative calibrated gate geometry (`center_g.z=1.0668 m`) plus gate 0's world z. It also starts 4 m before the gate because the outer frame is cropped at 3 m in the 256x256 image, which correctly causes the calibrated all-corners-visible guard to reject the observation.
+16. **Delayed-camera FIFO** — the measured OpenVINS output latency is about 0.10 s, longer than the 30 Hz camera interval. Camera observations now wait in a two-second timestamp-ordered FIFO instead of overwriting one pending slot. Frames are fused only after VIO brackets their source time; frames older than the first aligned VIO sample are discarded because causal interpolation is impossible.
 
 ## Diagnostic run
 
@@ -28,8 +32,10 @@ python3 scripts/estimation/run_openvins_diagnostic.py --headless --steps 5000
 # retain rejected frames for inspection/tuning.
 python3 scripts/estimation/run_openvins_diagnostic.py --headless --steps 5000 \
   --detector_checkpoint artifacts/stage2_next_steps_20260911/checkpoints/torchvision_keypointrcnn_best.pt \
+  --visibility_checkpoint artifacts/stage2_next_steps_20260911/checkpoints/gate_keypoint_net_best.pt \
   --rejection_dump_dir outputs/swift_rejections \
-  --rejection_dump_limit 200
+  --rejection_dump_limit 200 \
+  --output outputs/swift_openvins_diagnostic.json
 
 # Controlled association ablation only; normal operation should omit this.
 python3 scripts/estimation/run_openvins_diagnostic.py --headless --steps 5000 \
@@ -51,6 +57,24 @@ During the diagnostic, `OpenVINS/drained_odom_callbacks` should normally remain 
 The detector/fusion path uses VIO/map association by default. Set `--oracle_gate_index` only for a controlled ablation that intentionally supplies task-level gate identity. When `--rejection_dump_dir` is enabled, rejected images and JSON metadata are written as paired files and the runtime exposes `SwiftFusion/rejection_dump_count`.
 
 The diagnostic environment is not a PPO training task. If Isaac resets/teleports the vehicle, restart `ov_msckf`; the environment exposes `OpenVINS/restart_required` in logs.
+
+## Validated local result
+
+The 2026-09-12 RTX 4090 run in
+`artifacts/swift1_openvins_diagnostic/hybrid_1000_steps.json` completed all
+1,000 control steps and initialized OpenVINS at step 385. Of 181 processed
+camera observations, 51 complete observations entered the Kalman update and
+all 130 partial observations failed closed before IPPE. Fused translation RMSE
+was `1.036 m`, versus `1.555 m` for raw VIO. The fused second-difference median
+was `0.374 m`, versus `0.880 m` for raw mapped gate poses; far-gate covariance
+trace was also larger than near-gate covariance trace. The maximum fused/VIO
+orientation difference was exactly zero, confirming that gate pose never
+replaced VIO attitude.
+
+The absolute error in this stationary stress case remains dominated by
+OpenVINS translation drift after its beginning-only ZUPT phase. This run is an
+estimator/perception acceptance diagnostic, not a claim of closed-loop racing
+performance and not authorization to start PPO training.
 
 ## Regression tests
 

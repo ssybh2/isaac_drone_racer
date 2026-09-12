@@ -10,6 +10,7 @@ from .dataset import Stage2DatasetWriter
 from .dataset_collector import IsaacStage2DatasetCollector
 from .gate_geometry import GateGeometry
 from .keypoint_detector import GateKeypointNet, Stage2KeypointDataset, TorchGateCornerDetector
+from .hybrid_keypoint_detector import VisibilityGuardedGateCornerDetector
 from .planar_pnp import OpenCvPlanarPnP, PnPBackend, PnPResult
 from .pose_recovery import GatePoseRecovery, GatePoseSolution
 from .rigid_transform import RigidTransform
@@ -50,6 +51,7 @@ __all__ = [
     "Stage2DatasetWriter",
     "Stage2KeypointDataset",
     "TorchGateCornerDetector",
+    "VisibilityGuardedGateCornerDetector",
     "TorchvisionGateCornerDetector",
     "TorchvisionStage2KeypointDataset",
     "TrackLayout",

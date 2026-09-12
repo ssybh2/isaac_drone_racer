@@ -21,6 +21,7 @@ from estimation.openvins_bridge import (
     OpenVinsSensorRateGate,
 )
 from estimation.swift_vio_drift import VioWorldEstimate
+from estimation.timestamped_gate_queue import PendingGateFrame, TimestampedGateFrameQueue
 from estimation.vio_time_buffer import VioWorldEstimateBuffer
 
 from .drone_racer_swift_perception_env_cfg import DroneRacerSwiftPerceptionEnvCfg
@@ -56,9 +57,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         self.swift_detector = None
         self.swift_fused_estimate = None
         self.swift_last_fusion_result = None
-        self._latest_gate_observation = None
-        self._latest_gate_index: int | None = None
-        self._latest_gate_rgb: np.ndarray | None = None
+        self._pending_gate_frames = TimestampedGateFrameQueue(max_age_s=2.0)
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         if self.num_envs != 1:
             raise ValueError("SwiftOpenVinsDiagnosticEnv requires exactly one Isaac environment")
@@ -73,7 +72,10 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         from estimation.swift_fusion import SwiftPerceptionFusion
         from perception.camera_model import CameraCalibration
         from perception.stage2_calibration import load_stage2_gate_geometry, stage2_camera_to_body
-        from perception.swift_gate_measurement import GatePoseMeasurementBuilder
+        from perception.swift_gate_measurement import (
+            CornerPerturbationConfig,
+            GatePoseMeasurementBuilder,
+        )
         from perception.swift_isaac_adapter import track_layout_from_isaac
         from perception.torchvision_keypoint_detector import TorchvisionGateCornerDetector
 
@@ -96,13 +98,42 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
             calibration,
             stage2_camera_to_body(),
             track_layout_from_isaac(self, env_id=0),
+            perturbation=CornerPerturbationConfig(
+                num_samples=20,
+                corner_sigma_px=self.cfg.swift_corner_sigma_px,
+            ),
         )
-        self.swift_detector = TorchvisionGateCornerDetector(
+        coordinate_detector = TorchvisionGateCornerDetector(
             checkpoint_path,
             device=self.cfg.swift_detector_device,
             detection_threshold=self.cfg.swift_detection_threshold,
-            keypoint_confidence_threshold=self.cfg.swift_keypoint_confidence_threshold,
+            keypoint_confidence_threshold=(
+                0.0
+                if self.cfg.swift_visibility_checkpoint is not None
+                else self.cfg.swift_keypoint_confidence_threshold
+            ),
         )
+        if self.cfg.swift_visibility_checkpoint is None:
+            self.swift_detector = coordinate_detector
+        else:
+            from perception.hybrid_keypoint_detector import VisibilityGuardedGateCornerDetector
+            from perception.keypoint_detector import TorchGateCornerDetector
+
+            visibility_path = Path(self.cfg.swift_visibility_checkpoint).expanduser().resolve()
+            if not visibility_path.exists():
+                raise FileNotFoundError(
+                    f"Swift visibility checkpoint not found: {visibility_path}"
+                )
+            visibility_detector = TorchGateCornerDetector(
+                visibility_path,
+                device=self.cfg.swift_detector_device,
+                visibility_threshold=self.cfg.swift_visibility_threshold,
+            )
+            self.swift_detector = VisibilityGuardedGateCornerDetector(
+                coordinate_detector,
+                visibility_detector,
+                visibility_threshold=self.cfg.swift_visibility_threshold,
+            )
         self.swift_fusion = SwiftPerceptionFusion(builder)
 
     def _timestamp_s(self) -> float:
@@ -184,21 +215,23 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         if self.swift_detector is None and self.cfg.swift_detector_checkpoint is not None:
             self._initialize_optional_perception_fusion()
         if self.swift_detector is not None:
-            self._latest_gate_observation = self.swift_detector.detect(
+            observation = self.swift_detector.detect(
                 rgb, timestamp_s=timestamp_s
             )
-            self._latest_gate_rgb = rgb.copy()
             if self.cfg.swift_use_oracle_gate_index:
                 # Controlled ablation only. Normal estimator operation must not
                 # obtain gate identity from the task command manager.
                 from perception.swift_isaac_adapter import active_gate_index_from_isaac
 
-                self._latest_gate_index = active_gate_index_from_isaac(self, env_id=0)
+                gate_index = active_gate_index_from_isaac(self, env_id=0)
             else:
                 # Leave the detection unlabeled. GatePoseMeasurementBuilder then
                 # associates it against the known track using VIO at this exact
                 # camera timestamp.
-                self._latest_gate_index = None
+                gate_index = None
+            self._pending_gate_frames.append(
+                PendingGateFrame(observation, gate_index, rgb.copy())
+            )
 
     def _maybe_dump_rejection(self, observation, rgb, result) -> None:
         """Persist a rejected detector/IPPE/fusion frame for threshold tuning."""
@@ -269,7 +302,8 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         ):
             return
 
-        if self.openvins_alignment is None:
+        alignment_created = self.openvins_alignment is None
+        if alignment_created:
             try:
                 reference = self._alignment_truth_buffer.interpolate(sample.timestamp_s)
             except ValueError:
@@ -289,27 +323,23 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         self._last_openvins_sample_timestamp_s = sample.timestamp_s
 
         if self.swift_fusion is not None:
-            observation = self._latest_gate_observation
-            gate_index = self._latest_gate_index
-            gate_rgb = self._latest_gate_rgb
-            if observation is not None and observation.timestamp_s > world.timestamp_s + 1.0e-6:
-                # OpenVINS may trail the just-rendered camera frame by one ROS
-                # spin. Keep the observation and matching RGB pending until VIO
-                # brackets its timestamp instead of discarding it as a future
-                # measurement.
+            if alignment_created:
+                # With only one aligned VIO sample, earlier camera frames can
+                # never be interpolated. Drop them once instead of feeding a
+                # burst of guaranteed out-of-history rejections.
+                self._pending_gate_frames.discard_before(world.timestamp_s)
+            pending = self._pending_gate_frames.pop_ready(world.timestamp_s + 1.0e-6)
+            if pending is None:
                 self.swift_last_fusion_result = self.swift_fusion.step(world)
             else:
-                self._latest_gate_observation = None
-                self._latest_gate_index = None
-                self._latest_gate_rgb = None
                 self.swift_last_fusion_result = self.swift_fusion.step(
                     world,
-                    gate_observation=observation,
-                    gate_index=gate_index,
+                    gate_observation=pending.observation,
+                    gate_index=pending.gate_index,
                 )
                 self._maybe_dump_rejection(
-                    observation,
-                    gate_rgb,
+                    pending.observation,
+                    pending.rgb,
                     self.swift_last_fusion_result,
                 )
             self.swift_fused_estimate = self.swift_last_fusion_result.fused_state
@@ -323,6 +353,10 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         )
         log["SwiftFusion/oracle_gate_identity"] = float(self.cfg.swift_use_oracle_gate_index)
         log["SwiftFusion/rejection_dump_count"] = float(self._rejection_dump_count)
+        log["SwiftFusion/pending_gate_frames"] = float(len(self._pending_gate_frames))
+        log["SwiftFusion/dropped_gate_frames"] = float(
+            self._pending_gate_frames.dropped_count
+        )
         if self.openvins_vio_estimate is None:
             log["OpenVINS/age_s"] = float("nan")
         else:
@@ -391,9 +425,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
                 self.swift_fusion.reset()
             self.swift_fused_estimate = None
             self.swift_last_fusion_result = None
-            self._latest_gate_observation = None
-            self._latest_gate_index = None
-            self._latest_gate_rgb = None
+            self._pending_gate_frames.clear()
             self._openvins_rate_gate.reset()
             self._last_openvins_sample_timestamp_s = None
             self._record_alignment_truth()

@@ -8,6 +8,7 @@ from estimation.openvins_bridge import (
     OpenVinsOdomSample,
     OpenVinsRos2Bridge,
     OpenVinsSensorRateGate,
+    _restore_pythonpath_from_environment,
 )
 
 
@@ -77,6 +78,21 @@ def test_rate_gate_rejects_backward_timestamps_per_stream():
     assert gate.camera_due(0.2)
     with pytest.raises(ValueError, match="camera timestamps must be monotonic"):
         gate.camera_due(0.19)
+
+
+def test_ros_pythonpath_can_be_restored_after_embedded_runtime_rewrites_sys_path(
+    monkeypatch, tmp_path
+):
+    ros_site = tmp_path / "ros_site_packages"
+    ros_site.mkdir()
+    original_sys_path = list(__import__("sys").path)
+    monkeypatch.setenv("PYTHONPATH", str(ros_site))
+    monkeypatch.setattr(__import__("sys"), "path", list(original_sys_path))
+
+    added = _restore_pythonpath_from_environment()
+
+    assert added == (str(ros_site),)
+    assert __import__("sys").path[0] == str(ros_site)
 
 
 class _FakeRclpyQueue:

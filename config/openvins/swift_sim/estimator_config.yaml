@@ -37,7 +37,12 @@ zupt_only_at_beginning: true
 
 init_window_time: 2.0
 init_imu_thresh: 0.30
-init_max_disparity: 2.0
+# The deterministic Isaac hover stays within 1.6 cm over three seconds, while
+# KLT's aggregate disparity is 8-13 px due to the rendered scene and small
+# attitude corrections. This startup-only threshold is therefore calibrated
+# above that measured range; the static initializer still requires low IMU
+# variance before it can accept initialization.
+init_max_disparity: 15.0
 init_max_features: 50
 init_dyn_use: true
 init_dyn_mle_opt_calib: false

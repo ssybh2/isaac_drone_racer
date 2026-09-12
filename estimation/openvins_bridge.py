@@ -18,11 +18,35 @@ alignment. This detail is easy to miss and is covered by regression tests.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+from pathlib import Path
+import sys
 from threading import Lock
 
 import numpy as np
 
 from .swift_vio_drift import VioWorldEstimate
+
+
+def _restore_pythonpath_from_environment() -> tuple[str, ...]:
+    """Restore ROS paths removed from ``sys.path`` by embedded Isaac Kit.
+
+    Isaac Sim may rebuild ``sys.path`` while starting its embedded Kit runtime,
+    even though the shell-sourced ROS ``PYTHONPATH`` remains in the process
+    environment. Re-adding existing entries here keeps ROS optional and avoids
+    hard-coding a distro or installation prefix.
+    """
+    candidates = [
+        value
+        for value in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+        if value and Path(value).is_dir()
+    ]
+    added = []
+    for value in reversed(candidates):
+        if value not in sys.path:
+            sys.path.insert(0, value)
+            added.append(value)
+    return tuple(reversed(added))
 
 
 def _normalize_quaternion_wxyz(q) -> np.ndarray:
@@ -259,6 +283,7 @@ class OpenVinsRos2Bridge:
         camera_frame_id: str = "cam0",
         imu_frame_id: str = "imu",
     ) -> None:
+        _restore_pythonpath_from_environment()
         try:
             import rclpy
             from nav_msgs.msg import Odometry
