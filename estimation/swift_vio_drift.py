@@ -4,6 +4,12 @@ VIO supplies the high-rate pose. Mapped gate observations estimate only
 translation/velocity drift; VIO attitude is retained. Gate corrections are
 protected by a per-measurement Mahalanobis gate and the covariance update uses
 the Joseph form for numerical robustness.
+
+Swift runs the VIO/Kalman state at 100 Hz and reports per-step process-noise
+terms ``sigma_pos=0.05`` and ``sigma_vel=0.1``. This implementation preserves
+those values for a 10 ms prediction, but scales process noise with elapsed time
+so timestamp-aligned camera updates can split a control interval without
+injecting the full process covariance twice.
 """
 
 from __future__ import annotations
@@ -82,6 +88,11 @@ class VioDriftKalmanFilter:
     Mahalanobis threshold for each 3-D gate-position measurement. The default
     16.266 corresponds approximately to a 99.9% chi-square threshold for 3 DoF.
     Set it to ``None`` only for controlled diagnostics.
+
+    ``sigma_pos`` and ``sigma_vel`` are interpreted as the paper's process
+    covariance added over one nominal 100 Hz Kalman interval. For asynchronous
+    timestamp alignment they are scaled linearly by elapsed time relative to
+    ``nominal_rate_hz``.
     """
 
     def __init__(
@@ -90,16 +101,21 @@ class VioDriftKalmanFilter:
         sigma_pos: float = 0.05,
         sigma_vel: float = 0.1,
         innovation_gate_chi2: float | None = 16.26623619623813,
+        nominal_rate_hz: float = 100.0,
     ) -> None:
         if sigma_pos < 0.0 or sigma_vel < 0.0:
             raise ValueError("process-noise terms must be non-negative")
         if innovation_gate_chi2 is not None and innovation_gate_chi2 <= 0.0:
             raise ValueError("innovation_gate_chi2 must be positive or None")
+        if nominal_rate_hz <= 0.0 or not np.isfinite(nominal_rate_hz):
+            raise ValueError("nominal_rate_hz must be positive and finite")
         self.sigma_pos = float(sigma_pos)
         self.sigma_vel = float(sigma_vel)
         self.innovation_gate_chi2 = (
             None if innovation_gate_chi2 is None else float(innovation_gate_chi2)
         )
+        self.nominal_rate_hz = float(nominal_rate_hz)
+        self.nominal_dt_s = 1.0 / self.nominal_rate_hz
         self.x = np.zeros(6, dtype=np.float64)
         self.P = np.zeros((6, 6), dtype=np.float64)
         self.last_timestamp_s: float | None = None
@@ -122,10 +138,16 @@ class VioDriftKalmanFilter:
         if dt < -1.0e-9:
             raise ValueError("VIO drift filter timestamps must be monotonic")
         dt = max(0.0, dt)
+        if dt <= 1.0e-12:
+            # Repeated updates at the same sensor timestamp must not create
+            # process uncertainty out of thin air.
+            self.last_timestamp_s = timestamp_s
+            return
 
         I3 = np.eye(3, dtype=np.float64)
         F = np.block([[I3, dt * I3], [np.zeros((3, 3)), I3]])
-        Q = np.block(
+        process_scale = dt / self.nominal_dt_s
+        Q = process_scale * np.block(
             [
                 [self.sigma_pos * I3, np.zeros((3, 3))],
                 [np.zeros((3, 3)), self.sigma_vel * I3],
