@@ -44,6 +44,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         self._alignment_truth_buffer = VioWorldEstimateBuffer(max_age_s=5.0, max_samples=4096)
         self.openvins_vio_buffer = VioWorldEstimateBuffer(max_age_s=2.0, max_samples=4096)
         self._last_openvins_sample_timestamp_s: float | None = None
+        self._camera_contract_validated = False
         self.swift_fusion = None
         self.swift_detector = None
         self.swift_fused_estimate = None
@@ -116,6 +117,36 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         if self.openvins_alignment is None:
             self._alignment_truth_buffer.push(self._truth_vio_state())
 
+    def _validate_camera_contract(self) -> None:
+        """Verify runtime Isaac intrinsics match the pinned OpenVINS YAML contract."""
+        if self._camera_contract_validated:
+            return
+
+        from perception.stage2_calibration import (
+            OPENVINS_CAMERA_RESOLUTION,
+            openvins_camera_matrix,
+        )
+
+        camera = self.scene["tiled_camera"]
+        image_height, image_width = (int(v) for v in camera.data.image_shape)
+        expected_width, expected_height = OPENVINS_CAMERA_RESOLUTION
+        if (image_width, image_height) != (expected_width, expected_height):
+            raise RuntimeError(
+                "Isaac/OpenVINS camera resolution mismatch: "
+                f"runtime={(image_width, image_height)}, "
+                f"expected={(expected_width, expected_height)}"
+            )
+
+        runtime_K = _to_numpy(camera.data.intrinsic_matrices[0]).astype(np.float64)
+        expected_K = openvins_camera_matrix()
+        if not np.allclose(runtime_K, expected_K, rtol=0.0, atol=1.0e-3):
+            raise RuntimeError(
+                "Isaac/OpenVINS camera intrinsics mismatch. Runtime K is\n"
+                f"{runtime_K}\nwhile config/openvins/swift_sim/kalibr_imucam_chain.yaml "
+                f"expects\n{expected_K}. Regenerate/revalidate calibration before running VIO."
+            )
+        self._camera_contract_validated = True
+
     def _publish_imu_if_due(self) -> None:
         timestamp_s = self._timestamp_s()
         if not self._openvins_rate_gate.imu_due(timestamp_s):
@@ -131,6 +162,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         timestamp_s = self._timestamp_s()
         if not self._openvins_rate_gate.camera_due(timestamp_s):
             return
+        self._validate_camera_contract()
         camera = self.scene["tiled_camera"]
         rgb = _to_numpy(camera.data.output["rgb"][0])[..., :3]
         if rgb.dtype != np.uint8:
@@ -214,6 +246,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
     def _update_openvins_log(self) -> None:
         log = self.extras.setdefault("log", {})
         log["OpenVINS/aligned"] = float(self.openvins_alignment is not None)
+        log["OpenVINS/camera_contract_validated"] = float(self._camera_contract_validated)
         log["OpenVINS/drained_odom_callbacks"] = float(
             0 if self._openvins_bridge is None else self._openvins_bridge.last_drain_count
         )
