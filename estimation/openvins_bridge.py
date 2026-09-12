@@ -1,15 +1,18 @@
 """OpenVINS integration boundary for the Swift-2023 reproduction.
 
-OpenVINS stays an external ROS2 process.  This module provides:
+OpenVINS stays an external ROS2 process. This module provides:
 - a transport-neutral odometry sample contract;
 - one-time alignment from OpenVINS' local/global frame V into the known track
   world frame W;
 - conversion to the repository's ``VioWorldEstimate`` consumed by the Swift
   VIO-drift Kalman filter;
-- optional ROS2 publishers/subscriber used to bridge Isaac camera/IMU data to
-  OpenVINS without importing ROS2 at module import time.
+- deterministic source-rate gates for simulator -> ROS transport;
+- optional ROS2 publishers/subscriber without importing ROS2 at module import.
 
-No OpenVINS GPL source code is vendored into this repository.
+OpenVINS' ROS2 ``odomimu`` message publishes pose in its global frame but
+``twist.twist.linear`` in the local IMU frame. The conversion below therefore
+rotates the reported velocity by the OpenVINS pose before applying V->W
+alignment. This detail is easy to miss and is covered by regression tests.
 """
 
 from __future__ import annotations
@@ -74,7 +77,13 @@ def _rotmat_to_quat_wxyz(R) -> np.ndarray:
 
 @dataclass(frozen=True)
 class OpenVinsOdomSample:
-    """OpenVINS odometry expressed in its estimator frame V and IMU/body frame I."""
+    """One OpenVINS ``odomimu`` sample.
+
+    ``position_v_i`` and ``orientation_v_i_wxyz`` are the IMU pose in the
+    estimator/global frame V. For compatibility the velocity field keeps its
+    historical name ``linear_velocity_v_i``, but the ROS2 publisher actually
+    places *local-frame* velocity ``v_IinI`` in ``twist.twist.linear``.
+    """
 
     timestamp_s: float
     position_v_i: np.ndarray
@@ -87,20 +96,30 @@ class OpenVinsOdomSample:
         position = np.asarray(self.position_v_i, dtype=np.float64).reshape(3)
         velocity = np.asarray(self.linear_velocity_v_i, dtype=np.float64).reshape(3)
         orientation = _normalize_quaternion_wxyz(self.orientation_v_i_wxyz)
+        timestamp = float(self.timestamp_s)
+        if not np.isfinite(timestamp):
+            raise ValueError("OpenVINS timestamp must be finite")
         if not np.all(np.isfinite(position)) or not np.all(np.isfinite(velocity)):
             raise ValueError("OpenVINS odometry contains non-finite values")
         object.__setattr__(self, "position_v_i", position)
         object.__setattr__(self, "linear_velocity_v_i", velocity)
         object.__setattr__(self, "orientation_v_i_wxyz", orientation)
-        object.__setattr__(self, "timestamp_s", float(self.timestamp_s))
+        object.__setattr__(self, "timestamp_s", timestamp)
         if self.pose_covariance is not None:
-            object.__setattr__(
-                self, "pose_covariance", np.asarray(self.pose_covariance, dtype=np.float64).reshape(6, 6)
-            )
+            covariance = np.asarray(self.pose_covariance, dtype=np.float64).reshape(6, 6)
+            if not np.all(np.isfinite(covariance)):
+                raise ValueError("OpenVINS pose covariance contains non-finite values")
+            object.__setattr__(self, "pose_covariance", covariance)
         if self.twist_covariance is not None:
-            object.__setattr__(
-                self, "twist_covariance", np.asarray(self.twist_covariance, dtype=np.float64).reshape(6, 6)
-            )
+            covariance = np.asarray(self.twist_covariance, dtype=np.float64).reshape(6, 6)
+            if not np.all(np.isfinite(covariance)):
+                raise ValueError("OpenVINS twist covariance contains non-finite values")
+            object.__setattr__(self, "twist_covariance", covariance)
+
+    @property
+    def linear_velocity_i(self) -> np.ndarray:
+        """Local IMU-frame linear velocity from OpenVINS ``odomimu``."""
+        return self.linear_velocity_v_i
 
 
 @dataclass(frozen=True)
@@ -113,6 +132,8 @@ class OpenVinsFrameAlignment:
     def __post_init__(self) -> None:
         R = np.asarray(self.R_wv, dtype=np.float64).reshape(3, 3)
         t = np.asarray(self.t_wv, dtype=np.float64).reshape(3)
+        if not np.all(np.isfinite(R)) or not np.all(np.isfinite(t)):
+            raise ValueError("OpenVINS alignment must be finite")
         if not np.allclose(R.T @ R, np.eye(3), atol=1.0e-6):
             raise ValueError("R_wv must be orthonormal")
         if np.linalg.det(R) < 0.0:
@@ -128,32 +149,45 @@ class OpenVinsFrameAlignment:
         reference_position_w_b,
         reference_orientation_w_b_wxyz,
     ) -> "OpenVinsFrameAlignment":
-        """Align one initialized OpenVINS pose to a known start pose.
+        """Align one initialized OpenVINS pose to a known start/reference pose.
 
         In the current simulator the Isaac IMU is mounted on the body frame, so
-        I == B.  On hardware, include the calibrated IMU/body transform before
-        constructing this alignment if those frames differ.
+        I == B. Hardware must account for a non-identity IMU/body transform
+        before constructing this alignment.
         """
-        R_vb = _quat_wxyz_to_rotmat(sample.orientation_v_i_wxyz)
+        R_vi = _quat_wxyz_to_rotmat(sample.orientation_v_i_wxyz)
         R_wb = _quat_wxyz_to_rotmat(reference_orientation_w_b_wxyz)
-        R_wv = R_wb @ R_vb.T
+        R_wv = R_wb @ R_vi.T
         p_wb = np.asarray(reference_position_w_b, dtype=np.float64).reshape(3)
         t_wv = p_wb - R_wv @ sample.position_v_i
         return cls(R_wv=R_wv, t_wv=t_wv)
 
     def to_world(self, sample: OpenVinsOdomSample) -> VioWorldEstimate:
-        R_vb = _quat_wxyz_to_rotmat(sample.orientation_v_i_wxyz)
-        R_wb = self.R_wv @ R_vb
+        """Map an OpenVINS pose/velocity sample into track world W.
+
+        OpenVINS publishes ``v_IinI`` in the odometry twist. Convert it into V
+        with the published IMU orientation first, then apply V->W alignment.
+        """
+        R_vi = _quat_wxyz_to_rotmat(sample.orientation_v_i_wxyz)
+        R_wb = self.R_wv @ R_vi
+        velocity_v = R_vi @ sample.linear_velocity_i
         return VioWorldEstimate(
             position_w_b=self.R_wv @ sample.position_v_i + self.t_wv,
-            linear_velocity_w_b=self.R_wv @ sample.linear_velocity_v_i,
+            linear_velocity_w_b=self.R_wv @ velocity_v,
             orientation_w_b_wxyz=_rotmat_to_quat_wxyz(R_wb),
             timestamp_s=sample.timestamp_s,
         )
 
 
 class OpenVinsSensorRateGate:
-    """Deterministic source-rate gating for the Swift 200-Hz IMU / 30-Hz camera bridge."""
+    """Phase-preserving source-rate scheduler for Swift's IMU/camera bridge.
+
+    A naive ``now-last >= period`` gate drifts when the source clock cannot hit
+    the requested period exactly (for example a 30 Hz camera sampled from a
+    100 Hz render clock becomes 25 Hz). This scheduler keeps ideal deadlines
+    and emits on the first source tick at or after each deadline, preserving the
+    requested *average* rate without accumulating quantization error.
+    """
 
     def __init__(self, *, imu_hz: float = 200.0, camera_hz: float = 30.0) -> None:
         if imu_hz <= 0.0 or camera_hz <= 0.0:
@@ -163,24 +197,43 @@ class OpenVinsSensorRateGate:
         self.reset()
 
     def reset(self) -> None:
-        self._last_imu_s: float | None = None
-        self._last_camera_s: float | None = None
+        self._next_imu_s: float | None = None
+        self._next_camera_s: float | None = None
+        self._last_imu_timestamp_s: float | None = None
+        self._last_camera_timestamp_s: float | None = None
 
     @staticmethod
-    def _due(timestamp_s: float, last_s: float | None, period_s: float) -> bool:
-        return last_s is None or float(timestamp_s) - last_s >= period_s - 1.0e-9
+    def _check_monotonic(timestamp_s: float, last_s: float | None, stream: str) -> float:
+        timestamp = float(timestamp_s)
+        if not np.isfinite(timestamp):
+            raise ValueError("Sensor timestamp must be finite")
+        if last_s is not None and timestamp < last_s - 1.0e-9:
+            raise ValueError(f"OpenVINS {stream} timestamps must be monotonic")
+        return timestamp
+
+    @staticmethod
+    def _due(timestamp_s: float, next_s: float | None, period_s: float) -> tuple[bool, float]:
+        if next_s is None:
+            return True, timestamp_s + period_s
+        if timestamp_s + 1.0e-9 < next_s:
+            return False, next_s
+        # Keep the ideal phase even if the source tick arrives late or several
+        # deadlines were skipped.
+        lateness_s = max(0.0, timestamp_s - next_s)
+        periods_elapsed = int(np.floor(lateness_s / period_s)) + 1
+        return True, next_s + periods_elapsed * period_s
 
     def imu_due(self, timestamp_s: float) -> bool:
-        if self._due(timestamp_s, self._last_imu_s, self.imu_period_s):
-            self._last_imu_s = float(timestamp_s)
-            return True
-        return False
+        timestamp = self._check_monotonic(timestamp_s, self._last_imu_timestamp_s, "IMU")
+        self._last_imu_timestamp_s = timestamp
+        due, self._next_imu_s = self._due(timestamp, self._next_imu_s, self.imu_period_s)
+        return due
 
     def camera_due(self, timestamp_s: float) -> bool:
-        if self._due(timestamp_s, self._last_camera_s, self.camera_period_s):
-            self._last_camera_s = float(timestamp_s)
-            return True
-        return False
+        timestamp = self._check_monotonic(timestamp_s, self._last_camera_timestamp_s, "camera")
+        self._last_camera_timestamp_s = timestamp
+        due, self._next_camera_s = self._due(timestamp, self._next_camera_s, self.camera_period_s)
+        return due
 
 
 def _ros_stamp(msg, timestamp_s: float) -> None:
@@ -194,12 +247,7 @@ def _ros_stamp(msg, timestamp_s: float) -> None:
 
 
 class OpenVinsRos2Bridge:
-    """Optional ROS2 I/O adapter for an external ``ov_msckf`` process.
-
-    ROS2 imports happen lazily so pure Python estimator tests do not require a
-    ROS installation. Call ``spin_once`` regularly from the single-vehicle
-    diagnostic environment.
-    """
+    """Optional ROS2 I/O adapter for an external ``ov_msckf`` process."""
 
     def __init__(
         self,
@@ -253,6 +301,8 @@ class OpenVinsRos2Bridge:
             timestamp_s=timestamp_s,
             position_v_i=np.array([p.x, p.y, p.z], dtype=np.float64),
             orientation_v_i_wxyz=np.array([q.w, q.x, q.y, q.z], dtype=np.float64),
+            # OpenVINS ROS2Visualizer publishes v_IinI here despite the generic
+            # nav_msgs/Odometry field name.
             linear_velocity_v_i=np.array([v.x, v.y, v.z], dtype=np.float64),
             pose_covariance=np.asarray(msg.pose.covariance, dtype=np.float64).reshape(6, 6),
             twist_covariance=np.asarray(msg.twist.covariance, dtype=np.float64).reshape(6, 6),
@@ -284,6 +334,8 @@ class OpenVinsRos2Bridge:
     ) -> None:
         omega = np.asarray(angular_velocity_b, dtype=np.float64).reshape(3)
         accel = np.asarray(linear_acceleration_b, dtype=np.float64).reshape(3)
+        if not np.all(np.isfinite(omega)) or not np.all(np.isfinite(accel)):
+            raise ValueError("OpenVINS IMU input must be finite")
         msg = self._Imu()
         _ros_stamp(msg, timestamp_s)
         msg.header.frame_id = self.imu_frame_id

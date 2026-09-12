@@ -1,9 +1,4 @@
-"""Single-vehicle Swift perception diagnostic environment.
-
-This config intentionally enables the calibrated pinhole camera and Isaac IMU
-for OpenVINS/perception validation. It is not the large-scale PPO training
-configuration.
-"""
+"""Single-vehicle Swift perception/OpenVINS diagnostic configuration."""
 
 from __future__ import annotations
 
@@ -24,7 +19,6 @@ from .drone_racer_env_cfg import DroneRacerEnvCfg, DroneRacerSceneCfg, RewardsCf
 
 
 def swift_openvins_camera_cfg() -> TiledCameraCfg:
-    """256x256 pinhole camera matching the validated Stage2 calibration."""
     if CAMERA_MODEL != "pinhole":
         raise ValueError(f"Swift/OpenVINS camera requires pinhole calibration, got {CAMERA_MODEL!r}")
     return TiledCameraCfg(
@@ -44,8 +38,6 @@ def swift_openvins_camera_cfg() -> TiledCameraCfg:
 
 @configclass
 class SwiftPerceptionRewardsCfg(RewardsCfg):
-    """Existing task reward with Swift's camera-aware term replacing the legacy look-at term."""
-
     lookat_next = RewTerm(
         func=mdp.swift_perception_awareness,
         weight=0.02,
@@ -60,10 +52,18 @@ class SwiftPerceptionRewardsCfg(RewardsCfg):
 
 @configclass
 class DroneRacerSwiftPerceptionEnvCfg(DroneRacerEnvCfg):
-    """One-env camera+IMU configuration for real OpenVINS fusion diagnostics."""
+    """One-env camera+IMU config for OpenVINS and optional detector/fusion diagnostics."""
 
     scene: DroneRacerSceneCfg = DroneRacerSceneCfg(num_envs=1, env_spacing=0.0)
     rewards: SwiftPerceptionRewardsCfg = SwiftPerceptionRewardsCfg()
+
+    # Optional learned detector. Leave None for pure Isaac<->OpenVINS transport
+    # validation. Supplying a checkpoint enables detector->IPPE->drift fusion,
+    # but this diagnostic path is not authorized for PPO training yet.
+    swift_detector_checkpoint: str | None = None
+    swift_detector_device: str = "cuda"
+    swift_detection_threshold: float = 0.5
+    swift_keypoint_confidence_threshold: float = 0.5
 
     def __post_init__(self) -> None:
         super().__post_init__()

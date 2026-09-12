@@ -6,6 +6,7 @@ pytest.importorskip("cv2")
 from perception.camera_model import CameraCalibration, project_visible_with_calibration
 from perception.corner_detection import CornerObservation
 from perception.gate_geometry import GateGeometry
+from perception.planar_pnp import PnPResult
 from perception.rigid_transform import RigidTransform, translation_error_m
 from perception.stage2_calibration import stage2_camera_to_body
 from perception.swift_gate_measurement import (
@@ -119,3 +120,27 @@ def test_unlabeled_gate_can_be_associated_to_nearest_mapped_pose_from_vio():
     )
 
     assert measurement.gate_index == 1
+
+
+class _HighReprojectionBackend:
+    def solve(self, object_points_g, image_points_uv, K, dist_coeffs=None):
+        return PnPResult(
+            success=True,
+            T_cg=RigidTransform(np.eye(3), np.array([0.0, 0.0, 4.0]), to_frame="C", from_frame="G"),
+            reprojection_rmse_px=20.0,
+            method="test",
+            candidate_count=1,
+        )
+
+
+def test_nominal_reprojection_outlier_is_rejected_before_kalman_update():
+    T_bc, _, T_wg, observation = _truth(4.0)
+    builder = GatePoseMeasurementBuilder(
+        _geometry(),
+        _camera(),
+        T_bc,
+        TrackLayout((T_wg,)),
+        pnp_backend=_HighReprojectionBackend(),
+    )
+    with pytest.raises(RuntimeError, match="reprojection error exceeds configured limit"):
+        builder.build(observation, gate_index=0)

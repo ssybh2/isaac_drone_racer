@@ -63,7 +63,10 @@ grid_x: 5
 grid_y: 5
 min_px_dist: 8
 knn_ratio: 0.70
-track_frequency: 30.0
+# Isaac publishes camera frames at an externally phase-gated 30 Hz average.
+# Keep OpenVINS' internal tracker limit above that rate so 30/40 ms source
+# quantization is not throttled a second time.
+track_frequency: 100.0
 downsample_cameras: false
 num_opencv_threads: 4
 histogram_method: "HISTOGRAM"
