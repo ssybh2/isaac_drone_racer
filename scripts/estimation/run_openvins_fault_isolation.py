@@ -32,6 +32,29 @@ parser.add_argument("--translation_duration_s", type=float, default=10.0)
 parser.add_argument("--lissajous_amplitude_m", type=float, default=0.5)
 parser.add_argument("--lissajous_frequency_hz", type=float, default=0.08)
 parser.add_argument(
+    "--yaw_kp",
+    type=float,
+    default=0.06,
+    help="Yaw-angle hold gain in normalized motor-action units per radian.",
+)
+parser.add_argument(
+    "--yaw_kd",
+    type=float,
+    default=0.03,
+    help="Yaw-rate damping gain in normalized motor-action units per rad/s.",
+)
+parser.add_argument(
+    "--yaw_max_correction",
+    type=float,
+    default=0.08,
+    help="Absolute per-motor yaw correction limit in normalized action units.",
+)
+parser.add_argument(
+    "--disable_yaw_hold",
+    action="store_true",
+    help="Disable the diagnostic yaw hold so the previous uncontrolled behavior can be reproduced.",
+)
+parser.add_argument(
     "--output_dir",
     type=Path,
     default=Path("artifacts/openvins_fault_isolation"),
@@ -68,6 +91,10 @@ def _quat_to_rpy(q) -> np.ndarray:
     pitch = np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0))
     yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
     return np.array([roll, pitch, yaw], dtype=np.float64)
+
+
+def _wrap_angle(angle_rad: float) -> float:
+    return float(np.arctan2(np.sin(angle_rad), np.cos(angle_rad)))
 
 
 def _quat_angle_error(q_a, q_b) -> float:
@@ -121,7 +148,13 @@ def _target_xy(initial_xy: torch.Tensor, t_s: float) -> torch.Tensor:
     return target
 
 
-def _controller_action(raw_env, initial_xy: torch.Tensor, target_height_m: float, t_s: float) -> torch.Tensor:
+def _controller_action(
+    raw_env,
+    initial_xy: torch.Tensor,
+    target_height_m: float,
+    target_yaw_rad: float,
+    t_s: float,
+) -> tuple[torch.Tensor, float, float]:
     robot = raw_env.scene["robot"]
     target_xy = _target_xy(initial_xy, t_s)
     height_error = target_height_m - float(robot.data.root_pos_w[0, 2])
@@ -148,18 +181,42 @@ def _controller_action(raw_env, initial_xy: torch.Tensor, target_height_m: float
             )
         )
     )
+    yaw = float(
+        torch.atan2(
+            2.0 * (quaternion[0] * quaternion[3] + quaternion[1] * quaternion[2]),
+            1.0 - 2.0 * (quaternion[2] ** 2 + quaternion[3] ** 2),
+        )
+    )
     roll_correction = -0.08 * (roll - desired_roll) - 0.015 * float(angular_velocity[0])
     pitch_correction = -0.08 * (pitch - desired_pitch) - 0.015 * float(angular_velocity[1])
-    return torch.tensor(
+
+    yaw_error = _wrap_angle(yaw - target_yaw_rad)
+    if args_cli.disable_yaw_hold:
+        yaw_correction = 0.0
+    else:
+        yaw_correction = -float(args_cli.yaw_kp) * yaw_error - float(args_cli.yaw_kd) * float(angular_velocity[2])
+        yaw_correction = float(
+            np.clip(
+                yaw_correction,
+                -abs(float(args_cli.yaw_max_correction)),
+                abs(float(args_cli.yaw_max_correction)),
+            )
+        )
+
+    # Allocation yaw signs are [+ - + -]. A positive yaw_correction therefore
+    # commands positive body-z torque; the negative feedback above damps yaw
+    # error and yaw rate while leaving collective thrust unchanged to first order.
+    action = torch.tensor(
         [
-            common + roll_correction - pitch_correction,
-            common - roll_correction - pitch_correction,
-            common - roll_correction + pitch_correction,
-            common + roll_correction + pitch_correction,
+            common + roll_correction - pitch_correction + yaw_correction,
+            common - roll_correction - pitch_correction - yaw_correction,
+            common - roll_correction + pitch_correction + yaw_correction,
+            common + roll_correction + pitch_correction - yaw_correction,
         ],
         dtype=torch.float32,
         device=raw_env.device,
     ).clamp(-1.0, 1.0)
+    return action, yaw_error, yaw_correction
 
 
 def _empty_estimate_fields() -> dict:
@@ -195,9 +252,11 @@ def main() -> None:
     robot = raw_env.scene["robot"]
     target_height_m = float(robot.data.root_pos_w[0, 2])
     initial_xy = robot.data.root_pos_w[0, :2].clone()
+    initial_quaternion = np.asarray(robot.data.root_quat_w[0].detach().cpu(), dtype=np.float64)
+    target_yaw_rad = float(_quat_to_rpy(initial_quaternion)[2])
 
     fieldnames = [
-        "step", "t_s", "target_x", "target_y",
+        "step", "t_s", "target_x", "target_y", "target_yaw", "yaw_error", "yaw_correction",
         "truth_px", "truth_py", "truth_pz", "truth_vx", "truth_vy", "truth_vz",
         "truth_qw", "truth_qx", "truth_qy", "truth_qz",
         "truth_roll", "truth_pitch", "truth_yaw",
@@ -219,6 +278,8 @@ def main() -> None:
     imu_gyros: list[np.ndarray] = []
     preinit_imu_accels: list[np.ndarray] = []
     preinit_imu_gyros: list[np.ndarray] = []
+    yaw_errors: list[float] = []
+    yaw_corrections: list[float] = []
     pos_error_norms: list[float] = []
     vel_error_norms: list[float] = []
     orientation_errors: list[float] = []
@@ -235,7 +296,13 @@ def main() -> None:
                 if not simulation_app.is_running():
                     break
                 t_before = float(raw_env._timestamp_s())
-                action = _controller_action(raw_env, initial_xy, target_height_m, t_before)
+                action, control_yaw_error, yaw_correction = _controller_action(
+                    raw_env,
+                    initial_xy,
+                    target_height_m,
+                    target_yaw_rad,
+                    t_before,
+                )
                 _, _, terminated, truncated, _ = env.step(action.unsqueeze(0))
                 completed_steps = step + 1
 
@@ -255,6 +322,8 @@ def main() -> None:
                 truth_angular_velocities.append(truth_w_b)
                 imu_accels.append(imu_acc_b)
                 imu_gyros.append(imu_gyro_b)
+                yaw_errors.append(control_yaw_error)
+                yaw_corrections.append(yaw_correction)
 
                 estimate = raw_env.openvins_vio_estimate
                 if estimate is None:
@@ -266,6 +335,9 @@ def main() -> None:
                     "t_s": t_s,
                     "target_x": float(target_xy[0]),
                     "target_y": float(target_xy[1]),
+                    "target_yaw": target_yaw_rad,
+                    "yaw_error": control_yaw_error,
+                    "yaw_correction": yaw_correction,
                     "truth_px": float(truth.position_w_b[0]),
                     "truth_py": float(truth.position_w_b[1]),
                     "truth_pz": float(truth.position_w_b[2]),
@@ -349,7 +421,9 @@ def main() -> None:
                         print(
                             f"[FaultIsolation] step={step} t={t_s:.2f}s waiting for OpenVINS; "
                             f"|imu_a|={np.linalg.norm(imu_acc_b):.3f} "
-                            f"|imu_w|={np.linalg.norm(imu_gyro_b):.4f}"
+                            f"|imu_w|={np.linalg.norm(imu_gyro_b):.4f} "
+                            f"yaw_err={np.degrees(control_yaw_error):.2f}deg "
+                            f"yaw_u={yaw_correction:.4f}"
                         )
                     else:
                         print(
@@ -357,6 +431,7 @@ def main() -> None:
                             f"pos_err={row['pos_err_norm']:.3f}m "
                             f"vel_err={row['vel_err_norm']:.3f}m/s "
                             f"ori_err={np.degrees(row['orientation_err_rad']):.2f}deg "
+                            f"yaw_err={np.degrees(control_yaw_error):.2f}deg "
                             f"age={row['odom_age_s']:.4f}s"
                         )
 
@@ -378,7 +453,7 @@ def main() -> None:
                 np.max(np.linalg.norm(truth_position_array - initial_position, axis=1))
             )
         report = {
-            "schema": "isaac_drone_racer.openvins_fault_isolation.v1",
+            "schema": "isaac_drone_racer.openvins_fault_isolation.v2",
             "profile": args_cli.profile,
             "python_executable": sys.executable,
             "completed_steps": completed_steps,
@@ -387,6 +462,15 @@ def main() -> None:
                 None if initialized_step is None else initialized_step * float(raw_env.step_dt)
             ),
             "stopped_for_divergence": stopped_for_divergence,
+            "control": {
+                "yaw_hold_enabled": not args_cli.disable_yaw_hold,
+                "target_yaw_rad": target_yaw_rad,
+                "yaw_kp": float(args_cli.yaw_kp),
+                "yaw_kd": float(args_cli.yaw_kd),
+                "yaw_max_correction": float(args_cli.yaw_max_correction),
+                "yaw_error_rad": _scalar_summary([abs(v) for v in yaw_errors]),
+                "yaw_correction": _scalar_summary([abs(v) for v in yaw_corrections]),
+            },
             "truth_motion": {
                 "max_displacement_from_start_m": max_displacement,
                 "velocity_w_mps": _vector_summary(truth_velocities),
