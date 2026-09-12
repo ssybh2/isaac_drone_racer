@@ -31,6 +31,33 @@ CAMERA_TO_BODY_ROTATION = (
     (0.0, -1.0, 0.0),
 )
 
+# The rendered 256x256 Stage2/OpenVINS camera contract validated by the RGB
+# overlay artifact. Keep these values synchronized with
+# config/openvins/swift_sim/kalibr_imucam_chain.yaml. Runtime code verifies the
+# Isaac camera matrix before publishing frames to OpenVINS so a future camera
+# or IsaacLab configuration change fails closed instead of silently corrupting
+# VIO calibration.
+OPENVINS_CAMERA_RESOLUTION = (256, 256)  # width, height
+OPENVINS_CAMERA_INTRINSICS = (
+    293.19970703125,  # fx
+    293.19970703125,  # fy
+    128.0,  # cx
+    128.0,  # cy
+)
+
+
+def openvins_camera_matrix() -> np.ndarray:
+    """Return the validated 256x256 OpenVINS pinhole intrinsic matrix."""
+    fx, fy, cx, cy = OPENVINS_CAMERA_INTRINSICS
+    return np.array(
+        [
+            [fx, 0.0, cx],
+            [0.0, fy, cy],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+
 
 def stage2_camera_to_body() -> RigidTransform:
     """Return the single configured Stage2 transform ``T_bc``."""
