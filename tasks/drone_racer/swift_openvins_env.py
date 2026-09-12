@@ -8,6 +8,9 @@ for downstream Swift fusion diagnostics.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
@@ -37,6 +40,9 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
     cfg: DroneRacerSwiftPerceptionEnvCfg
 
     def __init__(self, cfg: DroneRacerSwiftPerceptionEnvCfg, render_mode: str | None = None, **kwargs):
+        if cfg.swift_rejection_dump_limit < 0:
+            raise ValueError("swift_rejection_dump_limit must be non-negative")
+
         self.openvins_vio_estimate: VioWorldEstimate | None = None
         self.openvins_alignment: OpenVinsFrameAlignment | None = None
         self._openvins_bridge: OpenVinsRos2Bridge | None = None
@@ -45,12 +51,14 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         self.openvins_vio_buffer = VioWorldEstimateBuffer(max_age_s=2.0, max_samples=4096)
         self._last_openvins_sample_timestamp_s: float | None = None
         self._camera_contract_validated = False
+        self._rejection_dump_count = 0
         self.swift_fusion = None
         self.swift_detector = None
         self.swift_fused_estimate = None
         self.swift_last_fusion_result = None
         self._latest_gate_observation = None
         self._latest_gate_index: int | None = None
+        self._latest_gate_rgb: np.ndarray | None = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         if self.num_envs != 1:
             raise ValueError("SwiftOpenVinsDiagnosticEnv requires exactly one Isaac environment")
@@ -61,8 +69,6 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         checkpoint = self.cfg.swift_detector_checkpoint
         if checkpoint is None:
             return
-
-        from pathlib import Path
 
         from estimation.swift_fusion import SwiftPerceptionFusion
         from perception.camera_model import CameraCalibration
@@ -173,6 +179,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
                 rgb = np.clip(rgb * scale, 0.0, 255.0).astype(np.uint8)
             else:
                 rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+        rgb = np.ascontiguousarray(rgb)
         self._openvins_bridge.publish_rgb(rgb, timestamp_s=timestamp_s)
         if self.swift_detector is None and self.cfg.swift_detector_checkpoint is not None:
             self._initialize_optional_perception_fusion()
@@ -180,6 +187,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
             self._latest_gate_observation = self.swift_detector.detect(
                 rgb, timestamp_s=timestamp_s
             )
+            self._latest_gate_rgb = rgb.copy()
             if self.cfg.swift_use_oracle_gate_index:
                 # Controlled ablation only. Normal estimator operation must not
                 # obtain gate identity from the task command manager.
@@ -191,6 +199,61 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
                 # associates it against the known track using VIO at this exact
                 # camera timestamp.
                 self._latest_gate_index = None
+
+    def _maybe_dump_rejection(self, observation, rgb, result) -> None:
+        """Persist a rejected detector/IPPE/fusion frame for threshold tuning."""
+        dump_dir = self.cfg.swift_rejection_dump_dir
+        if (
+            dump_dir is None
+            or observation is None
+            or rgb is None
+            or result.measurement_accepted
+            or self._rejection_dump_count >= self.cfg.swift_rejection_dump_limit
+        ):
+            return
+
+        try:
+            import cv2
+        except ImportError as exc:
+            raise ImportError(
+                "Rejected-frame export requires OpenCV (cv2), which is already required by the Stage2 PnP path."
+            ) from exc
+
+        output_dir = Path(dump_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp_s = float(observation.timestamp_s)
+        time_tag = f"{timestamp_s:.6f}".replace(".", "_")
+        stem = f"reject_{self._rejection_dump_count:05d}_t{time_tag}"
+        image_path = output_dir / f"{stem}.png"
+        metadata_path = output_dir / f"{stem}.json"
+
+        bgr = cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2BGR)
+        if not cv2.imwrite(str(image_path), bgr):
+            raise RuntimeError(f"Unable to write rejected Swift frame: {image_path}")
+
+        measurement = result.gate_measurement
+        payload = {
+            "schema": "isaac_drone_racer.swift_rejected_gate_observation.v1",
+            "timestamp_s": timestamp_s,
+            "source": str(observation.source),
+            "corners_uv": np.asarray(observation.corners_uv, dtype=float).tolist(),
+            "visible": np.asarray(observation.visible, dtype=bool).tolist(),
+            "confidence": np.asarray(observation.confidence, dtype=float).tolist(),
+            "rejection_reason": str(result.rejection_reason),
+            "innovation_mahalanobis2": [
+                float(value) for value in result.innovation_mahalanobis2
+            ],
+            "oracle_gate_identity_enabled": bool(self.cfg.swift_use_oracle_gate_index),
+            "measurement_gate_index": None if measurement is None else int(measurement.gate_index),
+            "nominal_reprojection_rmse_px": (
+                None
+                if measurement is None
+                else float(measurement.nominal_pnp.reprojection_rmse_px)
+            ),
+            "image_file": image_path.name,
+        }
+        metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self._rejection_dump_count += 1
 
     def _consume_openvins(self) -> None:
         # OpenVINS publishes propagated odometry from its 200 Hz IMU callback,
@@ -228,18 +291,26 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         if self.swift_fusion is not None:
             observation = self._latest_gate_observation
             gate_index = self._latest_gate_index
+            gate_rgb = self._latest_gate_rgb
             if observation is not None and observation.timestamp_s > world.timestamp_s + 1.0e-6:
                 # OpenVINS may trail the just-rendered camera frame by one ROS
-                # spin. Keep the observation pending until VIO brackets its
-                # timestamp instead of discarding it as a future measurement.
+                # spin. Keep the observation and matching RGB pending until VIO
+                # brackets its timestamp instead of discarding it as a future
+                # measurement.
                 self.swift_last_fusion_result = self.swift_fusion.step(world)
             else:
                 self._latest_gate_observation = None
                 self._latest_gate_index = None
+                self._latest_gate_rgb = None
                 self.swift_last_fusion_result = self.swift_fusion.step(
                     world,
                     gate_observation=observation,
                     gate_index=gate_index,
+                )
+                self._maybe_dump_rejection(
+                    observation,
+                    gate_rgb,
+                    self.swift_last_fusion_result,
                 )
             self.swift_fused_estimate = self.swift_last_fusion_result.fused_state
 
@@ -251,6 +322,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
             0 if self._openvins_bridge is None else self._openvins_bridge.last_drain_count
         )
         log["SwiftFusion/oracle_gate_identity"] = float(self.cfg.swift_use_oracle_gate_index)
+        log["SwiftFusion/rejection_dump_count"] = float(self._rejection_dump_count)
         if self.openvins_vio_estimate is None:
             log["OpenVINS/age_s"] = float("nan")
         else:
@@ -321,6 +393,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
             self.swift_last_fusion_result = None
             self._latest_gate_observation = None
             self._latest_gate_index = None
+            self._latest_gate_rgb = None
             self._openvins_rate_gate.reset()
             self._last_openvins_sample_timestamp_s = None
             self._record_alignment_truth()
