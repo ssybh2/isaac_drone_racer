@@ -153,7 +153,11 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
             self._latest_gate_index = active_gate_index_from_isaac(self, env_id=0)
 
     def _consume_openvins(self) -> None:
-        sample = self._openvins_bridge.spin_once(timeout_sec=0.0)
+        # OpenVINS publishes propagated odometry from its 200 Hz IMU callback,
+        # while this diagnostic control loop runs at 100 Hz. Drain the ROS
+        # subscription queue and keep the newest state; one spin_once per
+        # control step would otherwise accumulate stale odometry indefinitely.
+        sample = self._openvins_bridge.drain_latest(max_callbacks=32)
         if sample is None:
             return
         if (
@@ -202,6 +206,9 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
     def _update_openvins_log(self) -> None:
         log = self.extras.setdefault("log", {})
         log["OpenVINS/aligned"] = float(self.openvins_alignment is not None)
+        log["OpenVINS/drained_odom_callbacks"] = float(
+            0 if self._openvins_bridge is None else self._openvins_bridge.last_drain_count
+        )
         if self.openvins_vio_estimate is None:
             log["OpenVINS/age_s"] = float("nan")
         else:
