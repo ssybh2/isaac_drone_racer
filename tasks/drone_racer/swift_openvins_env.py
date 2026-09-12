@@ -145,12 +145,20 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         if self.swift_detector is None and self.cfg.swift_detector_checkpoint is not None:
             self._initialize_optional_perception_fusion()
         if self.swift_detector is not None:
-            from perception.swift_isaac_adapter import active_gate_index_from_isaac
-
             self._latest_gate_observation = self.swift_detector.detect(
                 rgb, timestamp_s=timestamp_s
             )
-            self._latest_gate_index = active_gate_index_from_isaac(self, env_id=0)
+            if self.cfg.swift_use_oracle_gate_index:
+                # Controlled ablation only. Normal estimator operation must not
+                # obtain gate identity from the task command manager.
+                from perception.swift_isaac_adapter import active_gate_index_from_isaac
+
+                self._latest_gate_index = active_gate_index_from_isaac(self, env_id=0)
+            else:
+                # Leave the detection unlabeled. GatePoseMeasurementBuilder then
+                # associates it against the known track using VIO at this exact
+                # camera timestamp.
+                self._latest_gate_index = None
 
     def _consume_openvins(self) -> None:
         # OpenVINS publishes propagated odometry from its 200 Hz IMU callback,
@@ -209,6 +217,7 @@ class SwiftOpenVinsDiagnosticEnv(ManagerBasedRLEnv):
         log["OpenVINS/drained_odom_callbacks"] = float(
             0 if self._openvins_bridge is None else self._openvins_bridge.last_drain_count
         )
+        log["SwiftFusion/oracle_gate_identity"] = float(self.cfg.swift_use_oracle_gate_index)
         if self.openvins_vio_estimate is None:
             log["OpenVINS/age_s"] = float("nan")
         else:
