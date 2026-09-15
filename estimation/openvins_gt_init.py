@@ -1,10 +1,11 @@
 """Pure frame contract for diagnostic OpenVINS ground-truth initialization.
 
-Isaac/ROS pose semantics use an active IMU-to-world quaternion ``q_WI``.
-OpenVINS' internal IMU state stores ``q_GtoI`` (global/world to IMU), so the
-orientation is inverted exactly once at this boundary.  This module has no ROS
-or Isaac dependency so the frame convention can be regression-tested in pure
-CI.
+Isaac/ROS pose semantics use an active IMU-to-world quaternion ``q_WI`` in
+scalar-first ``(w, x, y, z)`` order. OpenVINS' internal IMU state stores the
+inverse rotation ``q_GtoI`` using its JPL vector-first ``(x, y, z, w)``
+convention. The orientation is inverted and reordered exactly once at this
+boundary. This module has no ROS or Isaac dependency so the convention can be
+regression-tested in pure CI.
 """
 
 from dataclasses import dataclass
@@ -17,18 +18,18 @@ class OpenVinsGtInitialization:
     """OpenVINS 17-state initialization fields before C++ handoff."""
 
     timestamp_s: float
-    q_g_to_i_wxyz: np.ndarray
+    q_g_to_i_xyzw: np.ndarray
     position_g_i: np.ndarray
     velocity_g_i: np.ndarray
     gyro_bias_i: np.ndarray
     accel_bias_i: np.ndarray
 
     def as_openvins_state(self) -> np.ndarray:
-        """Return ``[time, q_GtoI, p_IinG, v_IinG, bg, ba]``."""
+        """Return ``[time, q_GtoI(xyzw), p_IinG, v_IinG, bg, ba]``."""
         return np.concatenate(
             (
                 np.array([self.timestamp_s], dtype=np.float64),
-                self.q_g_to_i_wxyz,
+                self.q_g_to_i_xyzw,
                 self.position_g_i,
                 self.velocity_g_i,
                 self.gyro_bias_i,
@@ -72,14 +73,16 @@ def build_openvins_gt_initialization(
         raise ValueError("orientation quaternion must be non-zero")
     q_w_i /= norm
 
-    # Inverse of a unit quaternion: q_GtoI = inverse(q_ItoG) = conjugate(q_WI).
-    q_g_to_i = q_w_i.copy()
-    q_g_to_i[1:] *= -1.0
+    # Isaac/ROS semantic rotation is I->G in Hamilton scalar-first order.
+    # OpenVINS stores G->I in JPL vector-first order. Invert the unit
+    # quaternion, then reorder from (w,x,y,z) to OpenVINS (x,y,z,w).
+    w, x, y, z = q_w_i
+    q_g_to_i_xyzw = np.array([-x, -y, -z, w], dtype=np.float64)
 
     zero = np.zeros(3, dtype=np.float64)
     return OpenVinsGtInitialization(
         timestamp_s=timestamp,
-        q_g_to_i_wxyz=q_g_to_i,
+        q_g_to_i_xyzw=q_g_to_i_xyzw,
         position_g_i=_finite_vector(position_w_i, 3, "position"),
         velocity_g_i=_finite_vector(linear_velocity_w_i, 3, "linear velocity"),
         gyro_bias_i=_finite_vector(zero if gyro_bias_i is None else gyro_bias_i, 3, "gyro bias"),
