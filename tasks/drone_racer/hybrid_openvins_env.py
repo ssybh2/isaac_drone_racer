@@ -91,6 +91,8 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             sigma_velocity=self.cfg.learned_motion_sigma_velocity,
             innovation_gate_chi2=self.cfg.learned_motion_innovation_gate_chi2,
             relative_position_only=self.cfg.learned_motion_relative_position_only,
+            raw_vio_jump_isolation=self.cfg.learned_motion_raw_vio_jump_isolation,
+            raw_vio_jump_threshold_m=self.cfg.learned_motion_raw_vio_jump_threshold_m,
         )
 
     def _record_alignment_truth(self) -> None:
@@ -228,10 +230,23 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
         log["LearnedMotion/relative_position_only"] = float(
             self.cfg.learned_motion_relative_position_only
         )
+        log["LearnedMotion/raw_vio_jump_isolation"] = float(
+            self.cfg.learned_motion_raw_vio_jump_isolation
+        )
+        log["LearnedMotion/raw_vio_jump_threshold_m"] = float(
+            self.cfg.learned_motion_raw_vio_jump_threshold_m
+        )
         log["LearnedMotion/oracle_absolute_position_enabled"] = float(
             self.cfg.oracle_absolute_position_enabled
         )
         log["LearnedMotion/oracle_position_updates"] = float(self.oracle_position_update_count)
+        if self.learned_motion_corrector is not None:
+            log["LearnedMotion/raw_vio_jump_count"] = float(
+                self.learned_motion_corrector.raw_vio_jump_count
+            )
+            log["LearnedMotion/raw_vio_jump_max_residual_m"] = float(
+                self.learned_motion_corrector.raw_vio_jump_max_residual_m
+            )
         if self.openvins_raw_vio_estimate is not None and self.openvins_vio_estimate is not None:
             correction = (
                 self.openvins_raw_vio_estimate.position_w_b
@@ -244,6 +259,11 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             log["LearnedMotion/update_accepted"] = float(result.learned_update_accepted)
             log["LearnedMotion/update_rejected"] = float(result.learned_update_rejected)
             log["LearnedMotion/skipped_windows"] = float(result.skipped_windows)
+            log["LearnedMotion/raw_vio_jump_detected"] = float(result.raw_vio_jump_detected)
+            if result.raw_vio_jump_residual_m is not None:
+                log["LearnedMotion/raw_vio_jump_residual_m"] = float(
+                    result.raw_vio_jump_residual_m
+                )
             log["LearnedMotion/oracle_update_applied"] = float(
                 result.absolute_position_update_applied
             )
