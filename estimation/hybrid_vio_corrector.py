@@ -12,6 +12,24 @@ from .swift_vio_drift import VioWorldEstimate
 from .vio_time_buffer import VioWorldEstimateBuffer
 
 
+def body_motion_to_world(vio: VioWorldEstimate, *, gyro_b, thrust_b) -> tuple[np.ndarray, np.ndarray]:
+    """Rotate body-frame gyro/thrust vectors into the world frame of ``vio``."""
+    w, x, y, z = np.asarray(vio.orientation_w_b_wxyz, dtype=np.float64).reshape(4)
+    R_wb = np.array(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ],
+        dtype=np.float64,
+    )
+    gyro = np.asarray(gyro_b, dtype=np.float64).reshape(3)
+    thrust = np.asarray(thrust_b, dtype=np.float64).reshape(3)
+    if not np.all(np.isfinite(gyro)) or not np.all(np.isfinite(thrust)):
+        raise ValueError("body motion vectors must be finite")
+    return R_wb @ gyro, R_wb @ thrust
+
+
 @dataclass(frozen=True)
 class HybridVioCorrectionResult:
     raw: VioWorldEstimate
