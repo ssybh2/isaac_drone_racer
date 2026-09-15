@@ -203,3 +203,27 @@ def test_corrector_can_apply_sparse_absolute_position_anchor_after_relative_upda
     )
     assert anchored.corrected.position_w_b[0] == pytest.approx(1.0, abs=0.12)
     assert anchored.raw is relative.raw
+
+
+def test_raw_vio_jump_isolation_keeps_corrected_position_continuous():
+    predictor = ConstantPredictor([0.0, 0.0, 0.0])
+    corrector = HybridLearnedVioCorrector(
+        predictor,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        raw_vio_jump_isolation=True,
+        raw_vio_jump_threshold_m=0.5,
+    )
+
+    first = corrector.step(_vio(0.0, 0.0, vx=0.0))
+    jumped = corrector.step(_vio(5.0, 0.01, vx=0.0))
+    after = corrector.step(_vio(5.01, 0.02, vx=1.0))
+
+    np.testing.assert_allclose(first.corrected.position_w_b, [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(jumped.raw.position_w_b, [5.0, 0.0, 0.0])
+    assert jumped.raw_vio_jump_detected is True
+    assert jumped.raw_vio_jump_residual_m == pytest.approx(5.0)
+    np.testing.assert_allclose(jumped.raw_vio_jump_compensation_w, [5.0, 0.0, 0.0])
+    np.testing.assert_allclose(jumped.corrected.position_w_b, [0.0, 0.0, 0.0], atol=1e-9)
+    assert after.raw_vio_jump_detected is False
+    assert after.corrected.position_w_b[0] == pytest.approx(0.01, abs=0.006)
