@@ -116,3 +116,36 @@ def test_absolute_position_anchor_corrects_current_drift_without_changing_attitu
     )
     np.testing.assert_allclose(filt.P, filt.P.T, atol=1.0e-12)
     assert np.linalg.eigvalsh(filt.P).min() >= -1.0e-10
+
+
+def test_absolute_position_anchor_preserves_velocity_drift_estimate():
+    filt = LearnedVioDriftFilter(
+        sigma_position=0.05,
+        sigma_velocity=0.1,
+        innovation_gate_chi2=None,
+    )
+    filt.reset(0.0, anchor_vio_position_w=np.zeros(3))
+    filt.step(_vio(0.0, 0.0))
+    raw = _vio(1.5, 0.5, vx=3.0)
+    measurement = LearnedDisplacementMeasurement(
+        displacement_w=np.array([1.0, 0.0, 0.0]),
+        covariance_w=np.eye(3) * 1.0e-4,
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+    )
+    filt.step(raw, measurement=measurement)
+    velocity_before = filt.current_velocity_drift_w
+    assert abs(float(velocity_before[0])) > 1.0e-6
+
+    filt.apply_absolute_position(
+        raw,
+        position_w_b=np.array([-20.0, 0.0, 0.0]),
+        covariance_w=np.eye(3) * 1.0e-6,
+    )
+
+    np.testing.assert_allclose(
+        filt.current_velocity_drift_w,
+        velocity_before,
+        rtol=0.0,
+        atol=1.0e-12,
+    )
