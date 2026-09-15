@@ -1,6 +1,16 @@
+import importlib.util
+from pathlib import Path
+
 import pytest
 
-from estimation.fault_isolation_schedule import resolve_motion_start_time_s
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+MODULE_PATH = PROJECT_ROOT / "estimation" / "fault_isolation_schedule.py"
+SPEC = importlib.util.spec_from_file_location("fault_isolation_schedule", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+resolve_motion_start_time_s = MODULE.resolve_motion_start_time_s
 
 
 def test_absolute_motion_schedule_preserves_existing_behavior():
