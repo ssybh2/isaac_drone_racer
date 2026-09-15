@@ -32,6 +32,20 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--learned_drift_velocity_from_displacement",
+    action="store_true",
+    help=(
+        "With --learned_relative_position_only, derive an explicit velocity-drift "
+        "measurement from each accepted jump-isolated VIO minus learned displacement window."
+    ),
+)
+parser.add_argument(
+    "--learned_drift_velocity_sigma_floor_mps",
+    type=float,
+    default=0.5,
+    help="Minimum 1-sigma uncertainty for the explicit learned drift-velocity measurement.",
+)
+parser.add_argument(
     "--raw_vio_jump_isolation",
     action="store_true",
     help=(
@@ -180,6 +194,12 @@ def main() -> None:
     env_cfg.learned_motion_relative_position_only = bool(
         args_cli.learned_relative_position_only
     )
+    env_cfg.learned_motion_drift_velocity_from_displacement = bool(
+        args_cli.learned_drift_velocity_from_displacement
+    )
+    env_cfg.learned_motion_drift_velocity_sigma_floor_mps = float(
+        args_cli.learned_drift_velocity_sigma_floor_mps
+    )
     env_cfg.learned_motion_raw_vio_jump_isolation = bool(args_cli.raw_vio_jump_isolation)
     env_cfg.learned_motion_raw_vio_jump_threshold_m = float(args_cli.raw_vio_jump_threshold_m)
     env_cfg.oracle_absolute_position_enabled = bool(args_cli.oracle_absolute_position)
@@ -217,11 +237,14 @@ def main() -> None:
         "raw_vel_err", "learned_vel_err", "gate_vel_err",
         "learned_update_attempted", "learned_update_accepted", "learned_update_rejected",
         "learned_innovation_d2", "learned_correction_norm_m",
+        "learned_velocity_update_applied", "learned_velocity_d2",
+        "learned_velocity_correction_norm_m",
         "prediction_start_s", "prediction_end_s",
         "gt_dp_x", "gt_dp_y", "gt_dp_z",
         "nn_dp_x", "nn_dp_y", "nn_dp_z",
         "vio_dp_x", "vio_dp_y", "vio_dp_z",
         "nn_dp_error_m", "vio_dp_error_m",
+        "learned_vd_meas_x", "learned_vd_meas_y", "learned_vd_meas_z",
         "learned_vd_before_x", "learned_vd_before_y", "learned_vd_before_z",
         "learned_vd_after_x", "learned_vd_after_y", "learned_vd_after_z",
         "raw_jump_detected", "raw_jump_residual_m",
@@ -235,6 +258,7 @@ def main() -> None:
     raw_pos_errors, learned_pos_errors, gate_pos_errors = [], [], []
     raw_vel_errors, learned_vel_errors, gate_vel_errors = [], [], []
     learned_attempted = learned_accepted = learned_rejected = 0
+    learned_velocity_updates = 0
     nn_window_errors, vio_window_errors = [], []
 
     def put_estimate(row, prefix, estimate, error):
@@ -292,9 +316,16 @@ def main() -> None:
                     learned_attempted += int(result.learned_update_attempted)
                     learned_accepted += int(result.learned_update_accepted)
                     learned_rejected += int(result.learned_update_rejected)
+                    learned_velocity_updates += int(result.learned_velocity_update_applied)
                 correction_norm = ""
+                velocity_correction_norm = ""
                 if raw is not None and learned is not None:
                     correction_norm = float(np.linalg.norm(raw.position_w_b - learned.position_w_b))
+                    velocity_correction_norm = float(
+                        np.linalg.norm(
+                            raw.linear_velocity_w_b - learned.linear_velocity_w_b
+                        )
+                    )
 
                 gt_dp = nn_dp = vio_dp = None
                 nn_dp_error = vio_dp_error = ""
@@ -333,6 +364,9 @@ def main() -> None:
                     "learned_update_rejected": 0 if result is None else int(result.learned_update_rejected),
                     "learned_innovation_d2": "" if result is None or result.mahalanobis2 is None else float(result.mahalanobis2),
                     "learned_correction_norm_m": correction_norm,
+                    "learned_velocity_update_applied": 0 if result is None else int(result.learned_velocity_update_applied),
+                    "learned_velocity_d2": "" if result is None or result.learned_velocity_mahalanobis2 is None else float(result.learned_velocity_mahalanobis2),
+                    "learned_velocity_correction_norm_m": velocity_correction_norm,
                     "prediction_start_s": prediction_start,
                     "prediction_end_s": prediction_end,
                     "nn_dp_error_m": nn_dp_error,
@@ -345,6 +379,11 @@ def main() -> None:
                 _put_vector(row, "gt_dp", gt_dp)
                 _put_vector(row, "nn_dp", nn_dp)
                 _put_vector(row, "vio_dp", vio_dp)
+                _put_vector(
+                    row,
+                    "learned_vd_meas",
+                    None if result is None else result.learned_velocity_drift_measurement_w,
+                )
                 _put_vector(
                     row,
                     "learned_vd_before",
@@ -406,6 +445,11 @@ def main() -> None:
                 "raw_vio_displacement_error_m": _stats(vio_window_errors),
             },
             "learned_relative_position_only": bool(args_cli.learned_relative_position_only),
+            "learned_drift_velocity_from_displacement": {
+                "enabled": bool(args_cli.learned_drift_velocity_from_displacement),
+                "sigma_floor_mps": float(args_cli.learned_drift_velocity_sigma_floor_mps),
+                "updates": int(learned_velocity_updates),
+            },
             "raw_vio_jump_isolation": {
                 "enabled": bool(args_cli.raw_vio_jump_isolation),
                 "threshold_m": float(args_cli.raw_vio_jump_threshold_m),
