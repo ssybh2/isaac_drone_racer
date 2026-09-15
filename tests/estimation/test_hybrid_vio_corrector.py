@@ -227,3 +227,33 @@ def test_raw_vio_jump_isolation_keeps_corrected_position_continuous():
     np.testing.assert_allclose(jumped.corrected.position_w_b, [0.0, 0.0, 0.0], atol=1e-9)
     assert after.raw_vio_jump_detected is False
     assert after.corrected.position_w_b[0] == pytest.approx(0.01, abs=0.006)
+
+
+def test_explicit_drift_velocity_from_displacement_propagates_correction_between_windows():
+    predictor = ConstantPredictor([1.0, 0.0, 0.0])
+    corrector = HybridLearnedVioCorrector(
+        predictor,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        relative_position_only=True,
+        learned_drift_velocity_from_displacement=True,
+        learned_drift_velocity_sigma_floor_mps=0.01,
+        innovation_gate_chi2=None,
+    )
+    _feed_motion(corrector)
+    corrector.step(_vio(0.0, 0.0, vx=3.0))
+
+    boundary = corrector.step(_vio(1.5, 0.5, vx=3.0))
+    mid = corrector.step(_vio(2.25, 0.75, vx=3.0))
+
+    assert boundary.learned_update_accepted is True
+    assert boundary.learned_velocity_update_applied is True
+    np.testing.assert_allclose(
+        boundary.learned_velocity_drift_measurement_w,
+        [1.0, 0.0, 0.0],
+        atol=1.0e-9,
+    )
+    assert boundary.corrected.position_w_b[0] == pytest.approx(1.0, abs=0.03)
+    assert boundary.corrected.linear_velocity_w_b[0] == pytest.approx(2.0, abs=0.03)
+    assert mid.corrected.position_w_b[0] == pytest.approx(1.5, abs=0.05)
+    assert mid.corrected.linear_velocity_w_b[0] == pytest.approx(2.0, abs=0.03)
