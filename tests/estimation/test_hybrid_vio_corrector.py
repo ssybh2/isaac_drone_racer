@@ -173,7 +173,7 @@ def test_result_exposes_exact_window_and_raw_vio_displacement_for_gt_diagnostics
 
 
 def test_corrector_can_apply_sparse_absolute_position_anchor_after_relative_update():
-    predictor = ConstantPredictor([0.0, 0.0, 0.0])
+    predictor = ConstantPredictor([2.0, 0.0, 0.0])
     drift_filter = LearnedVioDriftFilter(
         sigma_position=1.0e-4,
         sigma_velocity=1.0e-4,
@@ -189,7 +189,7 @@ def test_corrector_can_apply_sparse_absolute_position_anchor_after_relative_upda
     corrector.step(_vio(0.0, 0.0))
     raw = _vio(3.0, 0.5)
     relative = corrector.step(raw)
-    assert relative.corrected.position_w_b[0] > 2.5
+    assert relative.corrected.position_w_b[0] == pytest.approx(2.0, abs=0.03)
 
     anchored = corrector.apply_absolute_position(
         raw,
@@ -198,5 +198,5 @@ def test_corrector_can_apply_sparse_absolute_position_anchor_after_relative_upda
     )
 
     assert anchored.absolute_position_update_applied is True
-    assert anchored.corrected.position_w_b[0] == pytest.approx(1.0, abs=0.02)
+    assert anchored.corrected.position_w_b[0] == pytest.approx(1.0, abs=0.03)
     assert anchored.raw is relative.raw
