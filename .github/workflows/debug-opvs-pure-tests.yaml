@@ -2,9 +2,9 @@ name: debug-opvs pure checks
 
 on:
   push:
-    branches: [debug-opvs]
+    branches: [debug-opvs, "debug/**"]
   pull_request:
-    branches: [swift1]
+    branches: [swift1, debug-opvs]
 
 jobs:
   pure-python:
@@ -19,12 +19,15 @@ jobs:
       - name: Compile diagnostic Python
         run: |
           python -m py_compile scripts/estimation/run_openvins_fault_isolation.py
+          python -m py_compile estimation/fault_isolation_schedule.py
           python -m py_compile estimation/openvins_bridge.py
           python -m py_compile estimation/vio_time_buffer.py
           python -m py_compile estimation/swift_vio_drift.py
       - name: Validate shell helper
         run: bash -n scripts/estimation/capture_openvins_topics.sh
-      - name: Validate OpenVINS configuration contract
+      - name: Validate OpenVINS pure contracts
         env:
           PYTHONPATH: .
-        run: pytest -q tests/estimation/test_openvins_config.py
+        run: |
+          pytest -q tests/estimation/test_openvins_config.py \
+            tests/estimation/test_fault_isolation_schedule.py
