@@ -24,6 +24,14 @@ parser.add_argument("--lissajous_frequency_hz", type=float, default=0.08)
 parser.add_argument("--detector_checkpoint", type=Path, default=None)
 parser.add_argument("--visibility_checkpoint", type=Path, default=None)
 parser.add_argument(
+    "--learned_relative_position_only",
+    action="store_true",
+    help=(
+        "Diagnostic A/B mode: learned relative displacement may update position drift "
+        "but must not directly change the velocity-drift mean."
+    ),
+)
+parser.add_argument(
     "--oracle_absolute_position",
     action="store_true",
     help=(
@@ -155,6 +163,9 @@ def main() -> None:
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
     env_cfg.learned_motion_checkpoint = str(checkpoint)
     env_cfg.learned_motion_device = args_cli.device
+    env_cfg.learned_motion_relative_position_only = bool(
+        args_cli.learned_relative_position_only
+    )
     env_cfg.oracle_absolute_position_enabled = bool(args_cli.oracle_absolute_position)
     env_cfg.oracle_position_rate_hz = float(args_cli.oracle_position_rate_hz)
     env_cfg.oracle_position_sigma_m = float(args_cli.oracle_position_sigma_m)
@@ -195,8 +206,12 @@ def main() -> None:
         "nn_dp_x", "nn_dp_y", "nn_dp_z",
         "vio_dp_x", "vio_dp_y", "vio_dp_z",
         "nn_dp_error_m", "vio_dp_error_m",
+        "learned_vd_before_x", "learned_vd_before_y", "learned_vd_before_z",
+        "learned_vd_after_x", "learned_vd_after_y", "learned_vd_after_z",
         "oracle_position_update_applied", "oracle_position_d2",
         "oracle_meas_x", "oracle_meas_y", "oracle_meas_z",
+        "oracle_vd_before_x", "oracle_vd_before_y", "oracle_vd_before_z",
+        "oracle_vd_after_x", "oracle_vd_after_y", "oracle_vd_after_z",
     ]
     raw_pos_errors, learned_pos_errors, gate_pos_errors = [], [], []
     raw_vel_errors, learned_vel_errors, gate_vel_errors = [], [], []
@@ -309,7 +324,27 @@ def main() -> None:
                 _put_vector(row, "gt_dp", gt_dp)
                 _put_vector(row, "nn_dp", nn_dp)
                 _put_vector(row, "vio_dp", vio_dp)
+                _put_vector(
+                    row,
+                    "learned_vd_before",
+                    None if result is None else result.learned_velocity_drift_before_w,
+                )
+                _put_vector(
+                    row,
+                    "learned_vd_after",
+                    None if result is None else result.learned_velocity_drift_after_w,
+                )
                 _put_vector(row, "oracle_meas", raw_env.oracle_position_last_measurement_w if result is not None and result.absolute_position_update_applied else None)
+                _put_vector(
+                    row,
+                    "oracle_vd_before",
+                    None if result is None else result.absolute_velocity_drift_before_w,
+                )
+                _put_vector(
+                    row,
+                    "oracle_vd_after",
+                    None if result is None else result.absolute_velocity_drift_after_w,
+                )
                 put_estimate(row, "raw", raw, raw_error)
                 put_estimate(row, "learned", learned, learned_error)
                 put_estimate(row, "gate", gate_fused, gate_error)
@@ -332,6 +367,7 @@ def main() -> None:
                 "nn_displacement_error_m": _stats(nn_window_errors),
                 "raw_vio_displacement_error_m": _stats(vio_window_errors),
             },
+            "learned_relative_position_only": bool(args_cli.learned_relative_position_only),
             "oracle_absolute_position": {
                 "enabled": bool(args_cli.oracle_absolute_position),
                 "rate_hz": float(args_cli.oracle_position_rate_hz),
