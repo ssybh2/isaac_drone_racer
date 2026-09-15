@@ -151,3 +151,51 @@ def test_body_motion_history_is_timestamp_aligned_and_rotated_before_prediction(
     np.testing.assert_allclose(predictor.last_window.features[0, :], 0.0, atol=1e-7)
     np.testing.assert_allclose(predictor.last_window.features[1, :], 1.0, atol=1e-7)
     np.testing.assert_allclose(predictor.last_window.features[5, :], 6.0, atol=1e-7)
+
+
+def test_result_exposes_exact_window_and_raw_vio_displacement_for_gt_diagnostics():
+    predictor = ConstantPredictor([1.0, 0.0, 0.0])
+    corrector = HybridLearnedVioCorrector(
+        predictor,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        innovation_gate_chi2=None,
+    )
+    _feed_motion(corrector)
+    corrector.step(_vio(0.0, 0.0))
+
+    result = corrector.step(_vio(1.5, 0.5))
+
+    assert result.prediction_start_timestamp_s == pytest.approx(0.0)
+    assert result.prediction_end_timestamp_s == pytest.approx(0.5)
+    np.testing.assert_allclose(result.raw_window_displacement_w, [1.5, 0.0, 0.0])
+    np.testing.assert_allclose(result.prediction.displacement_w, [1.0, 0.0, 0.0])
+
+
+def test_corrector_can_apply_sparse_absolute_position_anchor_after_relative_update():
+    predictor = ConstantPredictor([0.0, 0.0, 0.0])
+    drift_filter = LearnedVioDriftFilter(
+        sigma_position=1.0e-4,
+        sigma_velocity=1.0e-4,
+        innovation_gate_chi2=None,
+    )
+    corrector = HybridLearnedVioCorrector(
+        predictor,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        drift_filter=drift_filter,
+    )
+    _feed_motion(corrector)
+    corrector.step(_vio(0.0, 0.0))
+    relative = corrector.step(_vio(3.0, 0.5))
+    assert relative.corrected.position_w_b[0] > 2.5
+
+    anchored = corrector.apply_absolute_position(
+        _vio(3.0, 0.5),
+        position_w_b=np.array([1.0, 0.0, 0.0]),
+        covariance_w=np.eye(3) * 1.0e-6,
+    )
+
+    assert anchored.absolute_position_update_applied is True
+    assert anchored.corrected.position_w_b[0] == pytest.approx(1.0, abs=0.02)
+    assert anchored.raw is relative.raw
