@@ -88,3 +88,31 @@ def test_reset_clears_drift_and_reanchors():
     filt.reset(1.0, anchor_vio_position_w=np.array([4.0, 0.0, 0.0]))
     np.testing.assert_allclose(filt.current_position_drift_w, np.zeros(3))
     np.testing.assert_allclose(filt.anchor_vio_position_w, [4.0, 0.0, 0.0])
+
+
+def test_absolute_position_anchor_corrects_current_drift_without_changing_attitude():
+    filt = LearnedVioDriftFilter(
+        sigma_position=1.0e-4,
+        sigma_velocity=1.0e-4,
+        innovation_gate_chi2=None,
+    )
+    filt.reset(0.0, anchor_vio_position_w=np.zeros(3))
+    raw = _vio(5.0, 1.0, vx=0.5)
+    predicted = filt.step(raw)
+    np.testing.assert_allclose(predicted.position_w_b, [5.0, 0.0, 0.0])
+
+    corrected = filt.apply_absolute_position(
+        raw,
+        position_w_b=np.array([2.0, 0.0, 0.0]),
+        covariance_w=np.eye(3) * 1.0e-6,
+    )
+
+    assert corrected.position_w_b[0] == pytest.approx(2.0, abs=0.02)
+    assert filt.current_position_drift_w[0] == pytest.approx(3.0, abs=0.02)
+    np.testing.assert_allclose(
+        corrected.orientation_w_b_wxyz,
+        raw.orientation_w_b_wxyz,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(filt.P, filt.P.T, atol=1.0e-12)
+    assert np.linalg.eigvalsh(filt.P).min() >= -1.0e-10
