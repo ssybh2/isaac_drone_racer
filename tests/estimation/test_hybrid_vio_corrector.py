@@ -17,6 +17,16 @@ class ConstantPredictor:
         return DisplacementPrediction(self.displacement, np.eye(3) * 1.0e-5)
 
 
+class RecordingPredictor(ConstantPredictor):
+    def __init__(self, displacement):
+        super().__init__(displacement)
+        self.last_window = None
+
+    def predict(self, window):
+        self.last_window = window
+        return super().predict(window)
+
+
 def _vio(x, t, vx=0.0, q=None):
     if q is None:
         q = np.array([1.0, 0.0, 0.0, 0.0])
@@ -117,3 +127,27 @@ def test_body_motion_is_rotated_to_world_using_raw_vio_attitude():
     )
     np.testing.assert_allclose(gyro_w, [0.0, 1.0, 0.0], atol=1e-8)
     np.testing.assert_allclose(thrust_w, [0.0, 0.0, 6.0], atol=1e-8)
+
+
+def test_body_motion_history_is_timestamp_aligned_and_rotated_before_prediction():
+    predictor = RecordingPredictor([0.0, 0.0, 0.0])
+    corrector = HybridLearnedVioCorrector(
+        predictor,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        innovation_gate_chi2=None,
+    )
+    q = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)])
+    for t in np.arange(0.0, 0.51, 0.01):
+        corrector.ingest_body_motion_sample(
+            float(t),
+            gyro_b=np.array([1.0, 0.0, 0.0]),
+            thrust_b=np.array([0.0, 0.0, 6.0]),
+        )
+    corrector.step(_vio(0.0, 0.0, q=q))
+    corrector.step(_vio(0.0, 0.5, q=q))
+
+    assert predictor.last_window is not None
+    np.testing.assert_allclose(predictor.last_window.features[0, :], 0.0, atol=1e-7)
+    np.testing.assert_allclose(predictor.last_window.features[1, :], 1.0, atol=1e-7)
+    np.testing.assert_allclose(predictor.last_window.features[5, :], 6.0, atol=1e-7)
