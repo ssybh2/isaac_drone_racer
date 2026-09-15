@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from estimation.hybrid_vio_corrector import HybridLearnedVioCorrector
+from estimation.hybrid_vio_corrector import HybridLearnedVioCorrector, body_motion_to_world
 from estimation.learned_motion import DisplacementPrediction
 from estimation.learned_vio_drift import LearnedVioDriftFilter
 from estimation.swift_vio_drift import VioWorldEstimate
@@ -105,3 +105,15 @@ def test_rejected_learned_window_is_advanced_instead_of_replayed_forever():
     assert second.learned_update_attempted is True
     assert predictor.calls == 2
     assert corrector.window_start_timestamp_s == pytest.approx(1.0)
+
+
+def test_body_motion_is_rotated_to_world_using_raw_vio_attitude():
+    # 90 degree yaw: body +X maps to world +Y; body +Z is unchanged.
+    q = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)])
+    gyro_w, thrust_w = body_motion_to_world(
+        _vio(0.0, 0.0, q=q),
+        gyro_b=np.array([1.0, 0.0, 0.0]),
+        thrust_b=np.array([0.0, 0.0, 6.0]),
+    )
+    np.testing.assert_allclose(gyro_w, [0.0, 1.0, 0.0], atol=1e-8)
+    np.testing.assert_allclose(thrust_w, [0.0, 0.0, 6.0], atol=1e-8)
