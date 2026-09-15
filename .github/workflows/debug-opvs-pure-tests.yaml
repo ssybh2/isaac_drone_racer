@@ -15,19 +15,24 @@ jobs:
         with:
           python-version: "3.10"
       - name: Install pure-test dependencies
-        run: python -m pip install --upgrade pip pytest pyyaml
+        run: python -m pip install --upgrade pip pytest pyyaml numpy
       - name: Compile diagnostic Python
         run: |
           python -m py_compile scripts/estimation/run_openvins_fault_isolation.py
+          python -m py_compile scripts/estimation/analyze_openvins_time_alignment.py
           python -m py_compile estimation/fault_isolation_schedule.py
+          python -m py_compile estimation/openvins_gt_init.py
           python -m py_compile estimation/openvins_bridge.py
           python -m py_compile estimation/vio_time_buffer.py
           python -m py_compile estimation/swift_vio_drift.py
-      - name: Validate shell helper
-        run: bash -n scripts/estimation/capture_openvins_topics.sh
+      - name: Validate shell helpers
+        run: |
+          bash -n scripts/estimation/capture_openvins_topics.sh
+          bash -n scripts/estimation/inspect_openvins_workspace.sh
       - name: Validate OpenVINS pure contracts
         env:
           PYTHONPATH: .
         run: |
           pytest -q tests/estimation/test_openvins_config.py \
-            tests/estimation/test_fault_isolation_schedule.py
+            tests/estimation/test_fault_isolation_schedule.py \
+            tests/estimation/test_openvins_gt_init.py
