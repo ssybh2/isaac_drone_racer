@@ -47,6 +47,9 @@ class HybridVioCorrectionResult:
     learned_velocity_drift_measurement_w: np.ndarray | None = None
     learned_velocity_drift_measurement_covariance_w: np.ndarray | None = None
     learned_velocity_mahalanobis2: float | None = None
+    learned_position_injection_norm_m: float = 0.0
+    learned_position_release_norm_m: float = 0.0
+    learned_position_pending_norm_m: float = 0.0
     absolute_position_update_applied: bool = False
     absolute_position_mahalanobis2: float | None = None
     learned_velocity_drift_before_w: np.ndarray | None = None
@@ -80,6 +83,12 @@ class HybridLearnedVioCorrector:
     subsequent normal propagation then carries the learned correction smoothly
     between learned-window boundaries without restoring cross-covariance-driven
     velocity jumps.
+
+    A separate optional position-residual slew defers the common-mode position
+    correction created by an accepted learned window and releases it at a
+    bounded rate on subsequent VIO samples. The same common-mode shift is
+    applied to anchor and current position drift, preserving the learned
+    relative-position state exactly while avoiding a one-frame output snap.
     """
 
     def __init__(
@@ -95,6 +104,8 @@ class HybridLearnedVioCorrector:
         relative_position_only: bool = False,
         learned_drift_velocity_from_displacement: bool = False,
         learned_drift_velocity_sigma_floor_mps: float = 0.5,
+        learned_position_residual_slew: bool = False,
+        learned_position_residual_max_rate_mps: float = 4.0,
         raw_vio_jump_isolation: bool = False,
         raw_vio_jump_threshold_m: float = 0.5,
     ) -> None:
@@ -105,10 +116,17 @@ class HybridLearnedVioCorrector:
             or not np.isfinite(learned_drift_velocity_sigma_floor_mps)
         ):
             raise ValueError("learned_drift_velocity_sigma_floor_mps must be positive and finite")
+        if (
+            learned_position_residual_max_rate_mps <= 0.0
+            or not np.isfinite(learned_position_residual_max_rate_mps)
+        ):
+            raise ValueError("learned_position_residual_max_rate_mps must be positive and finite")
         if learned_drift_velocity_from_displacement and not relative_position_only:
             raise ValueError(
                 "learned_drift_velocity_from_displacement requires relative_position_only"
             )
+        if learned_position_residual_slew and not relative_position_only:
+            raise ValueError("learned_position_residual_slew requires relative_position_only")
         self.predictor = predictor
         self.motion_buffer = LearnedMotionBuffer(
             window_time_s=window_time_s,
@@ -126,6 +144,10 @@ class HybridLearnedVioCorrector:
         )
         self.learned_drift_velocity_sigma_floor_mps = float(
             learned_drift_velocity_sigma_floor_mps
+        )
+        self.learned_position_residual_slew = bool(learned_position_residual_slew)
+        self.learned_position_residual_max_rate_mps = float(
+            learned_position_residual_max_rate_mps
         )
         self.raw_vio_jump_isolation = bool(raw_vio_jump_isolation)
         self.raw_vio_jump_threshold_m = float(raw_vio_jump_threshold_m)
@@ -150,6 +172,8 @@ class HybridLearnedVioCorrector:
         self.last_result: HybridVioCorrectionResult | None = None
         self._previous_raw_vio: VioWorldEstimate | None = None
         self._last_isolated_vio: VioWorldEstimate | None = None
+        self._last_position_slew_timestamp_s: float | None = None
+        self.pending_position_drift_w = np.zeros(3, dtype=np.float64)
         self.raw_vio_jump_compensation_w = np.zeros(3, dtype=np.float64)
         self.raw_vio_jump_count = 0
         self.raw_vio_jump_max_residual_m = 0.0
@@ -165,6 +189,8 @@ class HybridLearnedVioCorrector:
         self.last_result = None
         self._previous_raw_vio = None
         self._last_isolated_vio = None
+        self._last_position_slew_timestamp_s = None
+        self.pending_position_drift_w.fill(0.0)
         self.raw_vio_jump_compensation_w.fill(0.0)
         self.raw_vio_jump_count = 0
         self.raw_vio_jump_max_residual_m = 0.0
@@ -211,6 +237,36 @@ class HybridLearnedVioCorrector:
         if min_eig < floor_variance:
             covariance = covariance + np.eye(3) * (floor_variance - min_eig)
         return covariance
+
+    def _apply_position_drift_common_mode(self, delta_w: np.ndarray) -> None:
+        delta = np.asarray(delta_w, dtype=np.float64).reshape(3)
+        self.drift_filter.x[0:3] += delta
+        self.drift_filter.x[3:6] += delta
+
+    def _release_pending_position_drift(self, timestamp_s: float) -> float:
+        timestamp = float(timestamp_s)
+        if not self.learned_position_residual_slew:
+            return 0.0
+        if self._last_position_slew_timestamp_s is None:
+            self._last_position_slew_timestamp_s = timestamp
+            return 0.0
+        dt_s = timestamp - self._last_position_slew_timestamp_s
+        if dt_s < -1.0e-9:
+            raise ValueError("Position-residual slew timestamps must be monotonic")
+        self._last_position_slew_timestamp_s = timestamp
+        if dt_s <= 1.0e-12:
+            return 0.0
+        pending_norm = float(np.linalg.norm(self.pending_position_drift_w))
+        if pending_norm <= 1.0e-12:
+            return 0.0
+        max_release = self.learned_position_residual_max_rate_mps * dt_s
+        release_norm = min(pending_norm, max_release)
+        release = self.pending_position_drift_w * (release_norm / pending_norm)
+        self._apply_position_drift_common_mode(release)
+        self.pending_position_drift_w -= release
+        if np.linalg.norm(self.pending_position_drift_w) <= 1.0e-12:
+            self.pending_position_drift_w.fill(0.0)
+        return float(release_norm)
 
     def _isolate_raw_vio_jump(
         self,
@@ -266,11 +322,13 @@ class HybridLearnedVioCorrector:
         jump_residual_m: float | None = None,
     ) -> HybridVioCorrectionResult:
         self.window_start_timestamp_s = float(isolated.timestamp_s)
+        self._last_position_slew_timestamp_s = float(isolated.timestamp_s)
         self.drift_filter.reset(isolated.timestamp_s, anchor_vio_position_w=isolated.position_w_b)
         corrected = self.drift_filter.step(isolated)
         result = HybridVioCorrectionResult(
             raw=raw,
             corrected=corrected,
+            learned_position_pending_norm_m=float(np.linalg.norm(self.pending_position_drift_w)),
             raw_vio_jump_detected=jump_detected,
             raw_vio_jump_residual_w=None if jump_residual_w is None else jump_residual_w.copy(),
             raw_vio_jump_residual_m=jump_residual_m,
@@ -314,6 +372,9 @@ class HybridLearnedVioCorrector:
             raise ValueError("Absolute position anchor must match the latest raw VIO timestamp")
         if abs(float(raw.timestamp_s) - float(self._last_isolated_vio.timestamp_s)) > 1.0e-6:
             raise ValueError("Absolute position anchor must match the latest isolated VIO timestamp")
+        if self.learned_position_residual_slew:
+            self.pending_position_drift_w.fill(0.0)
+            self._last_position_slew_timestamp_s = float(raw.timestamp_s)
         velocity_before = self.drift_filter.current_velocity_drift_w
         corrected = self.drift_filter.apply_absolute_position(
             self._last_isolated_vio,
@@ -325,6 +386,7 @@ class HybridLearnedVioCorrector:
         result = replace(
             self.last_result,
             corrected=corrected,
+            learned_position_pending_norm_m=float(np.linalg.norm(self.pending_position_drift_w)),
             absolute_position_update_applied=True,
             absolute_position_mahalanobis2=diagnostics.mahalanobis2,
             absolute_velocity_drift_before_w=velocity_before,
@@ -361,6 +423,7 @@ class HybridLearnedVioCorrector:
         learned_velocity_d2: float | None = None
         learned_velocity_before: np.ndarray | None = None
         learned_velocity_after: np.ndarray | None = None
+        learned_position_injection_norm = 0.0
         epsilon = 1.0e-9
 
         while isolated.timestamp_s + epsilon >= self.window_start_timestamp_s + self.window_time_s:
@@ -404,6 +467,10 @@ class HybridLearnedVioCorrector:
             )
             attempted = True
             position_velocity_before = self.drift_filter.current_velocity_drift_w
+            position_drift_before: np.ndarray | None = None
+            if self.learned_position_residual_slew:
+                self.drift_filter.predict(endpoint.timestamp_s)
+                position_drift_before = self.drift_filter.current_position_drift_w
             self.drift_filter.step(endpoint, measurement=measurement)
             position_velocity_after = self.drift_filter.current_velocity_drift_w
             diagnostics = self.drift_filter.last_update_diagnostics
@@ -411,6 +478,15 @@ class HybridLearnedVioCorrector:
             if diagnostics.accepted:
                 accepted = True
                 self.window_start_timestamp_s = end
+                if self.learned_position_residual_slew:
+                    if position_drift_before is None:
+                        raise RuntimeError("Position residual slew pre-update state was not captured")
+                    position_injection = (
+                        self.drift_filter.current_position_drift_w - position_drift_before
+                    )
+                    learned_position_injection_norm = float(np.linalg.norm(position_injection))
+                    self._apply_position_drift_common_mode(-position_injection)
+                    self.pending_position_drift_w += position_injection
                 if self.learned_drift_velocity_from_displacement:
                     dt_s = end - start
                     isolated_displacement = (
@@ -452,6 +528,12 @@ class HybridLearnedVioCorrector:
         # Learned updates are processed at exact historical boundaries before
         # propagating the drift state to the newest jump-isolated OpenVINS time.
         corrected = self.drift_filter.step(isolated)
+        learned_position_release_norm = self._release_pending_position_drift(
+            isolated.timestamp_s
+        )
+        if learned_position_release_norm > 0.0:
+            corrected = self.drift_filter.corrected(isolated)
+        learned_position_pending_norm = float(np.linalg.norm(self.pending_position_drift_w))
         result = HybridVioCorrectionResult(
             raw=raw,
             corrected=corrected,
@@ -476,6 +558,9 @@ class HybridLearnedVioCorrector:
                 else learned_velocity_measurement_covariance.copy()
             ),
             learned_velocity_mahalanobis2=learned_velocity_d2,
+            learned_position_injection_norm_m=learned_position_injection_norm,
+            learned_position_release_norm_m=learned_position_release_norm,
+            learned_position_pending_norm_m=learned_position_pending_norm,
             learned_velocity_drift_before_w=learned_velocity_before,
             learned_velocity_drift_after_w=learned_velocity_after,
             raw_vio_jump_detected=jump_detected,

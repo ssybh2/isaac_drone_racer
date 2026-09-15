@@ -279,7 +279,7 @@ def test_position_residual_slew_defers_learned_position_jump_and_releases_at_rat
 
     assert boundary.learned_update_accepted is True
     assert boundary.learned_position_injection_norm_m > 0.4
-    assert boundary.learned_position_release_norm_m <= pytest.approx(0.04, abs=1.0e-9)
+    assert boundary.learned_position_release_norm_m <= 0.040000001
     assert boundary.learned_position_pending_norm_m > 0.3
     assert abs(boundary.corrected.position_w_b[0] - before.corrected.position_w_b[0]) < 0.1
 
