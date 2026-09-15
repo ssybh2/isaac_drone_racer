@@ -76,6 +76,7 @@ class LearnedVioDriftFilter:
         innovation_gate_chi2: float | None = 16.26623619623813,
         nominal_rate_hz: float = 100.0,
         timestamp_tolerance_s: float = 2.0e-3,
+        relative_position_only: bool = False,
     ) -> None:
         if sigma_position < 0.0 or sigma_velocity < 0.0:
             raise ValueError("process-noise terms must be non-negative")
@@ -93,6 +94,7 @@ class LearnedVioDriftFilter:
         self.nominal_rate_hz = float(nominal_rate_hz)
         self.nominal_dt_s = 1.0 / self.nominal_rate_hz
         self.timestamp_tolerance_s = float(timestamp_tolerance_s)
+        self.relative_position_only = bool(relative_position_only)
         self.x = np.zeros(9, dtype=np.float64)
         self.P = np.zeros((9, 9), dtype=np.float64)
         self.last_timestamp_s: float | None = None
@@ -235,6 +237,12 @@ class LearnedVioDriftFilter:
             K = np.linalg.solve(S.T, PHt.T).T
         except np.linalg.LinAlgError as exc:
             raise RuntimeError("Learned displacement Kalman gain solve failed") from exc
+        if self.relative_position_only:
+            # Diagnostic A/B mode: learned displacement constrains translational
+            # position drift only. Keep the velocity-drift mean frozen so a
+            # statistically accepted displacement residual cannot inject a
+            # large instantaneous velocity correction.
+            K[6:9, :] = 0.0
         self.x = self.x + K @ innovation
         I9 = np.eye(9, dtype=np.float64)
         A = I9 - K @ H
