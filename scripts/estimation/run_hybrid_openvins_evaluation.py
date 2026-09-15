@@ -32,6 +32,20 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--raw_vio_jump_isolation",
+    action="store_true",
+    help=(
+        "Remove implausible sample-to-sample raw OpenVINS position frame shifts "
+        "from the internal learned-correction stream while retaining raw VIO for diagnostics."
+    ),
+)
+parser.add_argument(
+    "--raw_vio_jump_threshold_m",
+    type=float,
+    default=0.5,
+    help="Detect a raw VIO frame jump when the velocity-predicted position residual exceeds this value.",
+)
+parser.add_argument(
     "--oracle_absolute_position",
     action="store_true",
     help=(
@@ -166,6 +180,8 @@ def main() -> None:
     env_cfg.learned_motion_relative_position_only = bool(
         args_cli.learned_relative_position_only
     )
+    env_cfg.learned_motion_raw_vio_jump_isolation = bool(args_cli.raw_vio_jump_isolation)
+    env_cfg.learned_motion_raw_vio_jump_threshold_m = float(args_cli.raw_vio_jump_threshold_m)
     env_cfg.oracle_absolute_position_enabled = bool(args_cli.oracle_absolute_position)
     env_cfg.oracle_position_rate_hz = float(args_cli.oracle_position_rate_hz)
     env_cfg.oracle_position_sigma_m = float(args_cli.oracle_position_sigma_m)
@@ -208,6 +224,9 @@ def main() -> None:
         "nn_dp_error_m", "vio_dp_error_m",
         "learned_vd_before_x", "learned_vd_before_y", "learned_vd_before_z",
         "learned_vd_after_x", "learned_vd_after_y", "learned_vd_after_z",
+        "raw_jump_detected", "raw_jump_residual_m",
+        "raw_jump_dx", "raw_jump_dy", "raw_jump_dz",
+        "raw_jump_comp_x", "raw_jump_comp_y", "raw_jump_comp_z",
         "oracle_position_update_applied", "oracle_position_d2",
         "oracle_meas_x", "oracle_meas_y", "oracle_meas_z",
         "oracle_vd_before_x", "oracle_vd_before_y", "oracle_vd_before_z",
@@ -318,6 +337,8 @@ def main() -> None:
                     "prediction_end_s": prediction_end,
                     "nn_dp_error_m": nn_dp_error,
                     "vio_dp_error_m": vio_dp_error,
+                    "raw_jump_detected": 0 if result is None else int(result.raw_vio_jump_detected),
+                    "raw_jump_residual_m": "" if result is None or result.raw_vio_jump_residual_m is None else float(result.raw_vio_jump_residual_m),
                     "oracle_position_update_applied": 0 if result is None else int(result.absolute_position_update_applied),
                     "oracle_position_d2": "" if result is None or result.absolute_position_mahalanobis2 is None else float(result.absolute_position_mahalanobis2),
                 }
@@ -333,6 +354,16 @@ def main() -> None:
                     row,
                     "learned_vd_after",
                     None if result is None else result.learned_velocity_drift_after_w,
+                )
+                _put_vector(
+                    row,
+                    "raw_jump_d",
+                    None if result is None else result.raw_vio_jump_residual_w,
+                )
+                _put_vector(
+                    row,
+                    "raw_jump_comp",
+                    None if result is None else result.raw_vio_jump_compensation_w,
                 )
                 _put_vector(row, "oracle_meas", raw_env.oracle_position_last_measurement_w if result is not None and result.absolute_position_update_applied else None)
                 _put_vector(
@@ -354,6 +385,13 @@ def main() -> None:
                     print("[HybridEval] environment terminated; restart ov_msckf before the next run")
                     break
     finally:
+        corrector = raw_env.learned_motion_corrector
+        jump_count = 0 if corrector is None else int(corrector.raw_vio_jump_count)
+        jump_max = 0.0 if corrector is None else float(corrector.raw_vio_jump_max_residual_m)
+        jump_total = 0.0 if corrector is None else float(corrector.raw_vio_jump_total_compensation_m)
+        jump_final_norm = 0.0 if corrector is None else float(
+            np.linalg.norm(corrector.raw_vio_jump_compensation_w)
+        )
         report = {
             "schema": "isaac_drone_racer.hybrid_openvins_evaluation.v1",
             "checkpoint": str(checkpoint),
@@ -368,6 +406,14 @@ def main() -> None:
                 "raw_vio_displacement_error_m": _stats(vio_window_errors),
             },
             "learned_relative_position_only": bool(args_cli.learned_relative_position_only),
+            "raw_vio_jump_isolation": {
+                "enabled": bool(args_cli.raw_vio_jump_isolation),
+                "threshold_m": float(args_cli.raw_vio_jump_threshold_m),
+                "detected": jump_count,
+                "max_residual_m": jump_max,
+                "total_compensation_m": jump_total,
+                "final_compensation_norm_m": jump_final_norm,
+            },
             "oracle_absolute_position": {
                 "enabled": bool(args_cli.oracle_absolute_position),
                 "rate_hz": float(args_cli.oracle_position_rate_hz),
