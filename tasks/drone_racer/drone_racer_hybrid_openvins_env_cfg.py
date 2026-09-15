@@ -30,6 +30,7 @@ class DroneRacerHybridOpenVinsEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     learned_motion_sigma_velocity: float = 0.1
     learned_motion_innovation_gate_chi2: float | None = 16.26623619623813
     learned_motion_variance_floor: float = 1.0e-6
+    learned_motion_relative_position_only: bool = False
 
     oracle_absolute_position_enabled: bool = False
     oracle_position_rate_hz: float = 2.0
