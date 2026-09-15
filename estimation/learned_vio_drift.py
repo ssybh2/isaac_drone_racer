@@ -3,7 +3,10 @@
 The filter estimates translational VIO drift only. A learned motion model
 provides a relative displacement measurement over a finite time window; the
 measurement is compared with raw VIO displacement over the same interval and
-used to estimate the drift accumulated during that interval.
+used to estimate the drift accumulated during that interval. Optional absolute
+position measurements observe the current position drift directly and are used
+only by explicit absolute-anchor sources such as gate PnP or simulator-oracle
+diagnostics.
 """
 
 from __future__ import annotations
@@ -61,7 +64,8 @@ class LearnedVioDriftFilter:
 
     State ordering is ``[p_d_anchor, p_d_current, v_d_current]``. The anchor
     clone is fixed during propagation. A learned displacement over the same VIO
-    interval observes ``p_d_current - p_d_anchor``.
+    interval observes ``p_d_current - p_d_anchor``. An optional absolute world
+    position observes ``p_d_current`` through ``p_vio - p_absolute``.
     """
 
     def __init__(
@@ -95,6 +99,7 @@ class LearnedVioDriftFilter:
         self.anchor_timestamp_s: float | None = None
         self.anchor_vio_position_w: np.ndarray | None = None
         self.last_update_diagnostics = LearnedDriftUpdateDiagnostics()
+        self.last_absolute_update_diagnostics = LearnedDriftUpdateDiagnostics()
 
     @property
     def anchor_position_drift_w(self) -> np.ndarray:
@@ -128,6 +133,7 @@ class LearnedVioDriftFilter:
         self.last_timestamp_s = None if timestamp_s is None else float(timestamp_s)
         self.anchor_timestamp_s = None if timestamp_s is None else float(timestamp_s)
         self.last_update_diagnostics = LearnedDriftUpdateDiagnostics()
+        self.last_absolute_update_diagnostics = LearnedDriftUpdateDiagnostics()
 
     def _ensure_initialized(self, vio: VioWorldEstimate) -> None:
         if self.anchor_vio_position_w is None:
@@ -136,6 +142,19 @@ class LearnedVioDriftFilter:
             self.anchor_timestamp_s = float(vio.timestamp_s)
         if self.last_timestamp_s is None:
             self.last_timestamp_s = float(vio.timestamp_s)
+
+    @staticmethod
+    def _validated_covariance(covariance_w: np.ndarray, *, name: str) -> np.ndarray:
+        covariance = np.asarray(covariance_w, dtype=np.float64).reshape(3, 3)
+        covariance = 0.5 * (covariance + covariance.T)
+        if not np.all(np.isfinite(covariance)):
+            raise ValueError(f"{name} covariance must be finite")
+        eig = np.linalg.eigvalsh(covariance)
+        if eig[0] < -1.0e-10:
+            raise ValueError(f"{name} covariance must be positive semidefinite")
+        if eig[0] < 1.0e-12:
+            covariance = covariance + np.eye(3) * (1.0e-12 - eig[0])
+        return covariance
 
     def predict(self, timestamp_s: float) -> None:
         timestamp = float(timestamp_s)
@@ -229,6 +248,57 @@ class LearnedVioDriftFilter:
             innovation_w=tuple(float(v) for v in innovation),
         )
         return True
+
+    def apply_absolute_position(
+        self,
+        vio: VioWorldEstimate,
+        *,
+        position_w_b: np.ndarray,
+        covariance_w: np.ndarray,
+    ) -> VioWorldEstimate:
+        """Fuse one absolute world-position anchor into the current drift state.
+
+        The measurement model is ``p_vio - p_absolute = p_d_current``. This
+        method deliberately does not re-anchor the learned-displacement window,
+        so sparse absolute updates can arrive between learned window boundaries
+        without invalidating the relative measurement timestamp contract.
+        """
+        self._ensure_initialized(vio)
+        self.predict(vio.timestamp_s)
+        position = np.asarray(position_w_b, dtype=np.float64).reshape(3)
+        if not np.all(np.isfinite(position)):
+            raise ValueError("Absolute position must be finite")
+        R = self._validated_covariance(covariance_w, name="Absolute position")
+
+        z = np.asarray(vio.position_w_b, dtype=np.float64) - position
+        H = np.zeros((3, 9), dtype=np.float64)
+        H[:, 3:6] = np.eye(3)
+        innovation = z - H @ self.x
+        S = H @ self.P @ H.T + R
+        try:
+            solved = np.linalg.solve(S, innovation)
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError("Absolute position innovation covariance is singular") from exc
+        d2 = float(innovation.T @ solved)
+
+        PHt = self.P @ H.T
+        try:
+            K = np.linalg.solve(S.T, PHt.T).T
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError("Absolute position Kalman gain solve failed") from exc
+        self.x = self.x + K @ innovation
+        I9 = np.eye(9, dtype=np.float64)
+        A = I9 - K @ H
+        self.P = A @ self.P @ A.T + K @ R @ K.T
+        self.P = 0.5 * (self.P + self.P.T)
+        self.last_absolute_update_diagnostics = LearnedDriftUpdateDiagnostics(
+            attempted=1,
+            accepted=1,
+            rejected=0,
+            mahalanobis2=d2,
+            innovation_w=tuple(float(v) for v in innovation),
+        )
+        return self.corrected(vio)
 
     def reanchor(self, vio: VioWorldEstimate) -> None:
         """Clone current drift/current raw VIO position as a new window anchor."""
