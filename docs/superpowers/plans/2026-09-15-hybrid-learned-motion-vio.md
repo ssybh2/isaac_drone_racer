@@ -31,10 +31,10 @@
 - Consumes: `VioWorldEstimate` from `estimation.swift_vio_drift`.
 - Produces: `LearnedDisplacementMeasurement`, `LearnedVioDriftFilter.step(vio, measurement=None)` and diagnostics.
 
-- [ ] **Step 1: Write failing tests** for no-update pass-through, known relative drift correction, NIS rejection, covariance PSD/symmetry, orientation preservation and reset.
-- [ ] **Step 2: Run** `PYTHONPATH=. pytest -q tests/estimation/test_learned_vio_drift.py` and verify failure because the module does not exist.
-- [ ] **Step 3: Implement** the 9-state fixed-anchor EKF with `H=[-I,I,0]`, Joseph update and re-anchoring after accepted learned measurements.
-- [ ] **Step 4: Re-run** the test file and verify all tests pass.
+- [x] **Step 1: Write failing tests** for no-update pass-through, known relative drift correction, NIS rejection, covariance PSD/symmetry, orientation preservation and reset.
+- [x] **Step 2: Run** `PYTHONPATH=. pytest -q tests/estimation/test_learned_vio_drift.py` and verify failure because the module does not exist.
+- [x] **Step 3: Implement** the 9-state fixed-anchor EKF with `H=[-I,I,0]`, Joseph update and re-anchoring after accepted learned measurements.
+- [x] **Step 4: Re-run** the test file and verify all tests pass.
 
 ### Task 2: Learned motion window and optional TCN inference
 
@@ -43,13 +43,13 @@
 - Create: `estimation/learned_motion.py`
 
 **Interfaces:**
-- Consumes: timestamped world-frame gyro/thrust samples.
+- Consumes: timestamped world/body-frame gyro and thrust samples.
 - Produces: `LearnedMotionBuffer`, predictor protocol, lazy `TorchTcnDisplacementPredictor`, six-output TCN when torch is present.
 
-- [ ] **Step 1: Write failing tests** for monotonic timestamps, exact 0.5 s non-overlapping windows, reset, and import-without-torch behavior.
-- [ ] **Step 2: Run** the test and verify module-missing failure.
-- [ ] **Step 3: Implement** pure NumPy buffering/protocol plus lazy torch model/checkpoint loader.
-- [ ] **Step 4: Re-run** and verify tests pass without installing torch.
+- [x] **Step 1: Write failing tests** for monotonic timestamps, exact 0.5 s windows, reset, import-without-torch behavior, and body-to-world time alignment.
+- [x] **Step 2: Run** the tests and verify module-missing failure before implementation.
+- [x] **Step 3: Implement** pure NumPy buffering/protocol plus lazy torch model/checkpoint loader.
+- [x] **Step 4: Re-run** and verify tests pass without installing torch.
 
 ### Task 3: Hybrid corrector orchestration
 
@@ -58,47 +58,51 @@
 - Create: `estimation/hybrid_vio_corrector.py`
 
 **Interfaces:**
-- Consumes: raw `VioWorldEstimate`, world-frame gyro, world-frame thrust, predictor.
+- Consumes: raw `VioWorldEstimate`, timestamped gyro/thrust history, predictor.
 - Produces: raw and learned-corrected estimates plus learned update diagnostics.
 
-- [ ] **Step 1: Write failing tests** showing no correction before a full window and correction after a deterministic displacement prediction.
-- [ ] **Step 2: Verify RED** with pytest.
-- [ ] **Step 3: Implement** window scheduling, measurement construction and filter update.
-- [ ] **Step 4: Verify GREEN** with pytest.
+- [x] **Step 1: Write failing tests** showing no correction before a full window and correction after a deterministic displacement prediction.
+- [x] **Step 2: Verify RED** with pytest.
+- [x] **Step 3: Implement** exact-window scheduling, timestamp-aligned body-to-world conversion, measurement construction and filter update.
+- [x] **Step 4: Verify GREEN** with pytest.
 
 ### Task 4: Isaac/OpenVINS runtime integration
 
 **Files:**
-- Modify: `tasks/drone_racer/drone_racer_swift_perception_env_cfg.py`
-- Modify: `tasks/drone_racer/swift_openvins_env.py`
+- Create: `tasks/drone_racer/drone_racer_hybrid_openvins_env_cfg.py`
+- Create: `tasks/drone_racer/hybrid_openvins_env.py`
+- Modify: `tasks/drone_racer/__init__.py`
 
 **Interfaces:**
 - New config: checkpoint path/device/window/update gate parameters.
-- Runtime: `openvins_raw_vio_estimate`, `openvins_learned_vio_estimate`, existing `openvins_vio_estimate` remains downstream selected estimate.
+- Runtime: `openvins_raw_vio_estimate`, `openvins_learned_vio_estimate`, existing `openvins_vio_estimate` remains the downstream selected estimate.
+- Task: `Isaac-Drone-Racer-Swift-Hybrid-OpenVINS-v0`.
 
-- [ ] **Step 1: Add configuration contract checks** through pure source-level/runtime-safe tests where possible.
-- [ ] **Step 2: Add lazy checkpoint initialization** only when the path is configured.
-- [ ] **Step 3: Read applied collective thrust from `control_action.processed_actions[0]`, rotate thrust and gyro with the raw VIO orientation, feed the hybrid corrector, and pass corrected VIO to Swift fusion.
-- [ ] **Step 4: Reset learned state on simulator reset and log learned update/acceptance metrics.
+- [x] **Step 1: Add configuration contract checks** for learned-motion parameters.
+- [x] **Step 2: Add lazy checkpoint initialization** only when the path is configured.
+- [x] **Step 3: Read applied collective thrust from `control_action.processed_actions[0]`, timestamp it with the IMU stream, rotate body motion using timestamp-aligned raw VIO attitude, feed the hybrid corrector, and pass corrected VIO to Swift fusion.
+- [x] **Step 4: Reset learned state on simulator reset and log learned update/acceptance metrics.**
 
-### Task 5: Training trace and trainer
+### Task 5: Training data, dataset, trainer and evaluator
 
 **Files:**
-- Modify: `scripts/estimation/run_openvins_fault_isolation.py`
+- Create: `scripts/estimation/collect_learned_motion_data.py`
 - Create: `estimation/learned_motion_dataset.py`
 - Create: `scripts/estimation/train_learned_motion.py`
+- Create: `scripts/estimation/run_hybrid_openvins_evaluation.py`
 - Create: `tests/estimation/test_learned_motion_dataset.py`
 
 **Interfaces:**
-- Trace adds processed collective/body thrust.
+- Collector records processed collective/body thrust, IMU and truth pose into complete trajectory files.
 - Dataset converts complete traces to 100 Hz, 0.5 s gyro+thrust windows and truth `dp` labels.
 - Trainer saves a checkpoint containing model state plus window/sample-rate metadata.
+- Evaluator compares raw OpenVINS, learned-corrected OpenVINS, and optional gate-fused output.
 
-- [ ] **Step 1: Write failing dataset tests** using synthetic CSV rows and complete-trace splitting.
-- [ ] **Step 2: Verify RED**.
-- [ ] **Step 3: Implement dataset utilities and extend trace schema.
-- [ ] **Step 4: Implement torch training CLI with Gaussian NLL displacement loss.
-- [ ] **Step 5: Verify dataset tests and Python compilation.
+- [x] **Step 1: Write failing dataset tests** using synthetic CSV rows and complete-trace splitting.
+- [x] **Step 2: Verify RED**.
+- [x] **Step 3: Implement dataset utilities and a dedicated training-trace collector.**
+- [x] **Step 4: Implement torch training CLI with Gaussian NLL displacement loss.**
+- [x] **Step 5: Implement raw-vs-learned evaluation runner and verify dataset tests/Python compilation.**
 
 ### Task 6: CI and documentation
 
@@ -107,7 +111,13 @@
 - Modify: `estimation/__init__.py`
 - Create: `docs/HYBRID_LEARNED_MOTION_VIO.md`
 
-- [ ] **Step 1: Add new pure modules to compile checks and NumPy-only tests to CI.
-- [ ] **Step 2: Export stable public estimator symbols without importing torch eagerly.
-- [ ] **Step 3: Document data collection, training, checkpoint configuration and evaluation workflow.
-- [ ] **Step 4: Run the reconstructed pure test suite locally and inspect GitHub Actions after push.
+- [x] **Step 1: Add new pure modules to compile checks and NumPy-only tests to CI.**
+- [x] **Step 2: Export stable public estimator symbols without importing torch eagerly.**
+- [x] **Step 3: Document data collection, training, checkpoint configuration and evaluation workflow.**
+- [x] **Step 4: Run the reconstructed pure test suite locally and inspect GitHub Actions after push.**
+
+## Verification record
+
+- Local reconstructed pure hybrid suite: `19 passed`.
+- GitHub Actions `debug-opvs pure checks`, run `34939050742`: `31 passed in 0.26s`; compilation, shell validation and pure tests all succeeded.
+- A full Isaac Sim + external OpenVINS + trained-checkpoint evaluation still requires running on the project workstation; no accuracy improvement is claimed until those experiments are performed.
