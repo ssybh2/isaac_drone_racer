@@ -9,12 +9,17 @@ from .drone_racer_swift_perception_env_cfg import DroneRacerSwiftPerceptionEnvCf
 
 @configclass
 class DroneRacerHybridOpenVinsEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
-    """Enable an optional learned relative-motion constraint ahead of gate fusion.
+    """Enable optional learned motion and explicit diagnostic absolute anchors.
 
-    Leaving ``learned_motion_checkpoint`` as ``None`` preserves the raw OpenVINS
+    Leaving ``learned_motion_checkpoint`` as ``None`` preserves raw OpenVINS
     behavior. Supplying a checkpoint activates the TCN displacement predictor,
     learned translational-drift EKF, and then the existing Swift mapped-gate
     absolute correction layer.
+
+    ``oracle_absolute_position_enabled`` is an Isaac-only diagnostic switch. It
+    injects sparse noisy simulator-truth position as an absolute measurement to
+    measure the upper bound of a future real absolute source such as gate PnP,
+    GPS, or UWB. It must remain disabled for sensor-faithful evaluation.
     """
 
     learned_motion_checkpoint: str | None = None
@@ -25,6 +30,11 @@ class DroneRacerHybridOpenVinsEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     learned_motion_sigma_velocity: float = 0.1
     learned_motion_innovation_gate_chi2: float | None = 16.26623619623813
     learned_motion_variance_floor: float = 1.0e-6
+
+    oracle_absolute_position_enabled: bool = False
+    oracle_position_rate_hz: float = 2.0
+    oracle_position_sigma_m: float = 0.10
+    oracle_position_seed: int = 0
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -41,3 +51,7 @@ class DroneRacerHybridOpenVinsEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
             raise ValueError("learned_motion_innovation_gate_chi2 must be positive or None")
         if self.learned_motion_variance_floor <= 0.0:
             raise ValueError("learned_motion_variance_floor must be positive")
+        if self.oracle_position_rate_hz <= 0.0:
+            raise ValueError("oracle_position_rate_hz must be positive")
+        if self.oracle_position_sigma_m < 0.0:
+            raise ValueError("oracle_position_sigma_m must be non-negative")
