@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .learned_motion import DisplacementPrediction, DisplacementPredictor, LearnedMotionBuffer
+from .learned_motion import DisplacementPrediction, DisplacementPredictor, LearnedMotionBuffer, MotionWindow
 from .learned_vio_drift import LearnedDisplacementMeasurement, LearnedVioDriftFilter
 from .swift_vio_drift import VioWorldEstimate
 from .vio_time_buffer import VioWorldEstimateBuffer
@@ -67,6 +67,10 @@ class HybridLearnedVioCorrector:
             window_time_s=window_time_s,
             sample_rate_hz=sample_rate_hz,
         )
+        self.body_motion_buffer = LearnedMotionBuffer(
+            window_time_s=window_time_s,
+            sample_rate_hz=sample_rate_hz,
+        )
         self.window_time_s = float(window_time_s)
         self.sample_rate_hz = float(sample_rate_hz)
         self.drift_filter = drift_filter or LearnedVioDriftFilter(
@@ -84,13 +88,40 @@ class HybridLearnedVioCorrector:
 
     def reset(self) -> None:
         self.motion_buffer.reset()
+        self.body_motion_buffer.reset()
         self.vio_buffer.clear()
         self.drift_filter.reset()
         self.window_start_timestamp_s = None
         self.last_result = None
 
     def ingest_motion_sample(self, timestamp_s: float, *, gyro_w, thrust_w) -> None:
+        """Append an already world-frame motion sample."""
         self.motion_buffer.append(timestamp_s, gyro_w=gyro_w, thrust_w=thrust_w)
+
+    def ingest_body_motion_sample(self, timestamp_s: float, *, gyro_b, thrust_b) -> None:
+        """Append a timestamped body-frame sample for later VIO-attitude rotation."""
+        self.body_motion_buffer.append(timestamp_s, gyro_w=gyro_b, thrust_w=thrust_b)
+
+    def _prediction_window(self, start: float, end: float) -> MotionWindow:
+        if len(self.body_motion_buffer) > 0:
+            body = self.body_motion_buffer.window(start, end)
+            world_features = np.empty_like(body.features)
+            for index, timestamp in enumerate(body.timestamps_s):
+                vio_at_sample = self.vio_buffer.interpolate(float(timestamp))
+                gyro_w, thrust_w = body_motion_to_world(
+                    vio_at_sample,
+                    gyro_b=body.features[0:3, index],
+                    thrust_b=body.features[3:6, index],
+                )
+                world_features[0:3, index] = gyro_w
+                world_features[3:6, index] = thrust_w
+            return MotionWindow(
+                features=world_features,
+                timestamps_s=body.timestamps_s,
+                start_timestamp_s=body.start_timestamp_s,
+                end_timestamp_s=body.end_timestamp_s,
+            )
+        return self.motion_buffer.window(start, end)
 
     def _initialize_from_vio(self, raw: VioWorldEstimate) -> HybridVioCorrectionResult:
         self.window_start_timestamp_s = float(raw.timestamp_s)
@@ -108,6 +139,7 @@ class HybridLearnedVioCorrector:
         self.drift_filter.reanchor(endpoint)
         self.window_start_timestamp_s = float(endpoint.timestamp_s)
         self.motion_buffer.discard_before(endpoint.timestamp_s)
+        self.body_motion_buffer.discard_before(endpoint.timestamp_s)
 
     def step(self, raw: VioWorldEstimate) -> HybridVioCorrectionResult:
         self.vio_buffer.push(raw)
@@ -134,7 +166,7 @@ class HybridLearnedVioCorrector:
                 break
 
             try:
-                window = self.motion_buffer.window(start, end)
+                window = self._prediction_window(start, end)
             except ValueError:
                 skipped += 1
                 self._advance_skipped_window(endpoint)
@@ -162,6 +194,7 @@ class HybridLearnedVioCorrector:
                 self.drift_filter.reanchor(endpoint)
                 self.window_start_timestamp_s = end
             self.motion_buffer.discard_before(end)
+            self.body_motion_buffer.discard_before(end)
 
         # Learned updates are processed at exact historical boundaries before
         # propagating the drift state to the newest raw OpenVINS timestamp.
