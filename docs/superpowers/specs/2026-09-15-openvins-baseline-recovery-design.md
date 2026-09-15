@@ -14,7 +14,7 @@ This phase implements four things:
 
 1. identify the exact local OpenVINS source repository and commit used by `~/openvins_ws`;
 2. add a diagnostic-only ROS2 ground-truth initialization path that calls OpenVINS `VioManager::initialize_with_gt()` once, with Isaac truth used only at initialization time;
-3. add a truly static/UZH-style configuration ablation that removes dynamic initialization and keeps estimator changes isolated;
+3. add a truly static initialization ablation that removes dynamic initialization while preserving the beginning-only ZUPT hook OpenVINS uses to permit standstill initialization;
 4. compare automatic initialization versus GT initialization with the same post-initialization hover and translation experiments.
 
 Learned residual estimation and gate-map absolute correction are explicitly deferred to later phases. They remain the intended architecture after the raw VIO baseline is understood.
@@ -24,6 +24,8 @@ Learned residual estimation and gate-map absolute correction are explicitly defe
 The matched hover and post-init translation tests show that the estimator diverges even without deliberate translation. Timestamp alignment reduces the apparent orientation error but barely changes the position/velocity error, so the approximately 97 ms odometry age is not the primary cause of the divergence. In the post-init translation run, the simulator truth stays near the commanded trajectory while OpenVINS position diverges by tens to more than one hundred metres.
 
 The upstream OpenVINS implementation exposes `VioManager::initialize_with_gt(Eigen::Matrix<double,17,1>)`, where the state is ordered as `[time, q_GtoI, p_IinG, v_IinG, b_gyro, b_accel]`. The upstream simulator already uses this entry point, making it suitable for a diagnostic experiment rather than a custom estimator modification.
+
+A source audit also shows an important initializer detail: `VioManager::try_to_initialize()` sets `wait_for_jerk = (updaterZUPT == nullptr)`. Therefore a stationary diagnostic with `try_zupt: false` can wait for motion instead of initializing at standstill. For the true-static ablation we must keep the ZUPT updater present but beginning-only, while disabling dynamic initialization.
 
 ## Architecture
 
@@ -53,15 +55,16 @@ The topic is diagnostic-only and is not part of the deployable real-vehicle inte
 
 The JSON summary records whether GT initialization was requested and how long it took before the first OpenVINS estimate was observed.
 
-### 4. True-static/UZH-style ablation
+### 4. True-static ablation
 
-A separate OpenVINS YAML variant is added for initialization diagnosis. Relative to the current strict-static debug configuration it changes one conceptual variable set:
+A separate OpenVINS YAML variant is added for initialization diagnosis. Relative to the current strict-static debug configuration it changes the dynamic initializer only:
 
 - `init_dyn_use: false`;
-- `try_zupt: false` for the clean initializer comparison;
-- preserves the current camera model, IMU noise baseline, MSCKF representation, and fixed simulator extrinsics.
+- keep `try_zupt: true` so OpenVINS does not force a jerk before static initialization;
+- keep `zupt_only_at_beginning: true` so ZUPT is restricted to the startup phase rather than remaining a flight correction mechanism;
+- preserve the current camera model, IMU noise baseline, MSCKF representation, and fixed simulator extrinsics.
 
-This is intentionally not a wholesale copy of the UZH-FPV outdoor configuration: the UZH setup is stereo and has dataset-specific masks/calibration, while this simulator is mono with known synthetic intrinsics/extrinsics. The ablation borrows the initialization strategy, not unrelated dataset details.
+This is intentionally not a wholesale copy of the UZH-FPV outdoor configuration. UZH's public outdoor dataset config uses `try_zupt: false` because its dataset/initialization conditions differ; copying that switch into a stationary simulator test would change the initializer semantics. We borrow the no-dynamic-initializer principle while retaining the OpenVINS mechanism required for standstill initialization in this experiment.
 
 ## Decision tree
 
