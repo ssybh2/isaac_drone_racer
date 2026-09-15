@@ -4,7 +4,7 @@
 
 **Goal:** Add a controlled OpenVINS GT-initialization diagnostic and source-identity guard so initialization can be isolated from propagation/visual-update failure.
 
-**Architecture:** Keep the estimator external. Add a pure Isaac-side conversion contract, a ROS2 diagnostic publisher, a guarded external OpenVINS patch, and one true-static/UZH-style config variant. The existing runner enables GT initialization only through an explicit flag and preserves all existing behavior otherwise.
+**Architecture:** Keep the estimator external. Add a pure Isaac-side conversion contract, a ROS2 diagnostic publisher, a guarded external OpenVINS patch, and one true-static config variant. The existing runner enables GT initialization only through an explicit flag and preserves all existing behavior otherwise.
 
 **Tech Stack:** Python 3.10, NumPy, ROS2 Humble (`rclpy`, `nav_msgs`), Bash, OpenVINS C++/Eigen, pytest, GitHub Actions.
 
@@ -100,19 +100,22 @@ Target `ov_msckf/src/ros/ROS2Visualizer.h` and `.cpp`. Keep the patch diagnostic
 
 Run `bash -n` on both helpers.
 
-### Task 4: True-static/UZH-style initialization ablation
+### Task 4: True-static initialization ablation
 
 **Files:**
 - Create: `config/openvins/swift_sim/estimator_config_debug_true_static.yaml`
 - Modify: `tests/estimation/test_openvins_config.py`
 
 **Interfaces:**
-- Mono simulator configuration based on current strict-static config, but `init_dyn_use: false` and `try_zupt: false`.
+- Mono simulator configuration based on current strict-static config.
+- `init_dyn_use: false` disables the dynamic initializer.
+- `try_zupt: true` is intentionally retained because upstream `VioManager::try_to_initialize()` sets `wait_for_jerk = (updaterZUPT == nullptr)`; without the ZUPT updater a stationary experiment can wait for motion instead of initializing at standstill.
+- `zupt_only_at_beginning: true` keeps the updater limited to startup.
 - Preserve known simulator intrinsics/extrinsics and current IMU noise baseline.
 
 - [ ] **Step 1: Add config assertions first**
 
-Test that the file exists, disables dynamic initialization and ZUPT, keeps FEJ/RK4, mono camera count, and references the same IMU/camera chain files.
+Test that the file exists, disables dynamic initialization, keeps beginning-only ZUPT, keeps FEJ/RK4, mono camera count, and references the same IMU/camera chain files.
 
 - [ ] **Step 2: Verify RED**
 
@@ -120,7 +123,7 @@ The test should fail because the config file does not yet exist.
 
 - [ ] **Step 3: Add the minimal configuration**
 
-Copy the current strict-static configuration and change only the documented initialization choices.
+Copy the current strict-static configuration and change only `init_dyn_use` to `false`, with comments documenting why ZUPT remains present at startup.
 
 - [ ] **Step 4: Verify config tests GREEN**
 
