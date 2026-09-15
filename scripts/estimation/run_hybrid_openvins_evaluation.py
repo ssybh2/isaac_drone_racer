@@ -225,7 +225,7 @@ def main() -> None:
         "learned_vd_before_x", "learned_vd_before_y", "learned_vd_before_z",
         "learned_vd_after_x", "learned_vd_after_y", "learned_vd_after_z",
         "raw_jump_detected", "raw_jump_residual_m",
-        "raw_jump_dx", "raw_jump_dy", "raw_jump_dz",
+        "raw_jump_d_x", "raw_jump_d_y", "raw_jump_d_z",
         "raw_jump_comp_x", "raw_jump_comp_y", "raw_jump_comp_z",
         "oracle_position_update_applied", "oracle_position_d2",
         "oracle_meas_x", "oracle_meas_y", "oracle_meas_z",
