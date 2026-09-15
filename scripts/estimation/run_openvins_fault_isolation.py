@@ -27,6 +27,16 @@ parser.add_argument(
 )
 parser.add_argument("--hover_action", type=float, default=0.0)
 parser.add_argument("--motion_start_s", type=float, default=6.0)
+parser.add_argument(
+    "--motion_start_after_init_s",
+    type=float,
+    default=None,
+    help=(
+        "If set, ignore absolute --motion_start_s for the experiment and keep the vehicle at the "
+        "initial target until an OpenVINS estimate is observed, then start motion after this delay. "
+        "Use this to isolate post-initialization propagation from initializer behavior."
+    ),
+)
 parser.add_argument("--translation_m", type=float, default=1.0)
 parser.add_argument("--translation_duration_s", type=float, default=10.0)
 parser.add_argument("--lissajous_amplitude_m", type=float, default=0.5)
@@ -83,6 +93,7 @@ import torch
 from isaaclab_tasks.utils import parse_env_cfg
 
 import tasks  # noqa: F401
+from estimation.fault_isolation_schedule import resolve_motion_start_time_s
 
 
 def _quat_to_rpy(q) -> np.ndarray:
@@ -132,11 +143,22 @@ def _vector_summary(values: list[np.ndarray]) -> dict:
     }
 
 
-def _target_xy(initial_xy: torch.Tensor, t_s: float) -> torch.Tensor:
+def _target_xy(
+    initial_xy: torch.Tensor,
+    t_s: float,
+    initialized_time_s: float | None,
+) -> torch.Tensor:
     target = initial_xy.clone()
-    if args_cli.profile == "hover" or t_s < args_cli.motion_start_s:
+    if args_cli.profile == "hover":
         return target
-    tau = t_s - args_cli.motion_start_s
+    motion_start_time_s = resolve_motion_start_time_s(
+        absolute_start_s=args_cli.motion_start_s,
+        after_init_delay_s=args_cli.motion_start_after_init_s,
+        initialized_time_s=initialized_time_s,
+    )
+    if motion_start_time_s is None or t_s < motion_start_time_s:
+        return target
+    tau = t_s - motion_start_time_s
     if args_cli.profile == "translate_x":
         alpha = min(1.0, max(0.0, tau / max(args_cli.translation_duration_s, 1.0e-6)))
         target[0] += float(args_cli.translation_m) * alpha
@@ -154,9 +176,10 @@ def _controller_action(
     target_height_m: float,
     target_yaw_rad: float,
     t_s: float,
+    initialized_time_s: float | None,
 ) -> tuple[torch.Tensor, float, float]:
     robot = raw_env.scene["robot"]
-    target_xy = _target_xy(initial_xy, t_s)
+    target_xy = _target_xy(initial_xy, t_s, initialized_time_s)
     height_error = target_height_m - float(robot.data.root_pos_w[0, 2])
     vertical_velocity = float(robot.data.root_lin_vel_w[0, 2])
     common = float(args_cli.hover_action) + 0.18 * height_error - 0.09 * vertical_velocity
@@ -232,6 +255,13 @@ def _empty_estimate_fields() -> dict:
 def main() -> None:
     if args_cli.steps < 1:
         raise ValueError("--steps must be positive")
+    # Validate both absolute and initialization-relative delay arguments before
+    # launching a long Isaac/OpenVINS run.
+    resolve_motion_start_time_s(
+        absolute_start_s=args_cli.motion_start_s,
+        after_init_delay_s=args_cli.motion_start_after_init_s,
+        initialized_time_s=None,
+    )
     output_dir = args_cli.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     trace_path = output_dir / f"{args_cli.profile}_trace.csv"
@@ -284,6 +314,7 @@ def main() -> None:
     vel_error_norms: list[float] = []
     orientation_errors: list[float] = []
     initialized_step: int | None = None
+    initialized_time_s: float | None = None
     error_checkpoints: dict[str, float] = {}
     completed_steps = 0
     stopped_for_divergence = False
@@ -302,6 +333,7 @@ def main() -> None:
                     target_height_m,
                     target_yaw_rad,
                     t_before,
+                    initialized_time_s,
                 )
                 _, _, terminated, truncated, _ = env.step(action.unsqueeze(0))
                 completed_steps = step + 1
@@ -314,7 +346,6 @@ def main() -> None:
                 truth_w_b = np.asarray(robot.data.root_ang_vel_b[0].detach().cpu(), dtype=np.float64)
                 imu_acc_b = np.asarray(imu.data.lin_acc_b[0].detach().cpu(), dtype=np.float64)
                 imu_gyro_b = np.asarray(imu.data.ang_vel_b[0].detach().cpu(), dtype=np.float64)
-                target_xy = _target_xy(initial_xy, t_s)
 
                 truth_positions.append(truth.position_w_b.copy())
                 truth_velocities.append(truth.linear_velocity_w_b.copy())
@@ -329,7 +360,20 @@ def main() -> None:
                 if estimate is None:
                     preinit_imu_accels.append(imu_acc_b)
                     preinit_imu_gyros.append(imu_gyro_b)
+                elif initialized_step is None:
+                    initialized_step = step
+                    initialized_time_s = t_s
+                    resolved_motion_start = resolve_motion_start_time_s(
+                        absolute_start_s=args_cli.motion_start_s,
+                        after_init_delay_s=args_cli.motion_start_after_init_s,
+                        initialized_time_s=initialized_time_s,
+                    )
+                    print(
+                        f"[FaultIsolation] OpenVINS observed at t={initialized_time_s:.2f}s; "
+                        f"motion_start={resolved_motion_start:.2f}s"
+                    )
 
+                target_xy = _target_xy(initial_xy, t_s, initialized_time_s)
                 row = {
                     "step": step,
                     "t_s": t_s,
@@ -366,8 +410,6 @@ def main() -> None:
                 }
 
                 if estimate is not None:
-                    if initialized_step is None:
-                        initialized_step = step
                     pos_error = estimate.position_w_b - truth.position_w_b
                     vel_error = estimate.linear_velocity_w_b - truth.linear_velocity_w_b
                     pos_error_norm = float(np.linalg.norm(pos_error))
@@ -403,7 +445,7 @@ def main() -> None:
                             "drained_callbacks": int(raw_env._openvins_bridge.last_drain_count),
                         }
                     )
-                    since_init = (step - initialized_step) * float(raw_env.step_dt)
+                    since_init = 0.0 if initialized_time_s is None else t_s - initialized_time_s
                     for checkpoint_s in (1.0, 5.0, 10.0, 20.0, 30.0):
                         key = f"{checkpoint_s:g}s"
                         if key not in error_checkpoints and since_init >= checkpoint_s:
@@ -452,16 +494,34 @@ def main() -> None:
             max_displacement = float(
                 np.max(np.linalg.norm(truth_position_array - initial_position, axis=1))
             )
+        resolved_motion_start_s = resolve_motion_start_time_s(
+            absolute_start_s=args_cli.motion_start_s,
+            after_init_delay_s=args_cli.motion_start_after_init_s,
+            initialized_time_s=initialized_time_s,
+        )
         report = {
-            "schema": "isaac_drone_racer.openvins_fault_isolation.v2",
+            "schema": "isaac_drone_racer.openvins_fault_isolation.v3",
             "profile": args_cli.profile,
             "python_executable": sys.executable,
             "completed_steps": completed_steps,
             "openvins_initialized_step": initialized_step,
-            "openvins_initialized_time_s": (
-                None if initialized_step is None else initialized_step * float(raw_env.step_dt)
-            ),
+            "openvins_initialized_time_s": initialized_time_s,
             "stopped_for_divergence": stopped_for_divergence,
+            "motion_schedule": {
+                "absolute_start_s": float(args_cli.motion_start_s),
+                "start_after_init_delay_s": (
+                    None
+                    if args_cli.motion_start_after_init_s is None
+                    else float(args_cli.motion_start_after_init_s)
+                ),
+                "resolved_start_s": resolved_motion_start_s,
+                "translation_duration_s": float(args_cli.translation_duration_s),
+                "starts_after_openvins_observed": (
+                    None
+                    if resolved_motion_start_s is None or initialized_time_s is None
+                    else bool(resolved_motion_start_s >= initialized_time_s)
+                ),
+            },
             "control": {
                 "yaw_hold_enabled": not args_cli.disable_yaw_hold,
                 "target_yaw_rad": target_yaw_rad,
