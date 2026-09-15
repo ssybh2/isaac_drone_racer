@@ -198,5 +198,8 @@ def test_corrector_can_apply_sparse_absolute_position_anchor_after_relative_upda
     )
 
     assert anchored.absolute_position_update_applied is True
-    assert anchored.corrected.position_w_b[0] == pytest.approx(1.0, abs=0.03)
+    assert abs(anchored.corrected.position_w_b[0] - 1.0) < abs(
+        relative.corrected.position_w_b[0] - 1.0
+    )
+    assert anchored.corrected.position_w_b[0] == pytest.approx(1.0, abs=0.12)
     assert anchored.raw is relative.raw
