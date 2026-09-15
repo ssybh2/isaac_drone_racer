@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -40,6 +40,11 @@ class HybridVioCorrectionResult:
     skipped_windows: int = 0
     mahalanobis2: float | None = None
     prediction: DisplacementPrediction | None = None
+    prediction_start_timestamp_s: float | None = None
+    prediction_end_timestamp_s: float | None = None
+    raw_window_displacement_w: np.ndarray | None = None
+    absolute_position_update_applied: bool = False
+    absolute_position_mahalanobis2: float | None = None
 
 
 class HybridLearnedVioCorrector:
@@ -49,6 +54,8 @@ class HybridLearnedVioCorrector:
     non-overlapping learned window boundary, raw VIO is interpolated to the
     boundary, the predictor produces physical displacement over the same
     interval, and the drift filter receives the relative drift measurement.
+    Sparse absolute position anchors can be fused separately without disturbing
+    the learned-window timing contract.
     """
 
     def __init__(
@@ -141,6 +148,35 @@ class HybridLearnedVioCorrector:
         self.motion_buffer.discard_before(endpoint.timestamp_s)
         self.body_motion_buffer.discard_before(endpoint.timestamp_s)
 
+    def apply_absolute_position(
+        self,
+        raw: VioWorldEstimate,
+        *,
+        position_w_b: np.ndarray,
+        covariance_w: np.ndarray,
+    ) -> HybridVioCorrectionResult:
+        """Fuse one absolute position measurement at the latest raw-VIO time."""
+        if self.last_result is None:
+            self._initialize_from_vio(raw)
+        if self.last_result is None:
+            raise RuntimeError("Hybrid VIO corrector failed to initialize")
+        if abs(float(raw.timestamp_s) - float(self.last_result.raw.timestamp_s)) > 1.0e-6:
+            raise ValueError("Absolute position anchor must match the latest raw VIO timestamp")
+        corrected = self.drift_filter.apply_absolute_position(
+            raw,
+            position_w_b=position_w_b,
+            covariance_w=covariance_w,
+        )
+        diagnostics = self.drift_filter.last_absolute_update_diagnostics
+        result = replace(
+            self.last_result,
+            corrected=corrected,
+            absolute_position_update_applied=True,
+            absolute_position_mahalanobis2=diagnostics.mahalanobis2,
+        )
+        self.last_result = result
+        return result
+
     def step(self, raw: VioWorldEstimate) -> HybridVioCorrectionResult:
         self.vio_buffer.push(raw)
         if self.window_start_timestamp_s is None:
@@ -151,6 +187,9 @@ class HybridLearnedVioCorrector:
         rejected = False
         skipped = 0
         last_prediction: DisplacementPrediction | None = None
+        last_prediction_start: float | None = None
+        last_prediction_end: float | None = None
+        last_raw_window_displacement: np.ndarray | None = None
         last_d2: float | None = None
         epsilon = 1.0e-9
 
@@ -172,8 +211,17 @@ class HybridLearnedVioCorrector:
                 self._advance_skipped_window(endpoint)
                 continue
 
+            anchor_vio_position = self.drift_filter.anchor_vio_position_w
+            if anchor_vio_position is None:
+                raise RuntimeError("Learned drift filter lost its VIO anchor")
+            raw_window_displacement = (
+                np.asarray(endpoint.position_w_b, dtype=np.float64) - anchor_vio_position
+            )
             prediction = self.predictor.predict(window)
             last_prediction = prediction
+            last_prediction_start = start
+            last_prediction_end = end
+            last_raw_window_displacement = raw_window_displacement.copy()
             measurement = LearnedDisplacementMeasurement(
                 displacement_w=prediction.displacement_w,
                 covariance_w=prediction.covariance_w,
@@ -208,6 +256,9 @@ class HybridLearnedVioCorrector:
             skipped_windows=skipped,
             mahalanobis2=last_d2,
             prediction=last_prediction,
+            prediction_start_timestamp_s=last_prediction_start,
+            prediction_end_timestamp_s=last_prediction_end,
+            raw_window_displacement_w=last_raw_window_displacement,
         )
         self.last_result = result
         return result
