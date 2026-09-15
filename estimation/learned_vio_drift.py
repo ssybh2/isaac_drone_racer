@@ -102,6 +102,7 @@ class LearnedVioDriftFilter:
         self.anchor_vio_position_w: np.ndarray | None = None
         self.last_update_diagnostics = LearnedDriftUpdateDiagnostics()
         self.last_absolute_update_diagnostics = LearnedDriftUpdateDiagnostics()
+        self.last_velocity_update_diagnostics = LearnedDriftUpdateDiagnostics()
 
     @property
     def anchor_position_drift_w(self) -> np.ndarray:
@@ -136,6 +137,7 @@ class LearnedVioDriftFilter:
         self.anchor_timestamp_s = None if timestamp_s is None else float(timestamp_s)
         self.last_update_diagnostics = LearnedDriftUpdateDiagnostics()
         self.last_absolute_update_diagnostics = LearnedDriftUpdateDiagnostics()
+        self.last_velocity_update_diagnostics = LearnedDriftUpdateDiagnostics()
 
     def _ensure_initialized(self, vio: VioWorldEstimate) -> None:
         if self.anchor_vio_position_w is None:
@@ -256,6 +258,54 @@ class LearnedVioDriftFilter:
             innovation_w=tuple(float(v) for v in innovation),
         )
         return True
+
+    def apply_velocity_drift_measurement(
+        self,
+        *,
+        velocity_drift_w: np.ndarray,
+        covariance_w: np.ndarray,
+    ) -> np.ndarray:
+        """Update only the velocity-drift mean from an explicit drift-rate measurement.
+
+        This is intentionally Schmidt-style: the measurement observes
+        ``v_d_current`` directly, and only the velocity rows of the Kalman gain
+        are active. Position and anchor drift means therefore cannot jump due to
+        this update; the new velocity drift affects position only through normal
+        time propagation on subsequent samples.
+        """
+        velocity = np.asarray(velocity_drift_w, dtype=np.float64).reshape(3)
+        if not np.all(np.isfinite(velocity)):
+            raise ValueError("Velocity drift measurement must be finite")
+        R = self._validated_covariance(covariance_w, name="Velocity drift")
+
+        H = np.zeros((3, 9), dtype=np.float64)
+        H[:, 6:9] = np.eye(3)
+        innovation = velocity - H @ self.x
+        S = H @ self.P @ H.T + R
+        try:
+            solved = np.linalg.solve(S, innovation)
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError("Velocity-drift innovation covariance is singular") from exc
+        d2 = float(innovation.T @ solved)
+
+        K = np.zeros((9, 3), dtype=np.float64)
+        try:
+            K[6:9, :] = np.linalg.solve(S.T, self.P[6:9, 6:9].T).T
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError("Velocity-drift Kalman gain solve failed") from exc
+        self.x = self.x + K @ innovation
+        I9 = np.eye(9, dtype=np.float64)
+        A = I9 - K @ H
+        self.P = A @ self.P @ A.T + K @ R @ K.T
+        self.P = 0.5 * (self.P + self.P.T)
+        self.last_velocity_update_diagnostics = LearnedDriftUpdateDiagnostics(
+            attempted=1,
+            accepted=1,
+            rejected=0,
+            mahalanobis2=d2,
+            innovation_w=tuple(float(v) for v in innovation),
+        )
+        return self.current_velocity_drift_w
 
     def apply_absolute_position(
         self,
