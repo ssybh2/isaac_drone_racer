@@ -1,4 +1,4 @@
-"""Evaluate raw OpenVINS versus learned-motion correction and optional Swift gate fusion."""
+"""Evaluate raw OpenVINS versus learned-motion correction and optional absolute anchors."""
 
 from __future__ import annotations
 
@@ -23,6 +23,17 @@ parser.add_argument("--lissajous_amplitude_m", type=float, default=0.6)
 parser.add_argument("--lissajous_frequency_hz", type=float, default=0.08)
 parser.add_argument("--detector_checkpoint", type=Path, default=None)
 parser.add_argument("--visibility_checkpoint", type=Path, default=None)
+parser.add_argument(
+    "--oracle_absolute_position",
+    action="store_true",
+    help=(
+        "Inject sparse noisy Isaac truth position as an absolute measurement. "
+        "Diagnostic upper-bound experiment only; disabled by default."
+    ),
+)
+parser.add_argument("--oracle_position_rate_hz", type=float, default=2.0)
+parser.add_argument("--oracle_position_sigma_m", type=float, default=0.10)
+parser.add_argument("--oracle_position_seed", type=int, default=0)
 parser.add_argument("--output_dir", type=Path, default=Path("artifacts/hybrid_openvins_evaluation"))
 parser.add_argument("--task", default="Isaac-Drone-Racer-Swift-Hybrid-OpenVINS-v0")
 AppLauncher.add_app_launcher_args(parser)
@@ -39,6 +50,7 @@ import torch
 from isaaclab_tasks.utils import parse_env_cfg
 
 import tasks  # noqa: F401
+from estimation.vio_time_buffer import VioWorldEstimateBuffer
 
 
 def _quat_to_yaw(q) -> float:
@@ -119,6 +131,18 @@ def _stats(values):
     }
 
 
+def _put_vector(row: dict, prefix: str, value) -> None:
+    if value is None:
+        row[f"{prefix}_x"] = ""
+        row[f"{prefix}_y"] = ""
+        row[f"{prefix}_z"] = ""
+        return
+    vector = np.asarray(value, dtype=np.float64).reshape(3)
+    row[f"{prefix}_x"] = float(vector[0])
+    row[f"{prefix}_y"] = float(vector[1])
+    row[f"{prefix}_z"] = float(vector[2])
+
+
 def main() -> None:
     checkpoint = args_cli.checkpoint.expanduser().resolve()
     if not checkpoint.exists():
@@ -131,6 +155,10 @@ def main() -> None:
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
     env_cfg.learned_motion_checkpoint = str(checkpoint)
     env_cfg.learned_motion_device = args_cli.device
+    env_cfg.oracle_absolute_position_enabled = bool(args_cli.oracle_absolute_position)
+    env_cfg.oracle_position_rate_hz = float(args_cli.oracle_position_rate_hz)
+    env_cfg.oracle_position_sigma_m = float(args_cli.oracle_position_sigma_m)
+    env_cfg.oracle_position_seed = int(args_cli.oracle_position_seed)
     env_cfg.swift_detector_checkpoint = (
         None if args_cli.detector_checkpoint is None else str(args_cli.detector_checkpoint.expanduser().resolve())
     )
@@ -150,6 +178,8 @@ def main() -> None:
     initial_xy = robot.data.root_pos_w[0, :2].clone()
     target_height_m = float(robot.data.root_pos_w[0, 2])
     target_yaw_rad = _quat_to_yaw(robot.data.root_quat_w[0])
+    truth_buffer = VioWorldEstimateBuffer(max_age_s=5.0, max_samples=2048)
+    truth_buffer.push(raw_env._truth_vio_state())
 
     fields = [
         "step", "t_s",
@@ -160,10 +190,18 @@ def main() -> None:
         "raw_vel_err", "learned_vel_err", "gate_vel_err",
         "learned_update_attempted", "learned_update_accepted", "learned_update_rejected",
         "learned_innovation_d2", "learned_correction_norm_m",
+        "prediction_start_s", "prediction_end_s",
+        "gt_dp_x", "gt_dp_y", "gt_dp_z",
+        "nn_dp_x", "nn_dp_y", "nn_dp_z",
+        "vio_dp_x", "vio_dp_y", "vio_dp_z",
+        "nn_dp_error_m", "vio_dp_error_m",
+        "oracle_position_update_applied", "oracle_position_d2",
+        "oracle_meas_x", "oracle_meas_y", "oracle_meas_z",
     ]
     raw_pos_errors, learned_pos_errors, gate_pos_errors = [], [], []
     raw_vel_errors, learned_vel_errors, gate_vel_errors = [], [], []
     learned_attempted = learned_accepted = learned_rejected = 0
+    nn_window_errors, vio_window_errors = [], []
 
     def put_estimate(row, prefix, estimate, error):
         if estimate is None:
@@ -197,6 +235,7 @@ def main() -> None:
                 _, _, terminated, truncated, _ = env.step(action.unsqueeze(0))
                 completed = step + 1
                 truth = raw_env._truth_vio_state()
+                truth_buffer.push(truth)
                 raw = raw_env.openvins_raw_vio_estimate
                 learned = raw_env.openvins_learned_vio_estimate
                 gate_fused = raw_env.swift_fused_estimate
@@ -222,6 +261,33 @@ def main() -> None:
                 correction_norm = ""
                 if raw is not None and learned is not None:
                     correction_norm = float(np.linalg.norm(raw.position_w_b - learned.position_w_b))
+
+                gt_dp = nn_dp = vio_dp = None
+                nn_dp_error = vio_dp_error = ""
+                prediction_start = prediction_end = ""
+                if (
+                    result is not None
+                    and result.prediction is not None
+                    and result.prediction_start_timestamp_s is not None
+                    and result.prediction_end_timestamp_s is not None
+                    and result.raw_window_displacement_w is not None
+                ):
+                    prediction_start = float(result.prediction_start_timestamp_s)
+                    prediction_end = float(result.prediction_end_timestamp_s)
+                    try:
+                        truth_start = truth_buffer.interpolate(prediction_start)
+                        truth_end = truth_buffer.interpolate(prediction_end)
+                    except ValueError:
+                        pass
+                    else:
+                        gt_dp = truth_end.position_w_b - truth_start.position_w_b
+                        nn_dp = np.asarray(result.prediction.displacement_w, dtype=np.float64)
+                        vio_dp = np.asarray(result.raw_window_displacement_w, dtype=np.float64)
+                        nn_dp_error = float(np.linalg.norm(nn_dp - gt_dp))
+                        vio_dp_error = float(np.linalg.norm(vio_dp - gt_dp))
+                        nn_window_errors.append(nn_dp_error)
+                        vio_window_errors.append(vio_dp_error)
+
                 row = {
                     "step": step,
                     "t_s": float(raw_env._timestamp_s()),
@@ -233,7 +299,17 @@ def main() -> None:
                     "learned_update_rejected": 0 if result is None else int(result.learned_update_rejected),
                     "learned_innovation_d2": "" if result is None or result.mahalanobis2 is None else float(result.mahalanobis2),
                     "learned_correction_norm_m": correction_norm,
+                    "prediction_start_s": prediction_start,
+                    "prediction_end_s": prediction_end,
+                    "nn_dp_error_m": nn_dp_error,
+                    "vio_dp_error_m": vio_dp_error,
+                    "oracle_position_update_applied": 0 if result is None else int(result.absolute_position_update_applied),
+                    "oracle_position_d2": "" if result is None or result.absolute_position_mahalanobis2 is None else float(result.absolute_position_mahalanobis2),
                 }
+                _put_vector(row, "gt_dp", gt_dp)
+                _put_vector(row, "nn_dp", nn_dp)
+                _put_vector(row, "vio_dp", vio_dp)
+                _put_vector(row, "oracle_meas", raw_env.oracle_position_last_measurement_w if result is not None and result.absolute_position_update_applied else None)
                 put_estimate(row, "raw", raw, raw_error)
                 put_estimate(row, "learned", learned, learned_error)
                 put_estimate(row, "gate", gate_fused, gate_error)
@@ -252,6 +328,17 @@ def main() -> None:
             "learned_corrected": {"position_error_m": _stats(learned_pos_errors), "velocity_error_mps": _stats(learned_vel_errors)},
             "gate_fused": {"position_error_m": _stats(gate_pos_errors), "velocity_error_mps": _stats(gate_vel_errors)},
             "learned_updates": {"attempted": learned_attempted, "accepted": learned_accepted, "rejected": learned_rejected},
+            "learned_window_diagnostics": {
+                "nn_displacement_error_m": _stats(nn_window_errors),
+                "raw_vio_displacement_error_m": _stats(vio_window_errors),
+            },
+            "oracle_absolute_position": {
+                "enabled": bool(args_cli.oracle_absolute_position),
+                "rate_hz": float(args_cli.oracle_position_rate_hz),
+                "sigma_m": float(args_cli.oracle_position_sigma_m),
+                "seed": int(args_cli.oracle_position_seed),
+                "updates": int(raw_env.oracle_position_update_count),
+            },
             "detector_enabled": args_cli.detector_checkpoint is not None,
             "files": {"trace_csv": trace_path.name},
         }
