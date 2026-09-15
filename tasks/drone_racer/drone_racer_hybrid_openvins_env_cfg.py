@@ -33,6 +33,8 @@ class DroneRacerHybridOpenVinsEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     learned_motion_relative_position_only: bool = False
     learned_motion_drift_velocity_from_displacement: bool = False
     learned_motion_drift_velocity_sigma_floor_mps: float = 0.5
+    learned_motion_position_residual_slew: bool = False
+    learned_motion_position_residual_max_rate_mps: float = 4.0
     learned_motion_raw_vio_jump_isolation: bool = False
     learned_motion_raw_vio_jump_threshold_m: float = 0.5
 
@@ -58,12 +60,22 @@ class DroneRacerHybridOpenVinsEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
             raise ValueError("learned_motion_variance_floor must be positive")
         if self.learned_motion_drift_velocity_sigma_floor_mps <= 0.0:
             raise ValueError("learned_motion_drift_velocity_sigma_floor_mps must be positive")
+        if self.learned_motion_position_residual_max_rate_mps <= 0.0:
+            raise ValueError("learned_motion_position_residual_max_rate_mps must be positive")
         if (
             self.learned_motion_drift_velocity_from_displacement
             and not self.learned_motion_relative_position_only
         ):
             raise ValueError(
                 "learned_motion_drift_velocity_from_displacement requires "
+                "learned_motion_relative_position_only"
+            )
+        if (
+            self.learned_motion_position_residual_slew
+            and not self.learned_motion_relative_position_only
+        ):
+            raise ValueError(
+                "learned_motion_position_residual_slew requires "
                 "learned_motion_relative_position_only"
             )
         if self.learned_motion_raw_vio_jump_threshold_m <= 0.0:

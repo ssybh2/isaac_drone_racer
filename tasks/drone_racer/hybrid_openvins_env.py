@@ -97,6 +97,12 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             learned_drift_velocity_sigma_floor_mps=(
                 self.cfg.learned_motion_drift_velocity_sigma_floor_mps
             ),
+            learned_position_residual_slew=(
+                self.cfg.learned_motion_position_residual_slew
+            ),
+            learned_position_residual_max_rate_mps=(
+                self.cfg.learned_motion_position_residual_max_rate_mps
+            ),
             raw_vio_jump_isolation=self.cfg.learned_motion_raw_vio_jump_isolation,
             raw_vio_jump_threshold_m=self.cfg.learned_motion_raw_vio_jump_threshold_m,
         )
@@ -242,6 +248,12 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
         log["LearnedMotion/drift_velocity_sigma_floor_mps"] = float(
             self.cfg.learned_motion_drift_velocity_sigma_floor_mps
         )
+        log["LearnedMotion/position_residual_slew"] = float(
+            self.cfg.learned_motion_position_residual_slew
+        )
+        log["LearnedMotion/position_residual_max_rate_mps"] = float(
+            self.cfg.learned_motion_position_residual_max_rate_mps
+        )
         log["LearnedMotion/raw_vio_jump_isolation"] = float(
             self.cfg.learned_motion_raw_vio_jump_isolation
         )
@@ -259,6 +271,9 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             log["LearnedMotion/raw_vio_jump_max_residual_m"] = float(
                 self.learned_motion_corrector.raw_vio_jump_max_residual_m
             )
+            log["LearnedMotion/position_residual_pending_norm_m"] = float(
+                np.linalg.norm(self.learned_motion_corrector.pending_position_drift_w)
+            )
         if self.openvins_raw_vio_estimate is not None and self.openvins_vio_estimate is not None:
             correction = (
                 self.openvins_raw_vio_estimate.position_w_b
@@ -273,6 +288,15 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             log["LearnedMotion/skipped_windows"] = float(result.skipped_windows)
             log["LearnedMotion/velocity_update_applied"] = float(
                 result.learned_velocity_update_applied
+            )
+            log["LearnedMotion/position_injection_norm_m"] = float(
+                result.learned_position_injection_norm_m
+            )
+            log["LearnedMotion/position_release_norm_m"] = float(
+                result.learned_position_release_norm_m
+            )
+            log["LearnedMotion/position_pending_norm_m"] = float(
+                result.learned_position_pending_norm_m
             )
             if result.learned_velocity_mahalanobis2 is not None:
                 log["LearnedMotion/velocity_update_d2"] = float(

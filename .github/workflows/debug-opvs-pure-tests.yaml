@@ -48,4 +48,5 @@ jobs:
             tests/estimation/test_learned_vio_drift.py \
             tests/estimation/test_learned_motion.py \
             tests/estimation/test_hybrid_vio_corrector.py \
-            tests/estimation/test_learned_motion_dataset.py
+            tests/estimation/test_learned_motion_dataset.py \
+            tests/estimation/test_hybrid_eval_csv_schema.py

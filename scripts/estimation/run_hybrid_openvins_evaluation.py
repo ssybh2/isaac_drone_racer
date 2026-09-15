@@ -46,6 +46,20 @@ parser.add_argument(
     help="Minimum 1-sigma uncertainty for the explicit learned drift-velocity measurement.",
 )
 parser.add_argument(
+    "--learned_position_residual_slew",
+    action="store_true",
+    help=(
+        "With --learned_relative_position_only, defer each accepted learned position "
+        "residual and release it as a common-mode drift correction at a bounded rate."
+    ),
+)
+parser.add_argument(
+    "--learned_position_residual_max_rate_mps",
+    type=float,
+    default=4.0,
+    help="Maximum norm rate used to release deferred learned position drift residuals.",
+)
+parser.add_argument(
     "--raw_vio_jump_isolation",
     action="store_true",
     help=(
@@ -200,6 +214,12 @@ def main() -> None:
     env_cfg.learned_motion_drift_velocity_sigma_floor_mps = float(
         args_cli.learned_drift_velocity_sigma_floor_mps
     )
+    env_cfg.learned_motion_position_residual_slew = bool(
+        args_cli.learned_position_residual_slew
+    )
+    env_cfg.learned_motion_position_residual_max_rate_mps = float(
+        args_cli.learned_position_residual_max_rate_mps
+    )
     env_cfg.learned_motion_raw_vio_jump_isolation = bool(args_cli.raw_vio_jump_isolation)
     env_cfg.learned_motion_raw_vio_jump_threshold_m = float(args_cli.raw_vio_jump_threshold_m)
     env_cfg.oracle_absolute_position_enabled = bool(args_cli.oracle_absolute_position)
@@ -239,6 +259,8 @@ def main() -> None:
         "learned_innovation_d2", "learned_correction_norm_m",
         "learned_velocity_update_applied", "learned_velocity_d2",
         "learned_velocity_correction_norm_m",
+        "learned_position_injection_norm_m", "learned_position_release_norm_m",
+        "learned_position_pending_norm_m",
         "prediction_start_s", "prediction_end_s",
         "gt_dp_x", "gt_dp_y", "gt_dp_z",
         "nn_dp_x", "nn_dp_y", "nn_dp_z",
@@ -367,6 +389,9 @@ def main() -> None:
                     "learned_velocity_update_applied": 0 if result is None else int(result.learned_velocity_update_applied),
                     "learned_velocity_d2": "" if result is None or result.learned_velocity_mahalanobis2 is None else float(result.learned_velocity_mahalanobis2),
                     "learned_velocity_correction_norm_m": velocity_correction_norm,
+                    "learned_position_injection_norm_m": "" if result is None else float(result.learned_position_injection_norm_m),
+                    "learned_position_release_norm_m": "" if result is None else float(result.learned_position_release_norm_m),
+                    "learned_position_pending_norm_m": "" if result is None else float(result.learned_position_pending_norm_m),
                     "prediction_start_s": prediction_start,
                     "prediction_end_s": prediction_end,
                     "nn_dp_error_m": nn_dp_error,
@@ -431,6 +456,9 @@ def main() -> None:
         jump_final_norm = 0.0 if corrector is None else float(
             np.linalg.norm(corrector.raw_vio_jump_compensation_w)
         )
+        position_pending_final_norm = 0.0 if corrector is None else float(
+            np.linalg.norm(corrector.pending_position_drift_w)
+        )
         report = {
             "schema": "isaac_drone_racer.hybrid_openvins_evaluation.v1",
             "checkpoint": str(checkpoint),
@@ -449,6 +477,11 @@ def main() -> None:
                 "enabled": bool(args_cli.learned_drift_velocity_from_displacement),
                 "sigma_floor_mps": float(args_cli.learned_drift_velocity_sigma_floor_mps),
                 "updates": int(learned_velocity_updates),
+            },
+            "learned_position_residual_slew": {
+                "enabled": bool(args_cli.learned_position_residual_slew),
+                "max_rate_mps": float(args_cli.learned_position_residual_max_rate_mps),
+                "final_pending_norm_m": position_pending_final_norm,
             },
             "raw_vio_jump_isolation": {
                 "enabled": bool(args_cli.raw_vio_jump_isolation),
