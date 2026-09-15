@@ -257,3 +257,67 @@ def test_explicit_drift_velocity_from_displacement_propagates_correction_between
     assert boundary.corrected.linear_velocity_w_b[0] == pytest.approx(2.0, abs=0.03)
     assert mid.corrected.position_w_b[0] == pytest.approx(1.5, abs=0.05)
     assert mid.corrected.linear_velocity_w_b[0] == pytest.approx(2.0, abs=0.03)
+
+
+def test_position_residual_slew_defers_learned_position_jump_and_releases_at_rate_limit():
+    predictor = ConstantPredictor([1.0, 0.0, 0.0])
+    corrector = HybridLearnedVioCorrector(
+        predictor,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        relative_position_only=True,
+        learned_drift_velocity_from_displacement=True,
+        learned_drift_velocity_sigma_floor_mps=0.01,
+        learned_position_residual_slew=True,
+        learned_position_residual_max_rate_mps=4.0,
+        innovation_gate_chi2=None,
+    )
+    _feed_motion(corrector)
+    corrector.step(_vio(0.0, 0.0, vx=3.0))
+    before = corrector.step(_vio(1.47, 0.49, vx=3.0))
+    boundary = corrector.step(_vio(1.5, 0.5, vx=3.0))
+
+    assert boundary.learned_update_accepted is True
+    assert boundary.learned_position_injection_norm_m > 0.4
+    assert boundary.learned_position_release_norm_m <= pytest.approx(0.04, abs=1.0e-9)
+    assert boundary.learned_position_pending_norm_m > 0.3
+    assert abs(boundary.corrected.position_w_b[0] - before.corrected.position_w_b[0]) < 0.1
+
+    pending_before = boundary.learned_position_pending_norm_m
+    after = corrector.step(_vio(1.53, 0.51, vx=3.0))
+    assert after.learned_position_release_norm_m == pytest.approx(0.04, abs=1.0e-8)
+    assert after.learned_position_pending_norm_m < pending_before
+    np.testing.assert_allclose(
+        corrector.drift_filter.anchor_position_drift_w,
+        corrector.drift_filter.current_position_drift_w,
+        atol=0.02,
+    )
+
+
+def test_absolute_position_anchor_clears_pending_learned_position_residual():
+    predictor = ConstantPredictor([1.0, 0.0, 0.0])
+    corrector = HybridLearnedVioCorrector(
+        predictor,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        relative_position_only=True,
+        learned_position_residual_slew=True,
+        learned_position_residual_max_rate_mps=4.0,
+        innovation_gate_chi2=None,
+    )
+    _feed_motion(corrector)
+    corrector.step(_vio(0.0, 0.0, vx=3.0))
+    corrector.step(_vio(1.47, 0.49, vx=3.0))
+    raw = _vio(1.5, 0.5, vx=3.0)
+    boundary = corrector.step(raw)
+    assert boundary.learned_position_pending_norm_m > 0.3
+
+    anchored = corrector.apply_absolute_position(
+        raw,
+        position_w_b=np.array([1.0, 0.0, 0.0]),
+        covariance_w=np.eye(3) * 1.0e-6,
+    )
+
+    assert anchored.absolute_position_update_applied is True
+    assert anchored.learned_position_pending_norm_m == pytest.approx(0.0, abs=1.0e-12)
+    np.testing.assert_allclose(corrector.pending_position_drift_w, np.zeros(3), atol=1.0e-12)
