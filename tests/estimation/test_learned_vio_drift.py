@@ -149,3 +149,32 @@ def test_absolute_position_anchor_preserves_velocity_drift_estimate():
         rtol=0.0,
         atol=1.0e-12,
     )
+
+
+def test_position_only_relative_update_preserves_velocity_drift_mean():
+    filt = LearnedVioDriftFilter(
+        sigma_position=0.05,
+        sigma_velocity=0.1,
+        innovation_gate_chi2=None,
+        relative_position_only=True,
+    )
+    filt.reset(0.0, anchor_vio_position_w=np.zeros(3))
+    filt.step(_vio(0.0, 0.0))
+    raw = _vio(1.5, 0.5, vx=3.0)
+    measurement = LearnedDisplacementMeasurement(
+        displacement_w=np.array([1.0, 0.0, 0.0]),
+        covariance_w=np.eye(3) * 1.0e-4,
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+    )
+
+    corrected = filt.step(raw, measurement=measurement)
+
+    assert filt.last_update_diagnostics.accepted == 1
+    assert corrected.position_w_b[0] < raw.position_w_b[0] - 0.2
+    np.testing.assert_allclose(
+        filt.current_velocity_drift_w,
+        np.zeros(3),
+        rtol=0.0,
+        atol=1.0e-12,
+    )
