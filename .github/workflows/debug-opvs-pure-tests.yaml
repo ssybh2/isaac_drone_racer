@@ -22,6 +22,7 @@ jobs:
           python -m py_compile scripts/estimation/analyze_openvins_time_alignment.py
           python -m py_compile scripts/estimation/collect_learned_motion_data.py
           python -m py_compile scripts/estimation/train_learned_motion.py
+          python -m py_compile scripts/estimation/run_hybrid_openvins_evaluation.py
           python -m py_compile estimation/fault_isolation_schedule.py
           python -m py_compile estimation/openvins_gt_init.py
           python -m py_compile estimation/openvins_bridge.py
