@@ -9,6 +9,7 @@ import numpy as np
 from estimation.hybrid_vio_corrector import HybridLearnedVioCorrector
 from estimation.openvins_bridge import OpenVinsFrameAlignment
 from estimation.swift_vio_drift import VioWorldEstimate
+from estimation.vio_time_buffer import VioWorldEstimateBuffer
 
 from .drone_racer_hybrid_openvins_env_cfg import DroneRacerHybridOpenVinsEnvCfg
 from .swift_openvins_env import SwiftOpenVinsDiagnosticEnv, _to_numpy
@@ -22,6 +23,10 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
     learned-corrected translation/velocity state and the compatibility field
     ``openvins_vio_estimate`` points at that corrected state. Existing Swift
     mapped-gate fusion therefore receives the learned-corrected VIO state.
+
+    An Isaac-truth absolute position source can be enabled explicitly for
+    diagnostic upper-bound experiments. It is intentionally disabled by
+    default and is not part of sensor-faithful operation.
     """
 
     cfg: DroneRacerHybridOpenVinsEnvCfg
@@ -31,6 +36,12 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
         self.openvins_learned_vio_estimate: VioWorldEstimate | None = None
         self.learned_motion_corrector: HybridLearnedVioCorrector | None = None
         self.learned_motion_last_result = None
+        self._hybrid_truth_buffer = VioWorldEstimateBuffer(max_age_s=20.0, max_samples=16384)
+        self._oracle_position_rng = np.random.default_rng(int(cfg.oracle_position_seed))
+        self._last_oracle_position_timestamp_s: float | None = None
+        self.oracle_position_update_count = 0
+        self.oracle_position_last_measurement_w: np.ndarray | None = None
+        self.oracle_position_last_truth_w: np.ndarray | None = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         self._initialize_optional_learned_motion()
 
@@ -81,6 +92,14 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             innovation_gate_chi2=self.cfg.learned_motion_innovation_gate_chi2,
         )
 
+    def _record_alignment_truth(self) -> None:
+        """Retain truth for alignment and, only when enabled, oracle diagnostics."""
+        truth = self._truth_vio_state()
+        if self.openvins_alignment is None:
+            self._alignment_truth_buffer.push(truth)
+        if self.cfg.oracle_absolute_position_enabled:
+            self._hybrid_truth_buffer.push(truth)
+
     def _publish_imu_if_due(self) -> None:
         """Publish IMU to OpenVINS and retain timestamp-identical motion-model inputs."""
         timestamp_s = self._timestamp_s()
@@ -106,6 +125,38 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
                 gyro_b=gyro_b,
                 thrust_b=thrust_b,
             )
+
+    def _oracle_position_due(self, timestamp_s: float) -> bool:
+        if not self.cfg.oracle_absolute_position_enabled:
+            return False
+        if self._last_oracle_position_timestamp_s is None:
+            return True
+        period_s = 1.0 / float(self.cfg.oracle_position_rate_hz)
+        return float(timestamp_s) + 1.0e-9 >= self._last_oracle_position_timestamp_s + period_s
+
+    def _apply_oracle_absolute_position(self, raw_world: VioWorldEstimate):
+        if self.learned_motion_corrector is None or not self._oracle_position_due(raw_world.timestamp_s):
+            return self.learned_motion_last_result
+        try:
+            truth = self._hybrid_truth_buffer.interpolate(raw_world.timestamp_s)
+        except ValueError:
+            return self.learned_motion_last_result
+
+        sigma = float(self.cfg.oracle_position_sigma_m)
+        noise = self._oracle_position_rng.normal(0.0, sigma, size=3) if sigma > 0.0 else np.zeros(3)
+        measured_position = np.asarray(truth.position_w_b, dtype=np.float64) + noise
+        covariance = np.eye(3, dtype=np.float64) * max(sigma * sigma, 1.0e-12)
+        result = self.learned_motion_corrector.apply_absolute_position(
+            raw_world,
+            position_w_b=measured_position,
+            covariance_w=covariance,
+        )
+        self._last_oracle_position_timestamp_s = float(raw_world.timestamp_s)
+        self.oracle_position_update_count += 1
+        self.oracle_position_last_measurement_w = measured_position.copy()
+        self.oracle_position_last_truth_w = np.asarray(truth.position_w_b, dtype=np.float64).copy()
+        self.learned_motion_last_result = result
+        return result
 
     def _consume_openvins(self) -> None:
         sample = self._openvins_bridge.drain_latest(max_callbacks=32)
@@ -136,6 +187,8 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
         selected_world = raw_world
         if self.learned_motion_corrector is not None:
             self.learned_motion_last_result = self.learned_motion_corrector.step(raw_world)
+            if self.cfg.oracle_absolute_position_enabled:
+                self._apply_oracle_absolute_position(raw_world)
             selected_world = self.learned_motion_last_result.corrected
             self.openvins_learned_vio_estimate = selected_world
         else:
@@ -171,6 +224,10 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
         super()._update_openvins_log()
         log = self.extras.setdefault("log", {})
         log["LearnedMotion/enabled"] = float(self.learned_motion_corrector is not None)
+        log["LearnedMotion/oracle_absolute_position_enabled"] = float(
+            self.cfg.oracle_absolute_position_enabled
+        )
+        log["LearnedMotion/oracle_position_updates"] = float(self.oracle_position_update_count)
         if self.openvins_raw_vio_estimate is not None and self.openvins_vio_estimate is not None:
             correction = (
                 self.openvins_raw_vio_estimate.position_w_b
@@ -183,13 +240,26 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             log["LearnedMotion/update_accepted"] = float(result.learned_update_accepted)
             log["LearnedMotion/update_rejected"] = float(result.learned_update_rejected)
             log["LearnedMotion/skipped_windows"] = float(result.skipped_windows)
+            log["LearnedMotion/oracle_update_applied"] = float(
+                result.absolute_position_update_applied
+            )
             if result.mahalanobis2 is not None:
                 log["LearnedMotion/innovation_d2"] = float(result.mahalanobis2)
+            if result.absolute_position_mahalanobis2 is not None:
+                log["LearnedMotion/oracle_position_d2"] = float(
+                    result.absolute_position_mahalanobis2
+                )
 
     def _reset_idx(self, env_ids) -> None:
         super()._reset_idx(env_ids)
         self.openvins_raw_vio_estimate = None
         self.openvins_learned_vio_estimate = None
         self.learned_motion_last_result = None
+        self._hybrid_truth_buffer.clear()
+        self._oracle_position_rng = np.random.default_rng(int(self.cfg.oracle_position_seed))
+        self._last_oracle_position_timestamp_s = None
+        self.oracle_position_update_count = 0
+        self.oracle_position_last_measurement_w = None
+        self.oracle_position_last_truth_w = None
         if self.learned_motion_corrector is not None:
             self.learned_motion_corrector.reset()
