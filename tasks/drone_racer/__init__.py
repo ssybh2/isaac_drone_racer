@@ -66,3 +66,13 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
     },
 )
+
+gym.register(
+    id="Isaac-Drone-Racer-Swift-Hybrid-OpenVINS-v0",
+    entry_point=f"{__name__}.hybrid_openvins_env:HybridSwiftOpenVinsDiagnosticEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_racer_hybrid_openvins_env_cfg:DroneRacerHybridOpenVinsEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
+    },
+)
