@@ -90,6 +90,7 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             sigma_position=self.cfg.learned_motion_sigma_position,
             sigma_velocity=self.cfg.learned_motion_sigma_velocity,
             innovation_gate_chi2=self.cfg.learned_motion_innovation_gate_chi2,
+            relative_position_only=self.cfg.learned_motion_relative_position_only,
         )
 
     def _record_alignment_truth(self) -> None:
@@ -224,6 +225,9 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
         super()._update_openvins_log()
         log = self.extras.setdefault("log", {})
         log["LearnedMotion/enabled"] = float(self.learned_motion_corrector is not None)
+        log["LearnedMotion/relative_position_only"] = float(
+            self.cfg.learned_motion_relative_position_only
+        )
         log["LearnedMotion/oracle_absolute_position_enabled"] = float(
             self.cfg.oracle_absolute_position_enabled
         )
