@@ -20,19 +20,31 @@ jobs:
         run: |
           python -m py_compile scripts/estimation/run_openvins_fault_isolation.py
           python -m py_compile scripts/estimation/analyze_openvins_time_alignment.py
+          python -m py_compile scripts/estimation/collect_learned_motion_data.py
+          python -m py_compile scripts/estimation/train_learned_motion.py
           python -m py_compile estimation/fault_isolation_schedule.py
           python -m py_compile estimation/openvins_gt_init.py
           python -m py_compile estimation/openvins_bridge.py
           python -m py_compile estimation/vio_time_buffer.py
           python -m py_compile estimation/swift_vio_drift.py
+          python -m py_compile estimation/learned_vio_drift.py
+          python -m py_compile estimation/learned_motion.py
+          python -m py_compile estimation/learned_motion_dataset.py
+          python -m py_compile estimation/hybrid_vio_corrector.py
+          python -m py_compile tasks/drone_racer/drone_racer_hybrid_openvins_env_cfg.py
+          python -m py_compile tasks/drone_racer/hybrid_openvins_env.py
       - name: Validate shell helpers
         run: |
           bash -n scripts/estimation/capture_openvins_topics.sh
           bash -n scripts/estimation/inspect_openvins_workspace.sh
-      - name: Validate OpenVINS pure contracts
+      - name: Validate OpenVINS and hybrid learned-motion pure contracts
         env:
           PYTHONPATH: .
         run: |
           pytest -q tests/estimation/test_openvins_config.py \
             tests/estimation/test_fault_isolation_schedule.py \
-            tests/estimation/test_openvins_gt_init.py
+            tests/estimation/test_openvins_gt_init.py \
+            tests/estimation/test_learned_vio_drift.py \
+            tests/estimation/test_learned_motion.py \
+            tests/estimation/test_hybrid_vio_corrector.py \
+            tests/estimation/test_learned_motion_dataset.py
