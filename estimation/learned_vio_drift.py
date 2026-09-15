@@ -256,12 +256,16 @@ class LearnedVioDriftFilter:
         position_w_b: np.ndarray,
         covariance_w: np.ndarray,
     ) -> VioWorldEstimate:
-        """Fuse one absolute world-position anchor into the current drift state.
+        """Fuse one absolute world-position anchor into current position drift only.
 
-        The measurement model is ``p_vio - p_absolute = p_d_current``. This
-        method deliberately does not re-anchor the learned-displacement window,
-        so sparse absolute updates can arrive between learned window boundaries
-        without invalidating the relative measurement timestamp contract.
+        The measurement model is ``p_vio - p_absolute = p_d_current``. Absolute
+        position is deliberately a Schmidt-style position-only update: it may
+        correct the current position-drift mean and its covariance, but it must
+        not directly change the anchor-drift or velocity-drift means. Learned
+        relative displacement remains responsible for estimating velocity drift.
+        The learned-displacement window is not re-anchored here, so sparse
+        absolute updates can arrive between learned window boundaries without
+        invalidating the relative measurement timestamp contract.
         """
         self._ensure_initialized(vio)
         self.predict(vio.timestamp_s)
@@ -281,9 +285,12 @@ class LearnedVioDriftFilter:
             raise RuntimeError("Absolute position innovation covariance is singular") from exc
         d2 = float(innovation.T @ solved)
 
-        PHt = self.P @ H.T
+        # Only the current position-drift block is active for an absolute
+        # position observation. Cross-covariance may still be reduced by the
+        # Joseph update, but anchor and velocity drift means stay frozen.
+        K = np.zeros((9, 3), dtype=np.float64)
         try:
-            K = np.linalg.solve(S.T, PHt.T).T
+            K[3:6, :] = np.linalg.solve(S.T, self.P[3:6, 3:6].T).T
         except np.linalg.LinAlgError as exc:
             raise RuntimeError("Absolute position Kalman gain solve failed") from exc
         self.x = self.x + K @ innovation
