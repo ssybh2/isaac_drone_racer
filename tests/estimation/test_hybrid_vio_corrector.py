@@ -187,11 +187,12 @@ def test_corrector_can_apply_sparse_absolute_position_anchor_after_relative_upda
     )
     _feed_motion(corrector)
     corrector.step(_vio(0.0, 0.0))
-    relative = corrector.step(_vio(3.0, 0.5))
+    raw = _vio(3.0, 0.5)
+    relative = corrector.step(raw)
     assert relative.corrected.position_w_b[0] > 2.5
 
     anchored = corrector.apply_absolute_position(
-        _vio(3.0, 0.5),
+        raw,
         position_w_b=np.array([1.0, 0.0, 0.0]),
         covariance_w=np.eye(3) * 1.0e-6,
     )
