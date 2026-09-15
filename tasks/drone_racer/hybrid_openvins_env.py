@@ -91,6 +91,12 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             sigma_velocity=self.cfg.learned_motion_sigma_velocity,
             innovation_gate_chi2=self.cfg.learned_motion_innovation_gate_chi2,
             relative_position_only=self.cfg.learned_motion_relative_position_only,
+            learned_drift_velocity_from_displacement=(
+                self.cfg.learned_motion_drift_velocity_from_displacement
+            ),
+            learned_drift_velocity_sigma_floor_mps=(
+                self.cfg.learned_motion_drift_velocity_sigma_floor_mps
+            ),
             raw_vio_jump_isolation=self.cfg.learned_motion_raw_vio_jump_isolation,
             raw_vio_jump_threshold_m=self.cfg.learned_motion_raw_vio_jump_threshold_m,
         )
@@ -230,6 +236,12 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
         log["LearnedMotion/relative_position_only"] = float(
             self.cfg.learned_motion_relative_position_only
         )
+        log["LearnedMotion/drift_velocity_from_displacement"] = float(
+            self.cfg.learned_motion_drift_velocity_from_displacement
+        )
+        log["LearnedMotion/drift_velocity_sigma_floor_mps"] = float(
+            self.cfg.learned_motion_drift_velocity_sigma_floor_mps
+        )
         log["LearnedMotion/raw_vio_jump_isolation"] = float(
             self.cfg.learned_motion_raw_vio_jump_isolation
         )
@@ -259,6 +271,13 @@ class HybridSwiftOpenVinsDiagnosticEnv(SwiftOpenVinsDiagnosticEnv):
             log["LearnedMotion/update_accepted"] = float(result.learned_update_accepted)
             log["LearnedMotion/update_rejected"] = float(result.learned_update_rejected)
             log["LearnedMotion/skipped_windows"] = float(result.skipped_windows)
+            log["LearnedMotion/velocity_update_applied"] = float(
+                result.learned_velocity_update_applied
+            )
+            if result.learned_velocity_mahalanobis2 is not None:
+                log["LearnedMotion/velocity_update_d2"] = float(
+                    result.learned_velocity_mahalanobis2
+                )
             log["LearnedMotion/raw_vio_jump_detected"] = float(result.raw_vio_jump_detected)
             if result.raw_vio_jump_residual_m is not None:
                 log["LearnedMotion/raw_vio_jump_residual_m"] = float(
