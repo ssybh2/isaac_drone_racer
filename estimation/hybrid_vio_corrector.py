@@ -45,6 +45,10 @@ class HybridVioCorrectionResult:
     raw_window_displacement_w: np.ndarray | None = None
     absolute_position_update_applied: bool = False
     absolute_position_mahalanobis2: float | None = None
+    learned_velocity_drift_before_w: np.ndarray | None = None
+    learned_velocity_drift_after_w: np.ndarray | None = None
+    absolute_velocity_drift_before_w: np.ndarray | None = None
+    absolute_velocity_drift_after_w: np.ndarray | None = None
 
 
 class HybridLearnedVioCorrector:
@@ -68,6 +72,7 @@ class HybridLearnedVioCorrector:
         sigma_position: float = 0.05,
         sigma_velocity: float = 0.1,
         innovation_gate_chi2: float | None = 16.26623619623813,
+        relative_position_only: bool = False,
     ) -> None:
         self.predictor = predictor
         self.motion_buffer = LearnedMotionBuffer(
@@ -80,11 +85,13 @@ class HybridLearnedVioCorrector:
         )
         self.window_time_s = float(window_time_s)
         self.sample_rate_hz = float(sample_rate_hz)
+        self.relative_position_only = bool(relative_position_only)
         self.drift_filter = drift_filter or LearnedVioDriftFilter(
             sigma_position=sigma_position,
             sigma_velocity=sigma_velocity,
             innovation_gate_chi2=innovation_gate_chi2,
             nominal_rate_hz=sample_rate_hz,
+            relative_position_only=self.relative_position_only,
         )
         self.vio_buffer = VioWorldEstimateBuffer(
             max_age_s=max(2.0, 4.0 * self.window_time_s),
@@ -162,17 +169,21 @@ class HybridLearnedVioCorrector:
             raise RuntimeError("Hybrid VIO corrector failed to initialize")
         if abs(float(raw.timestamp_s) - float(self.last_result.raw.timestamp_s)) > 1.0e-6:
             raise ValueError("Absolute position anchor must match the latest raw VIO timestamp")
+        velocity_before = self.drift_filter.current_velocity_drift_w
         corrected = self.drift_filter.apply_absolute_position(
             raw,
             position_w_b=position_w_b,
             covariance_w=covariance_w,
         )
+        velocity_after = self.drift_filter.current_velocity_drift_w
         diagnostics = self.drift_filter.last_absolute_update_diagnostics
         result = replace(
             self.last_result,
             corrected=corrected,
             absolute_position_update_applied=True,
             absolute_position_mahalanobis2=diagnostics.mahalanobis2,
+            absolute_velocity_drift_before_w=velocity_before,
+            absolute_velocity_drift_after_w=velocity_after,
         )
         self.last_result = result
         return result
@@ -191,6 +202,8 @@ class HybridLearnedVioCorrector:
         last_prediction_end: float | None = None
         last_raw_window_displacement: np.ndarray | None = None
         last_d2: float | None = None
+        learned_velocity_before: np.ndarray | None = None
+        learned_velocity_after: np.ndarray | None = None
         epsilon = 1.0e-9
 
         while raw.timestamp_s + epsilon >= self.window_start_timestamp_s + self.window_time_s:
@@ -229,7 +242,9 @@ class HybridLearnedVioCorrector:
                 end_timestamp_s=end,
             )
             attempted = True
+            learned_velocity_before = self.drift_filter.current_velocity_drift_w
             self.drift_filter.step(endpoint, measurement=measurement)
+            learned_velocity_after = self.drift_filter.current_velocity_drift_w
             diagnostics = self.drift_filter.last_update_diagnostics
             last_d2 = diagnostics.mahalanobis2
             if diagnostics.accepted:
@@ -259,6 +274,8 @@ class HybridLearnedVioCorrector:
             prediction_start_timestamp_s=last_prediction_start,
             prediction_end_timestamp_s=last_prediction_end,
             raw_window_displacement_w=last_raw_window_displacement,
+            learned_velocity_drift_before_w=learned_velocity_before,
+            learned_velocity_drift_after_w=learned_velocity_after,
         )
         self.last_result = result
         return result
