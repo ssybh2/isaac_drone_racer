@@ -43,6 +43,10 @@ class HybridVioCorrectionResult:
     prediction_start_timestamp_s: float | None = None
     prediction_end_timestamp_s: float | None = None
     raw_window_displacement_w: np.ndarray | None = None
+    learned_velocity_update_applied: bool = False
+    learned_velocity_drift_measurement_w: np.ndarray | None = None
+    learned_velocity_drift_measurement_covariance_w: np.ndarray | None = None
+    learned_velocity_mahalanobis2: float | None = None
     absolute_position_update_applied: bool = False
     absolute_position_mahalanobis2: float | None = None
     learned_velocity_drift_before_w: np.ndarray | None = None
@@ -69,6 +73,13 @@ class HybridLearnedVioCorrector:
     frame shifts relative to the velocity-predicted displacement and removes the
     accumulated frame shift from the internal VIO stream before it reaches the
     drift filter. The original raw VIO is retained unchanged for diagnostics.
+
+    In position-only learned-update mode, an optional explicit drift-velocity
+    measurement can be formed from each accepted learned window as
+    ``(dp_vio_isolated - dp_learned) / dt``. It updates only ``v_d_current``;
+    subsequent normal propagation then carries the learned correction smoothly
+    between learned-window boundaries without restoring cross-covariance-driven
+    velocity jumps.
     """
 
     def __init__(
@@ -82,11 +93,22 @@ class HybridLearnedVioCorrector:
         sigma_velocity: float = 0.1,
         innovation_gate_chi2: float | None = 16.26623619623813,
         relative_position_only: bool = False,
+        learned_drift_velocity_from_displacement: bool = False,
+        learned_drift_velocity_sigma_floor_mps: float = 0.5,
         raw_vio_jump_isolation: bool = False,
         raw_vio_jump_threshold_m: float = 0.5,
     ) -> None:
         if raw_vio_jump_threshold_m <= 0.0 or not np.isfinite(raw_vio_jump_threshold_m):
             raise ValueError("raw_vio_jump_threshold_m must be positive and finite")
+        if (
+            learned_drift_velocity_sigma_floor_mps <= 0.0
+            or not np.isfinite(learned_drift_velocity_sigma_floor_mps)
+        ):
+            raise ValueError("learned_drift_velocity_sigma_floor_mps must be positive and finite")
+        if learned_drift_velocity_from_displacement and not relative_position_only:
+            raise ValueError(
+                "learned_drift_velocity_from_displacement requires relative_position_only"
+            )
         self.predictor = predictor
         self.motion_buffer = LearnedMotionBuffer(
             window_time_s=window_time_s,
@@ -99,6 +121,12 @@ class HybridLearnedVioCorrector:
         self.window_time_s = float(window_time_s)
         self.sample_rate_hz = float(sample_rate_hz)
         self.relative_position_only = bool(relative_position_only)
+        self.learned_drift_velocity_from_displacement = bool(
+            learned_drift_velocity_from_displacement
+        )
+        self.learned_drift_velocity_sigma_floor_mps = float(
+            learned_drift_velocity_sigma_floor_mps
+        )
         self.raw_vio_jump_isolation = bool(raw_vio_jump_isolation)
         self.raw_vio_jump_threshold_m = float(raw_vio_jump_threshold_m)
         self.drift_filter = drift_filter or LearnedVioDriftFilter(
@@ -170,6 +198,19 @@ class HybridLearnedVioCorrector:
                 end_timestamp_s=body.end_timestamp_s,
             )
         return self.motion_buffer.window(start, end)
+
+    def _velocity_measurement_covariance(
+        self,
+        displacement_covariance_w: np.ndarray,
+        dt_s: float,
+    ) -> np.ndarray:
+        covariance = np.asarray(displacement_covariance_w, dtype=np.float64) / (dt_s * dt_s)
+        covariance = 0.5 * (covariance + covariance.T)
+        floor_variance = self.learned_drift_velocity_sigma_floor_mps**2
+        min_eig = float(np.linalg.eigvalsh(covariance)[0])
+        if min_eig < floor_variance:
+            covariance = covariance + np.eye(3) * (floor_variance - min_eig)
+        return covariance
 
     def _isolate_raw_vio_jump(
         self,
@@ -314,6 +355,10 @@ class HybridLearnedVioCorrector:
         last_prediction_end: float | None = None
         last_raw_window_displacement: np.ndarray | None = None
         last_d2: float | None = None
+        learned_velocity_update_applied = False
+        learned_velocity_measurement: np.ndarray | None = None
+        learned_velocity_measurement_covariance: np.ndarray | None = None
+        learned_velocity_d2: float | None = None
         learned_velocity_before: np.ndarray | None = None
         learned_velocity_after: np.ndarray | None = None
         epsilon = 1.0e-9
@@ -322,6 +367,7 @@ class HybridLearnedVioCorrector:
             start = float(self.window_start_timestamp_s)
             end = start + self.window_time_s
             try:
+                startpoint = self.vio_buffer.interpolate(start)
                 endpoint = self.vio_buffer.interpolate(end)
             except ValueError:
                 # We cannot safely create a measurement without VIO at the exact
@@ -357,16 +403,45 @@ class HybridLearnedVioCorrector:
                 end_timestamp_s=end,
             )
             attempted = True
-            learned_velocity_before = self.drift_filter.current_velocity_drift_w
+            position_velocity_before = self.drift_filter.current_velocity_drift_w
             self.drift_filter.step(endpoint, measurement=measurement)
-            learned_velocity_after = self.drift_filter.current_velocity_drift_w
+            position_velocity_after = self.drift_filter.current_velocity_drift_w
             diagnostics = self.drift_filter.last_update_diagnostics
             last_d2 = diagnostics.mahalanobis2
             if diagnostics.accepted:
                 accepted = True
                 self.window_start_timestamp_s = end
+                if self.learned_drift_velocity_from_displacement:
+                    dt_s = end - start
+                    isolated_displacement = (
+                        np.asarray(endpoint.position_w_b, dtype=np.float64)
+                        - np.asarray(startpoint.position_w_b, dtype=np.float64)
+                    )
+                    learned_velocity_measurement = (
+                        isolated_displacement
+                        - np.asarray(prediction.displacement_w, dtype=np.float64)
+                    ) / dt_s
+                    learned_velocity_measurement_covariance = self._velocity_measurement_covariance(
+                        prediction.covariance_w,
+                        dt_s,
+                    )
+                    learned_velocity_before = self.drift_filter.current_velocity_drift_w
+                    self.drift_filter.apply_velocity_drift_measurement(
+                        velocity_drift_w=learned_velocity_measurement,
+                        covariance_w=learned_velocity_measurement_covariance,
+                    )
+                    learned_velocity_after = self.drift_filter.current_velocity_drift_w
+                    learned_velocity_d2 = (
+                        self.drift_filter.last_velocity_update_diagnostics.mahalanobis2
+                    )
+                    learned_velocity_update_applied = True
+                else:
+                    learned_velocity_before = position_velocity_before
+                    learned_velocity_after = position_velocity_after
             else:
                 rejected = True
+                learned_velocity_before = position_velocity_before
+                learned_velocity_after = position_velocity_after
                 # The drift state is still valid; only this network constraint
                 # was rejected. Re-anchor without applying the bad measurement.
                 self.drift_filter.reanchor(endpoint)
@@ -389,6 +464,18 @@ class HybridLearnedVioCorrector:
             prediction_start_timestamp_s=last_prediction_start,
             prediction_end_timestamp_s=last_prediction_end,
             raw_window_displacement_w=last_raw_window_displacement,
+            learned_velocity_update_applied=learned_velocity_update_applied,
+            learned_velocity_drift_measurement_w=(
+                None
+                if learned_velocity_measurement is None
+                else learned_velocity_measurement.copy()
+            ),
+            learned_velocity_drift_measurement_covariance_w=(
+                None
+                if learned_velocity_measurement_covariance is None
+                else learned_velocity_measurement_covariance.copy()
+            ),
+            learned_velocity_mahalanobis2=learned_velocity_d2,
             learned_velocity_drift_before_w=learned_velocity_before,
             learned_velocity_drift_after_w=learned_velocity_after,
             raw_vio_jump_detected=jump_detected,
