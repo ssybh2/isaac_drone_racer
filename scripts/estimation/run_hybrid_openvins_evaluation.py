@@ -14,13 +14,15 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--checkpoint", type=Path, required=True)
 parser.add_argument("--steps", type=int, default=4000)
 parser.add_argument(
-    "--profile", choices=("hover", "translate_x", "lissajous"), default="translate_x"
+    "--profile", choices=("hover", "translate_x", "lissajous", "circle"), default="translate_x"
 )
 parser.add_argument("--motion_start_s", type=float, default=4.0)
 parser.add_argument("--translation_m", type=float, default=1.5)
 parser.add_argument("--translation_duration_s", type=float, default=8.0)
 parser.add_argument("--lissajous_amplitude_m", type=float, default=0.6)
 parser.add_argument("--lissajous_frequency_hz", type=float, default=0.08)
+parser.add_argument("--circle_amplitude_m", type=float, default=0.8)
+parser.add_argument("--circle_frequency_hz", type=float, default=0.10)
 parser.add_argument("--detector_checkpoint", type=Path, default=None)
 parser.add_argument("--visibility_checkpoint", type=Path, default=None)
 parser.add_argument(
@@ -120,6 +122,12 @@ def _target_xy(initial_xy: torch.Tensor, t_s: float) -> torch.Tensor:
     if args_cli.profile == "translate_x":
         alpha = min(1.0, max(0.0, tau / max(float(args_cli.translation_duration_s), 1.0e-6)))
         target[0] += float(args_cli.translation_m) * alpha
+        return target
+    if args_cli.profile == "circle":
+        omega = 2.0 * np.pi * float(args_cli.circle_frequency_hz)
+        amp = float(args_cli.circle_amplitude_m)
+        target[0] += amp * float(np.cos(omega * tau) - 1.0)
+        target[1] += amp * float(np.sin(omega * tau))
         return target
     omega = 2.0 * np.pi * float(args_cli.lissajous_frequency_hz)
     amp = float(args_cli.lissajous_amplitude_m)
