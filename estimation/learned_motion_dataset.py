@@ -48,7 +48,7 @@ def _quat_wxyz_to_rotmat(q) -> np.ndarray:
 
 def _read_trace(
     path: Path,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     with path.open("r", newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         columns = set(reader.fieldnames or ())
@@ -83,12 +83,13 @@ def _read_trace(
     if all(name in columns for name in velocity_columns):
         velocities = np.column_stack(tuple(col(name) for name in velocity_columns))
 
+    features_b = np.column_stack((gyro_b, thrust_b))
     features_w = np.empty((len(rows), 6), dtype=np.float64)
     for index, (q, gyro, thrust) in enumerate(zip(quaternions, gyro_b, thrust_b)):
         R_wb = _quat_wxyz_to_rotmat(q)
         features_w[index, 0:3] = R_wb @ gyro
         features_w[index, 3:6] = R_wb @ thrust
-    return timestamps, positions, features_w, velocities
+    return timestamps, positions, quaternions, features_w, features_b, velocities
 
 
 def load_trace_windows(
@@ -104,9 +105,14 @@ def load_trace_windows(
     target_mode="displacement" produces dp = p1 - p0.
 
     target_mode="kinematic_residual" produces
-        dp_residual = (p1 - p0) - v0 * window_time_s
-    so the EKF can represent the start-velocity term explicitly instead of
-    forcing the TCN to infer translational velocity from thrust/gyro alone.
+        dp_residual_w = (p1 - p0) - v0 * window_time_s
+    in world coordinates.
+
+    target_mode="kinematic_residual_body_end" uses body-frame gyro/thrust
+    features and produces
+        dp_residual_b1 = R_wb(t1)^T * dp_residual_w.
+    This removes estimator attitude from the network input contract while
+    making the output-frame dependence explicit in the EKF measurement model.
     """
     path = Path(path)
     if window_time_s <= 0.0 or sample_rate_hz <= 0.0 or stride_time_s <= 0.0:
@@ -115,12 +121,29 @@ def load_trace_windows(
     if sample_count < 2:
         raise ValueError("learned motion window must contain at least two samples")
 
-    if target_mode not in ("displacement", "kinematic_residual"):
+    valid_target_modes = (
+        "displacement",
+        "kinematic_residual",
+        "kinematic_residual_body_end",
+    )
+    if target_mode not in valid_target_modes:
         raise ValueError(
-            "target_mode must be 'displacement' or 'kinematic_residual'"
+            "target_mode must be one of " + ", ".join(repr(v) for v in valid_target_modes)
         )
-    timestamps, positions, source_features, velocities = _read_trace(path)
-    if target_mode == "kinematic_residual" and velocities is None:
+    (
+        timestamps,
+        positions,
+        quaternions,
+        features_w,
+        features_b,
+        velocities,
+    ) = _read_trace(path)
+    source_features = (
+        features_b
+        if target_mode == "kinematic_residual_body_end"
+        else features_w
+    )
+    if target_mode in ("kinematic_residual", "kinematic_residual_body_end") and velocities is None:
         raise ValueError(
             f"trace {path} needs truth_vx/truth_vy/truth_vz for "
             "kinematic_residual targets"
@@ -151,7 +174,7 @@ def load_trace_windows(
             dtype=np.float64,
         )
         target = p_end - p_start
-        if target_mode == "kinematic_residual":
+        if target_mode in ("kinematic_residual", "kinematic_residual_body_end"):
             v_start = np.array(
                 [
                     np.interp(start, timestamps, velocities[:, axis])
@@ -160,6 +183,33 @@ def load_trace_windows(
                 dtype=np.float64,
             )
             target = target - v_start * float(window_time_s)
+
+        if target_mode == "kinematic_residual_body_end":
+            # Interpolate the endpoint attitude and project the matrix back to
+            # SO(3). The target is expressed in the endpoint body frame:
+            #   z_b(t) = R_wb(t)^T [(p_t-p_s) - v_s * dt]
+            # This makes both network inputs and outputs invariant to global
+            # attitude while leaving attitude dependence explicit in the EKF
+            # measurement model.
+            R_interp = np.empty((3, 3), dtype=np.float64)
+            rotation_samples = np.stack(
+                [_quat_wxyz_to_rotmat(q) for q in quaternions],
+                axis=0,
+            )
+            for row in range(3):
+                for col in range(3):
+                    R_interp[row, col] = np.interp(
+                        end,
+                        timestamps,
+                        rotation_samples[:, row, col],
+                    )
+            U, _, Vt = np.linalg.svd(R_interp)
+            R_end = U @ Vt
+            if np.linalg.det(R_end) < 0.0:
+                U[:, -1] *= -1.0
+                R_end = U @ Vt
+            target = R_end.T @ target
+
         targets[window_index, :] = target.astype(np.float32)
 
     return TraceWindows(
