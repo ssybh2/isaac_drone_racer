@@ -31,7 +31,7 @@ class LearnedInertialPolicyCfg(ObsGroup):
 class LearnedInertialObservationsCfg:
     policy: LearnedInertialPolicyCfg = LearnedInertialPolicyCfg()
     # Rewards may use simulator truth during training, but the actor observation
-    # intentionally has no GT pose.  Add an asymmetric privileged critic later
+    # intentionally has no GT pose. Add an asymmetric privileged critic later
     # only as a deliberate training ablation.
     critic = None
 
@@ -51,13 +51,19 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     learned_motion_device: str = "cuda"
     learned_window_time_s: float = 0.5
     learned_sample_rate_hz: float = 100.0
-    # Current MVP uses non-overlapping 0.5 s windows (2 Hz). The paper uses
-    # 20 Hz overlapping updates with a fixed-lag multi-state EKF; that is the
-    # next estimator-fidelity milestone on this branch.
-    learned_update_rate_hz: float = 2.0
+    # Paper-style overlapping relative-displacement updates: a 0.5 s history
+    # window is evaluated every 0.05 s, requiring a fixed-lag clone bank.
+    learned_update_rate_hz: float = 20.0
+    learned_max_position_clones: int = 11
+    # Held-out IMO traces exposed rare horizontal covariance collapse
+    # (millimetre sigma with roughly 0.2 m error). Keep learned heteroscedastic
+    # uncertainty, but prevent implausibly confident EKF measurements.
+    learned_sigma_floor_xyz_m: tuple[float, float, float] = (0.10, 0.10, 0.01)
+    learned_covariance_scale: float = 1.25
+
     vehicle_mass_kg: float = 0.6076
     # The PnP builder already estimates world-position covariance from corner
-    # perturbations.  Until rotational uncertainty is propagated explicitly,
+    # perturbations. Until rotational uncertainty is propagated explicitly,
     # use a conservative fixed rotation sigma for the gate orientation update.
     gate_orientation_sigma_deg: float = 5.0
     gate_position_mahalanobis2_max: float = 16.27  # chi2(3), ~99.9%
