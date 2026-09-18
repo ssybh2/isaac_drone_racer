@@ -42,6 +42,7 @@ def _trace_metrics(torch, model, path: Path, metadata: dict, device, batch_size:
         window_time_s=float(metadata.get("window_time_s", 0.5)),
         sample_rate_hz=float(metadata.get("sample_rate_hz", 100.0)),
         stride_time_s=float(metadata.get("stride_time_s", 0.01)),
+        target_mode=str(metadata.get("target_mode", "displacement")),
     )
     x = torch.from_numpy(windows.features).float()
     y = torch.from_numpy(windows.targets).float()
@@ -212,6 +213,7 @@ def main() -> None:
         "checkpoint_epoch": checkpoint.get("epoch"),
         "checkpoint_selection_metric": checkpoint.get("selection_metric"),
         "checkpoint_selection_value": checkpoint.get("selection_value"),
+        "target_mode": str(metadata.get("target_mode", "displacement")),
         "manifest": str(manifest_path),
         "splits": {},
     }
