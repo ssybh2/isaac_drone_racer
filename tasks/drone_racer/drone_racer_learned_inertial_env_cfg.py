@@ -81,6 +81,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # kinematic residual for the same window. This must never be enabled for
     # training/deployment; it isolates EKF measurement-model correctness.
     learned_debug_oracle_residual_fusion: bool = False
+    # Diagnostic only: rotate TCN gyro/thrust features with simulator truth
+    # attitude instead of EKF attitude. If this materially improves fusion, it
+    # proves the current world-frame learned measurement is state-dependent in
+    # a way the EKF Jacobian does not model.
+    learned_debug_truth_orientation_for_features: bool = False
 
     # Synthetic onboard-IMU corruption for estimator robustness experiments.
     # White-noise sigmas are per simulated sample. Bias random-walk sigmas use
