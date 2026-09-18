@@ -1,10 +1,15 @@
 import csv
+import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from estimation.learned_motion_dataset import load_trace_windows, split_trace_paths
+from estimation.learned_motion_dataset import (
+    load_trace_split_manifest,
+    load_trace_windows,
+    split_trace_paths,
+)
 
 
 FIELDS = [
@@ -81,3 +86,48 @@ def test_trace_split_is_by_whole_file_and_is_deterministic():
     assert set(train).isdisjoint(val)
     assert set(train).isdisjoint(test)
     assert set(val).isdisjoint(test)
+
+
+
+def test_explicit_manifest_preserves_declared_whole_trace_splits(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    manifest_dir = tmp_path / "config"
+    manifest_dir.mkdir()
+
+    manifest = {
+        "schema": "isaac_drone_racer.imo_dataset_manifest.v2",
+        "path_base": "..",
+        "traces": [
+            {"path": "data/train_a.csv", "split": "train"},
+            {"path": "data/train_b.csv", "split": "train"},
+            {"path": "data/val_a.csv", "split": "val"},
+            {"path": "data/test_a.csv", "split": "test"},
+        ],
+    }
+    path = manifest_dir / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    train, val, test = load_trace_split_manifest(path)
+
+    assert train == [
+        (data_dir / "train_a.csv").resolve(),
+        (data_dir / "train_b.csv").resolve(),
+    ]
+    assert val == [(data_dir / "val_a.csv").resolve()]
+    assert test == [(data_dir / "test_a.csv").resolve()]
+
+
+def test_explicit_manifest_rejects_duplicate_paths(tmp_path):
+    manifest = {
+        "schema": "isaac_drone_racer.imo_dataset_manifest.v2",
+        "traces": [
+            {"path": "same.csv", "split": "train"},
+            {"path": "same.csv", "split": "test"},
+        ],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate trace path"):
+        load_trace_split_manifest(path)
