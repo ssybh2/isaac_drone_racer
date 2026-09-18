@@ -36,11 +36,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--stride_time_s", type=float, default=0.01)
     parser.add_argument(
         "--target_mode",
-        choices=("displacement", "kinematic_residual"),
+        choices=("displacement", "kinematic_residual", "kinematic_residual_body_end"),
         default="displacement",
         help=(
-            "Train direct displacement, or residual displacement after "
-            "subtracting v_start * window_time_s."
+            "Train direct displacement, world-frame residual displacement, "
+            "or endpoint-body residual displacement after subtracting "
+            "v_start * window_time_s."
         ),
     )
     parser.add_argument("--val_fraction", type=float, default=0.15)
@@ -216,18 +217,38 @@ def main() -> None:
         "sample_rate_hz": float(args.sample_rate_hz),
         "stride_time_s": float(args.stride_time_s),
         "target_mode": str(args.target_mode),
-        "features": ["gyro_w_x", "gyro_w_y", "gyro_w_z", "thrust_w_x", "thrust_w_y", "thrust_w_z"],
+        "feature_frame": (
+            "body"
+            if args.target_mode == "kinematic_residual_body_end"
+            else "world"
+        ),
+        "features": (
+            ["gyro_b_x", "gyro_b_y", "gyro_b_z", "thrust_b_x", "thrust_b_y", "thrust_b_z"]
+            if args.target_mode == "kinematic_residual_body_end"
+            else ["gyro_w_x", "gyro_w_y", "gyro_w_z", "thrust_w_x", "thrust_w_y", "thrust_w_z"]
+        ),
         "outputs": (
             ["dp_w_x", "dp_w_y", "dp_w_z", "log_var_x", "log_var_y", "log_var_z"]
             if args.target_mode == "displacement"
-            else [
-                "dp_residual_w_x",
-                "dp_residual_w_y",
-                "dp_residual_w_z",
-                "log_var_x",
-                "log_var_y",
-                "log_var_z",
-            ]
+            else (
+                [
+                    "dp_residual_b_end_x",
+                    "dp_residual_b_end_y",
+                    "dp_residual_b_end_z",
+                    "log_var_x",
+                    "log_var_y",
+                    "log_var_z",
+                ]
+                if args.target_mode == "kinematic_residual_body_end"
+                else [
+                    "dp_residual_w_x",
+                    "dp_residual_w_y",
+                    "dp_residual_w_z",
+                    "log_var_x",
+                    "log_var_y",
+                    "log_var_z",
+                ]
+            )
         ),
         "train_traces": [str(path) for path in train_paths],
         "val_traces": [str(path) for path in val_paths],
