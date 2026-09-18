@@ -229,6 +229,11 @@ class TorchTcnDisplacementPredictor:
             raise ValueError("learned motion checkpoint must use input_dim=6 and output_dim=6")
         self.window_time_s = float(metadata.get("window_time_s", 0.5))
         self.sample_rate_hz = float(metadata.get("sample_rate_hz", 100.0))
+        self.target_mode = str(metadata.get("target_mode", "displacement"))
+        if self.target_mode not in ("displacement", "kinematic_residual"):
+            raise ValueError(
+                f"unsupported learned-motion target_mode: {self.target_mode!r}"
+            )
         self.model = build_tcn(input_dim=6, output_dim=6).to(self.device)
         state = checkpoint.get("model_state_dict", checkpoint)
         self.model.load_state_dict(state)
