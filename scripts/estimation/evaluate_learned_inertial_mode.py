@@ -92,6 +92,14 @@ parser.add_argument(
         "residuals to isolate EKF measurement-model correctness."
     ),
 )
+parser.add_argument(
+    "--truth-orientation-for-tcn-features",
+    action="store_true",
+    help=(
+        "Diagnostic only: rotate TCN features with simulator-truth attitude "
+        "instead of the EKF attitude."
+    ),
+)
 parser.add_argument("--replay-npz", type=Path, required=True)
 parser.add_argument("--output-dir", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -213,6 +221,9 @@ def _prepare_cfg():
     cfg.episode_length_s = max(float(cfg.episode_length_s), args_cli.steps * 0.01 + 10.0)
     cfg.learned_debug_oracle_residual_fusion = bool(
         args_cli.oracle_learned_residual_fusion
+    )
+    cfg.learned_debug_truth_orientation_for_features = bool(
+        args_cli.truth_orientation_for_tcn_features
     )
     cfg.terminations.collision = None
     cfg.terminations.flyaway = None
@@ -623,6 +634,7 @@ def main() -> None:
         innovation_summary = {
             "samples": int(len(innovations)),
             "axis_rmse_m": None,
+            "axis_bias_m": None,
             "norm_mean_m": None,
             "norm_rmse_m": None,
             "norm_max_m": None,
@@ -632,6 +644,7 @@ def main() -> None:
             innovation_summary.update(
                 {
                     "axis_rmse_m": np.sqrt(np.mean(innovations**2, axis=0)).tolist(),
+                    "axis_bias_m": np.mean(innovations, axis=0).tolist(),
                     "norm_mean_m": float(np.mean(innovation_norm)),
                     "norm_rmse_m": float(np.sqrt(np.mean(innovation_norm**2))),
                     "norm_max_m": float(np.max(innovation_norm)),
@@ -641,6 +654,7 @@ def main() -> None:
         prediction_summary = {
             "samples": int(len(pred_errors)),
             "axis_rmse_m": None,
+            "axis_bias_m": None,
             "norm_rmse_m": None,
             "norm_mean_m": None,
             "norm_max_m": None,
@@ -650,6 +664,7 @@ def main() -> None:
             prediction_summary.update(
                 {
                     "axis_rmse_m": np.sqrt(np.mean(pred_errors**2, axis=0)).tolist(),
+                    "axis_bias_m": np.mean(pred_errors, axis=0).tolist(),
                     "norm_rmse_m": float(np.sqrt(np.mean(pred_norm**2))),
                     "norm_mean_m": float(np.mean(pred_norm)),
                     "norm_max_m": float(np.max(pred_norm)),
@@ -678,6 +693,9 @@ def main() -> None:
             ),
             "last_learned_measurement_source": (
                 raw_env._last_learned_measurement_source
+            ),
+            "truth_orientation_for_tcn_features": bool(
+                cfg.learned_debug_truth_orientation_for_features
             ),
             "samples": int(len(pos)),
             "duration_s": float(duration_s),
