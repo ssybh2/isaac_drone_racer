@@ -61,7 +61,12 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_gate_measurement = None
         self._learned_update_count = 0
         self._learned_update_skip_count = 0
+        self._last_learned_innovation_w = None
+        self._last_learned_update_timestamp_s = None
+        self._gate_attempt_count = 0
         self._gate_update_count = 0
+        self._gate_reject_count = 0
+        self._last_gate_mahalanobis2 = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         if self.num_envs != 1:
             raise ValueError("LearnedInertialRacingEnv currently requires num_envs=1")
@@ -117,6 +122,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._next_learned_update_s = None
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
+        self._last_learned_innovation_w = None
+        self._last_learned_update_timestamp_s = None
+        self._last_gate_mahalanobis2 = None
         self.learned_inertial_state = self._lio.state()
 
     def _initialize_detector_and_gate_builder(self) -> None:
@@ -272,7 +280,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             covariance_scale=self.cfg.learned_covariance_scale,
         )
         try:
-            self._lio.update_learned_displacement(
+            innovation = self._lio.update_learned_displacement(
                 prediction.displacement_w,
                 protected_covariance,
                 start_timestamp_s=start_s,
@@ -286,6 +294,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             return
 
         self._learned_update_count += 1
+        self._last_learned_innovation_w = np.asarray(innovation, dtype=np.float64).copy()
+        self._last_learned_update_timestamp_s = now
         # discard_before retains one interpolation predecessor. The next
         # 0.5 s window begins only 0.05 s later, so the histories overlap.
         self._motion_buffer.discard_before(start_s)
@@ -299,32 +309,45 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         if self.swift_detector is None or self._gate_builder is None or not self._camera_due():
             return
         self._last_camera_timestamp_s = self._timestamp_s()
+        self._gate_attempt_count += 1
 
         camera = self.scene["tiled_camera"]
         rgb = _np(camera.data.output["rgb"][0])[..., :3]
         if rgb.dtype != np.uint8:
-            scale = 255.0 if np.issubdtype(rgb.dtype, np.floating) and float(np.nanmax(rgb)) <= 1.0 + 1e-6 else 1.0
+            scale = (
+                255.0
+                if np.issubdtype(rgb.dtype, np.floating)
+                and float(np.nanmax(rgb)) <= 1.0 + 1e-6
+                else 1.0
+            )
             rgb = np.clip(rgb * scale, 0.0, 255.0).astype(np.uint8)
 
-        observation = self.swift_detector.detect(
-            np.ascontiguousarray(rgb),
-            timestamp_s=self._timestamp_s(),
-        )
         try:
+            observation = self.swift_detector.detect(
+                np.ascontiguousarray(rgb),
+                timestamp_s=self._timestamp_s(),
+            )
             measurement = self._gate_builder.build(
                 observation,
                 gate_index=None,
                 reference_position_w_b=self._lio.p,
             )
         except (ValueError, RuntimeError):
+            self._gate_reject_count += 1
             return
 
         # Reject a visually plausible but globally inconsistent gate association.
         innovation_p = measurement.position_w_b - self._lio.p
         Ppp = self._lio.P[6:9, 6:9]
         S = Ppp + measurement.position_covariance_w
-        d2 = float(innovation_p.T @ np.linalg.solve(S, innovation_p))
+        try:
+            d2 = float(innovation_p.T @ np.linalg.solve(S, innovation_p))
+        except np.linalg.LinAlgError:
+            self._gate_reject_count += 1
+            return
+        self._last_gate_mahalanobis2 = d2
         if d2 > float(self.cfg.gate_position_mahalanobis2_max):
+            self._gate_reject_count += 1
             return
 
         # Gate PnP + mapped T_wg is an absolute body-pose observation.
@@ -345,7 +368,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         log["LearnedIO/learned_updates"] = float(self._learned_update_count)
         log["LearnedIO/learned_update_skips"] = float(self._learned_update_skip_count)
         log["LearnedIO/position_clones"] = float(self._lio.clone_count)
+        log["LearnedIO/gate_attempts"] = float(self._gate_attempt_count)
         log["LearnedIO/gate_updates"] = float(self._gate_update_count)
+        log["LearnedIO/gate_rejects"] = float(self._gate_reject_count)
         log["LearnedIO/has_checkpoint"] = float(self._motion_predictor is not None)
         log["LearnedIO/has_gate_detector"] = float(self.swift_detector is not None)
         log["LearnedIO/cov_trace"] = float(np.trace(self._lio.P[:15, :15]))
