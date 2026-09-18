@@ -15,6 +15,7 @@ from estimation.learned_motion_dataset import (
 FIELDS = [
     "t_s",
     "truth_px", "truth_py", "truth_pz",
+    "truth_vx", "truth_vy", "truth_vz",
     "truth_qw", "truth_qx", "truth_qy", "truth_qz",
     "imu_gx", "imu_gy", "imu_gz",
     "thrust_b_x", "thrust_b_y", "thrust_b_z",
@@ -33,6 +34,9 @@ def _write_trace(path: Path, duration_s: float = 1.0, yaw_90: bool = False) -> N
                     "truth_px": 2.0 * t,
                     "truth_py": 0.0,
                     "truth_pz": 1.0,
+                    "truth_vx": 2.0,
+                    "truth_vy": 0.0,
+                    "truth_vz": 0.0,
                     "truth_qw": q[0],
                     "truth_qx": q[1],
                     "truth_qy": q[2],
@@ -64,6 +68,22 @@ def test_trace_windows_build_world_frame_features_and_truth_displacement(tmp_pat
     np.testing.assert_allclose(windows.features[:, 1, :], 1.0, atol=1e-7)
     np.testing.assert_allclose(windows.features[:, 5, :], 6.0, atol=1e-7)
     np.testing.assert_allclose(windows.targets, [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]], atol=1e-8)
+
+
+def test_kinematic_residual_target_subtracts_start_velocity(tmp_path):
+    trace = tmp_path / "trace.csv"
+    _write_trace(trace, yaw_90=False)
+
+    windows = load_trace_windows(
+        trace,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        stride_time_s=0.5,
+        target_mode="kinematic_residual",
+    )
+
+    assert windows.target_mode == "kinematic_residual"
+    np.testing.assert_allclose(windows.targets, 0.0, atol=1e-8)
 
 
 def test_missing_thrust_columns_are_rejected(tmp_path):
