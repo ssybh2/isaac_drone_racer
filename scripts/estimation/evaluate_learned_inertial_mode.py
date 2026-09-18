@@ -505,6 +505,7 @@ def main() -> None:
                             if target_mode in (
                                 "kinematic_residual",
                                 "kinematic_residual_body_end",
+                                "kinematic_residual_body_end_gyro_aligned",
                             ):
                                 if start_key not in truth_velocity_by_time:
                                     raise RuntimeError(
@@ -518,7 +519,10 @@ def main() -> None:
                                     tcn_gt_dp
                                     - truth_velocity_by_time[start_key] * window_dt
                                 )
-                            if target_mode == "kinematic_residual_body_end":
+                            if target_mode in (
+                                "kinematic_residual_body_end",
+                                "kinematic_residual_body_end_gyro_aligned",
+                            ):
                                 if end_key not in truth_orientation_by_time:
                                     raise RuntimeError(
                                         "missing truth endpoint attitude for body residual diagnostic"
