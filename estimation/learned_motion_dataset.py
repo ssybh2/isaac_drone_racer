@@ -176,7 +176,10 @@ def load_trace_windows(
     sample_offsets = np.arange(sample_count, dtype=np.float64) / float(sample_rate_hz)
     rotation_samples = (
         np.stack([_quat_wxyz_to_rotmat(q) for q in quaternions], axis=0)
-        if target_mode == "kinematic_residual_body_end"
+        if target_mode in (
+            "kinematic_residual_body_end",
+            "kinematic_residual_body_end_gyro_aligned",
+        )
         else None
     )
     for window_index, (start, end) in enumerate(zip(starts, ends)):
