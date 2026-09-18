@@ -1,14 +1,16 @@
 """Standalone learned inertial odometry (IMO-style) estimator.
 
-This module intentionally has no OpenVINS dependency.  It follows the structure
+This module intentionally has no OpenVINS dependency. It follows the structure
 of Cioffi et al. (RAL 2023):
 
 * IMU propagation estimates attitude, velocity, position and IMU biases.
-* A learned 0.5 s relative displacement is injected as a Kalman measurement.
+* Learned 0.5 s relative displacements are injected as Kalman measurements.
+* Timestamped position clones retain the cross-covariances required for
+  overlapping fixed-lag relative-position updates.
 * Optional mapped-gate PnP measurements provide absolute pose anchors.
 
-The learned displacement update keeps one cloned position state so the
-measurement Jacobian is the paper-style relative-position form [-I, +I].
+The current error state is [dtheta, dv, dp, dba, dbg] (15 states). Each
+historical position clone appends a 3-D position error state.
 """
 
 from __future__ import annotations
@@ -88,6 +90,30 @@ def rotmat_to_quat_wxyz(R: np.ndarray) -> np.ndarray:
     return q
 
 
+def protected_displacement_covariance(
+    covariance_w,
+    *,
+    sigma_floor_xyz_m=(0.10, 0.10, 0.01),
+    covariance_scale: float = 1.25,
+) -> np.ndarray:
+    """Protect the EKF from learned-uncertainty collapse."""
+    covariance = np.asarray(covariance_w, dtype=np.float64).reshape(3, 3)
+    floor = np.asarray(sigma_floor_xyz_m, dtype=np.float64).reshape(3)
+    scale = float(covariance_scale)
+    if not np.all(np.isfinite(covariance)):
+        raise ValueError("learned displacement covariance must be finite")
+    if np.any(floor <= 0.0) or not np.all(np.isfinite(floor)):
+        raise ValueError("sigma_floor_xyz_m must be positive and finite")
+    if scale <= 0.0 or not np.isfinite(scale):
+        raise ValueError("covariance_scale must be positive and finite")
+    diagonal = np.diag(covariance)
+    if np.any(diagonal < 0.0):
+        raise ValueError("learned displacement covariance diagonal must be non-negative")
+    predicted_sigma = np.sqrt(diagonal)
+    sigma_used = np.maximum(predicted_sigma, floor)
+    return np.diag((scale * sigma_used) ** 2)
+
+
 @dataclass(frozen=True)
 class LearnedInertialState:
     timestamp_s: float
@@ -108,12 +134,10 @@ class LearnedInertialState:
 
 
 class LearnedInertialOdometry:
-    """Error-state EKF with one cloned position for learned relative updates.
+    """Fixed-lag error-state EKF with timestamped 3-D position clones."""
 
-    Error-state order is [dtheta, dv, dp, dba, dbg] (15 states).  When a
-    learned-displacement window is active, a 3-D clone of the window-start
-    position is appended, making an 18-state covariance.
-    """
+    _CURRENT_DIM = 15
+    _CLONE_DIM = 3
 
     def __init__(
         self,
@@ -123,12 +147,16 @@ class LearnedInertialOdometry:
         gyro_noise_sigma=0.001,
         accel_bias_rw_sigma=0.001,
         gyro_bias_rw_sigma=0.0001,
+        max_position_clones: int = 11,
     ) -> None:
+        if int(max_position_clones) < 1:
+            raise ValueError("max_position_clones must be at least 1")
         self.gravity_w = np.asarray(gravity_w, dtype=np.float64).reshape(3)
         self.accel_noise_sigma = float(accel_noise_sigma)
         self.gyro_noise_sigma = float(gyro_noise_sigma)
         self.accel_bias_rw_sigma = float(accel_bias_rw_sigma)
         self.gyro_bias_rw_sigma = float(gyro_bias_rw_sigma)
+        self.max_position_clones = int(max_position_clones)
         self.reset()
 
     def reset(
@@ -149,16 +177,30 @@ class LearnedInertialOdometry:
         self.ba = np.asarray(accel_bias_b, dtype=np.float64).reshape(3).copy()
         self.bg = np.asarray(gyro_bias_b, dtype=np.float64).reshape(3).copy()
         self.P = (
-            np.eye(15, dtype=np.float64) * 1.0e-3
+            np.eye(self._CURRENT_DIM, dtype=np.float64) * 1.0e-3
             if initial_covariance is None
-            else np.asarray(initial_covariance, dtype=np.float64).reshape(15, 15).copy()
+            else np.asarray(initial_covariance, dtype=np.float64)
+            .reshape(self._CURRENT_DIM, self._CURRENT_DIM)
+            .copy()
         )
-        self._clone_position: np.ndarray | None = None
-        self._clone_timestamp_s: float | None = None
+        self._clone_positions: list[np.ndarray] = []
+        self._clone_timestamps_s: list[float] = []
+
+    @property
+    def clone_count(self) -> int:
+        return len(self._clone_positions)
+
+    @property
+    def clone_timestamps_s(self) -> tuple[float, ...]:
+        return tuple(self._clone_timestamps_s)
+
+    @property
+    def clone_positions_w_b(self) -> tuple[np.ndarray, ...]:
+        return tuple(position.copy() for position in self._clone_positions)
 
     @property
     def has_displacement_clone(self) -> bool:
-        return self._clone_position is not None
+        return self.clone_count > 0
 
     def state(self) -> LearnedInertialState:
         return LearnedInertialState(
@@ -171,22 +213,107 @@ class LearnedInertialOdometry:
             covariance=self.P.copy(),
         )
 
-    def begin_displacement_window(self) -> None:
-        """Clone current position and augment covariance for a future relative update."""
-        if self.has_displacement_clone:
-            raise RuntimeError("a learned-displacement window is already active")
-        self._clone_position = self.p.copy()
-        self._clone_timestamp_s = self.timestamp_s
+    def _clone_slice(self, clone_index: int) -> slice:
+        start = self._CURRENT_DIM + self._CLONE_DIM * int(clone_index)
+        return slice(start, start + self._CLONE_DIM)
 
-        P_aug = np.zeros((18, 18), dtype=np.float64)
-        P_aug[:15, :15] = self.P
-        # clone error equals current position error at augmentation time
-        J = np.zeros((3, 15), dtype=np.float64)
+    def _find_clone_index(self, timestamp_s: float, *, tolerance_s: float = 1.0e-6) -> int:
+        if not self._clone_timestamps_s:
+            raise RuntimeError("no learned-displacement position clone is available")
+        timestamp = float(timestamp_s)
+        tolerance = float(tolerance_s)
+        if tolerance < 0.0 or not np.isfinite(tolerance):
+            raise ValueError("clone timestamp tolerance must be finite and non-negative")
+        times = np.asarray(self._clone_timestamps_s, dtype=np.float64)
+        index = int(np.argmin(np.abs(times - timestamp)))
+        error = abs(float(times[index]) - timestamp)
+        if error > tolerance:
+            raise KeyError(
+                f"no position clone within {tolerance:.6f}s of {timestamp:.6f}s "
+                f"(nearest={times[index]:.6f}s)"
+            )
+        return index
+
+    def clone_current_position(self) -> float:
+        """Append the current position with full clone cross-covariance."""
+        timestamp = float(self.timestamp_s)
+        if self._clone_timestamps_s and timestamp <= self._clone_timestamps_s[-1] + 1.0e-12:
+            raise ValueError("position clone timestamps must be strictly increasing")
+
+        while self.clone_count >= self.max_position_clones:
+            self.marginalize_clone(0)
+
+        old_dim = self.P.shape[0]
+        P_aug = np.zeros(
+            (old_dim + self._CLONE_DIM, old_dim + self._CLONE_DIM),
+            dtype=np.float64,
+        )
+        P_aug[:old_dim, :old_dim] = self.P
+
+        J = np.zeros((self._CLONE_DIM, old_dim), dtype=np.float64)
         J[:, 6:9] = np.eye(3)
-        P_aug[15:18, :15] = J @ self.P
-        P_aug[:15, 15:18] = P_aug[15:18, :15].T
-        P_aug[15:18, 15:18] = J @ self.P @ J.T
-        self.P = P_aug
+        cross = J @ self.P
+        P_aug[old_dim:, :old_dim] = cross
+        P_aug[:old_dim, old_dim:] = cross.T
+        P_aug[old_dim:, old_dim:] = J @ self.P @ J.T
+
+        self.P = 0.5 * (P_aug + P_aug.T)
+        self._clone_positions.append(self.p.copy())
+        self._clone_timestamps_s.append(timestamp)
+        return timestamp
+
+    def begin_displacement_window(self) -> None:
+        """Backward-compatible alias for cloning a window-start position."""
+        self.clone_current_position()
+
+    def marginalize_clone(self, clone_index: int) -> None:
+        """Remove one historical clone and its covariance rows/columns."""
+        index = int(clone_index)
+        if index < 0:
+            index += self.clone_count
+        if index < 0 or index >= self.clone_count:
+            raise IndexError("position clone index out of range")
+        sl = self._clone_slice(index)
+        keep = np.ones(self.P.shape[0], dtype=bool)
+        keep[sl] = False
+        self.P = self.P[np.ix_(keep, keep)].copy()
+        del self._clone_positions[index]
+        del self._clone_timestamps_s[index]
+        self.P = 0.5 * (self.P + self.P.T)
+
+    def marginalize_clones_before(self, timestamp_s: float, *, inclusive: bool = False) -> int:
+        """Drop clones older than a fixed-lag cutoff."""
+        threshold = float(timestamp_s)
+        removed = 0
+        while self._clone_timestamps_s:
+            oldest = self._clone_timestamps_s[0]
+            expired = oldest <= threshold if inclusive else oldest < threshold
+            if not expired:
+                break
+            self.marginalize_clone(0)
+            removed += 1
+        return removed
+
+    def relative_displacement_jacobian(
+        self,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Build H for a current-minus-historical position measurement."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-displacement position clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, 6:9] = np.eye(3)
+        H[:, self._clone_slice(clone_index)] = -np.eye(3)
+        return H
 
     def propagate(self, *, gyro_b, accel_b, timestamp_s: float) -> None:
         t = float(timestamp_s)
@@ -206,7 +333,7 @@ class LearnedInertialOdometry:
         self.R = R_prev @ _exp_so3(omega * dt)
         self.timestamp_s = t
 
-        F = np.eye(15, dtype=np.float64)
+        F = np.eye(self._CURRENT_DIM, dtype=np.float64)
         F[0:3, 0:3] -= _skew(omega) * dt
         F[0:3, 12:15] = -np.eye(3) * dt
         F[3:6, 0:3] = -(R_prev @ _skew(specific_force)) * dt
@@ -215,7 +342,7 @@ class LearnedInertialOdometry:
         F[6:9, 0:3] = -0.5 * (R_prev @ _skew(specific_force)) * dt * dt
         F[6:9, 9:12] = -0.5 * R_prev * dt * dt
 
-        G = np.zeros((15, 12), dtype=np.float64)
+        G = np.zeros((self._CURRENT_DIM, 12), dtype=np.float64)
         G[0:3, 3:6] = -np.eye(3) * dt
         G[3:6, 0:3] = -R_prev * dt
         G[6:9, 0:3] = -0.5 * R_prev * dt * dt
@@ -228,31 +355,33 @@ class LearnedInertialOdometry:
             + [self.gyro_bias_rw_sigma**2] * 3
         )
 
-        if self.P.shape == (15, 15):
-            self.P = F @ self.P @ F.T + G @ Qc @ G.T
-        else:
-            F_aug = np.eye(18, dtype=np.float64)
-            F_aug[:15, :15] = F
-            G_aug = np.zeros((18, 12), dtype=np.float64)
-            G_aug[:15, :] = G
-            self.P = F_aug @ self.P @ F_aug.T + G_aug @ Qc @ G_aug.T
+        total_dim = self.P.shape[0]
+        F_aug = np.eye(total_dim, dtype=np.float64)
+        F_aug[:self._CURRENT_DIM, :self._CURRENT_DIM] = F
+        G_aug = np.zeros((total_dim, 12), dtype=np.float64)
+        G_aug[:self._CURRENT_DIM, :] = G
+        self.P = F_aug @ self.P @ F_aug.T + G_aug @ Qc @ G_aug.T
         self.P = 0.5 * (self.P + self.P.T)
 
     def _inject_error(self, dx: np.ndarray) -> None:
         dx = np.asarray(dx, dtype=np.float64).reshape(-1)
+        expected_dim = self._CURRENT_DIM + self._CLONE_DIM * self.clone_count
+        if dx.size != expected_dim:
+            raise ValueError(f"error state has size {dx.size}, expected {expected_dim}")
         self.R = _exp_so3(dx[0:3]) @ self.R
         self.v += dx[3:6]
         self.p += dx[6:9]
         self.ba += dx[9:12]
         self.bg += dx[12:15]
-        if dx.size == 18 and self._clone_position is not None:
-            self._clone_position += dx[15:18]
+        for clone_index in range(self.clone_count):
+            self._clone_positions[clone_index] += dx[self._clone_slice(clone_index)]
 
     def _kalman_update(self, residual: np.ndarray, H: np.ndarray, Rm: np.ndarray) -> None:
         residual = np.asarray(residual, dtype=np.float64).reshape(-1)
         Rm = np.asarray(Rm, dtype=np.float64)
         S = H @ self.P @ H.T + Rm
-        K = self.P @ H.T @ np.linalg.inv(S)
+        PHt = self.P @ H.T
+        K = np.linalg.solve(S.T, PHt.T).T
         dx = K @ residual
         self._inject_error(dx)
         I = np.eye(self.P.shape[0], dtype=np.float64)
@@ -260,28 +389,43 @@ class LearnedInertialOdometry:
         self.P = A @ self.P @ A.T + K @ Rm @ K.T
         self.P = 0.5 * (self.P + self.P.T)
 
-    def update_learned_displacement(self, displacement_w, covariance_w) -> np.ndarray:
-        """Fuse network-predicted relative displacement and return innovation.
+    def update_learned_displacement(
+        self,
+        displacement_w,
+        covariance_w,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_used_clone: bool = True,
+    ) -> np.ndarray:
+        """Fuse z = p_current - p_historical and return the innovation."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-displacement position clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
 
-        The innovation follows measurement-minus-prediction:
-            r = dp_nn - (p_j - p_i)
-        """
-        if not self.has_displacement_clone or self.P.shape != (18, 18):
-            raise RuntimeError("begin_displacement_window() must be called first")
         z = np.asarray(displacement_w, dtype=np.float64).reshape(3)
         Rm = np.asarray(covariance_w, dtype=np.float64).reshape(3, 3)
-        predicted = self.p - self._clone_position
-        residual = z - predicted
+        if not np.all(np.isfinite(Rm)):
+            raise ValueError("learned displacement covariance must be finite")
+        if np.linalg.eigvalsh(0.5 * (Rm + Rm.T))[0] <= 0.0:
+            raise ValueError("learned displacement covariance must be positive definite")
 
-        H = np.zeros((3, 18), dtype=np.float64)
-        H[:, 6:9] = np.eye(3)
-        H[:, 15:18] = -np.eye(3)
+        predicted = self.p - self._clone_positions[clone_index]
+        residual = z - predicted
+        H = self.relative_displacement_jacobian(
+            start_timestamp_s=self._clone_timestamps_s[clone_index],
+            clone_tolerance_s=clone_tolerance_s,
+        )
         self._kalman_update(residual, H, Rm)
 
-        # Marginalize the clone after the window update.
-        self.P = self.P[:15, :15].copy()
-        self._clone_position = None
-        self._clone_timestamp_s = None
+        if marginalize_used_clone:
+            self.marginalize_clone(clone_index)
         return residual
 
     def update_absolute_position(self, position_w_b, covariance_w) -> np.ndarray:
