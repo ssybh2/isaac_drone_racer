@@ -506,6 +506,7 @@ def main() -> None:
                                 "kinematic_residual",
                                 "kinematic_residual_body_end",
                                 "kinematic_residual_body_end_gyro_aligned",
+                                "kinematic_residual_body_end_gravity_compensated",
                             ):
                                 if start_key not in truth_velocity_by_time:
                                     raise RuntimeError(
@@ -519,9 +520,16 @@ def main() -> None:
                                     tcn_gt_dp
                                     - truth_velocity_by_time[start_key] * window_dt
                                 )
+                            if target_mode == "kinematic_residual_body_end_gravity_compensated":
+                                gravity_w = np.array([0.0, 0.0, -9.81], dtype=np.float64)
+                                tcn_gt_dp = (
+                                    tcn_gt_dp
+                                    - 0.5 * gravity_w * window_dt * window_dt
+                                )
                             if target_mode in (
                                 "kinematic_residual_body_end",
                                 "kinematic_residual_body_end_gyro_aligned",
+                                "kinematic_residual_body_end_gravity_compensated",
                             ):
                                 if end_key not in truth_orientation_by_time:
                                     raise RuntimeError(
