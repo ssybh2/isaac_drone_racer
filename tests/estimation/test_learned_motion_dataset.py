@@ -136,6 +136,46 @@ def test_body_end_residual_uses_body_features_and_endpoint_frame(tmp_path):
     )
 
 
+def test_gravity_compensated_body_target_removes_ballistic_gravity(tmp_path):
+    trace = tmp_path / "gravity_trace.csv"
+    with trace.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        for t in np.arange(0.0, 1.0 + 1.0e-9, 0.01):
+            writer.writerow(
+                {
+                    "t_s": t,
+                    "truth_px": 0.0,
+                    "truth_py": 0.0,
+                    "truth_pz": -0.5 * 9.81 * t * t,
+                    "truth_vx": 0.0,
+                    "truth_vy": 0.0,
+                    "truth_vz": -9.81 * t,
+                    "truth_qw": 1.0,
+                    "truth_qx": 0.0,
+                    "truth_qy": 0.0,
+                    "truth_qz": 0.0,
+                    "imu_gx": 0.0,
+                    "imu_gy": 0.0,
+                    "imu_gz": 0.0,
+                    "thrust_b_x": 0.0,
+                    "thrust_b_y": 0.0,
+                    "thrust_b_z": 0.0,
+                }
+            )
+
+    windows = load_trace_windows(
+        trace,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        stride_time_s=0.5,
+        target_mode="kinematic_residual_body_end_gravity_compensated",
+    )
+
+    assert windows.target_mode == "kinematic_residual_body_end_gravity_compensated"
+    np.testing.assert_allclose(windows.targets, 0.0, atol=1e-6)
+
+
 def test_missing_thrust_columns_are_rejected(tmp_path):
     trace = tmp_path / "bad.csv"
     with trace.open("w", newline="", encoding="utf-8") as handle:
