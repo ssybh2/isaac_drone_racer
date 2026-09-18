@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 
 import estimation.learned_inertial_odometry as lio
@@ -198,6 +200,87 @@ def test_kinematic_residual_removes_known_start_velocity_term():
     assert np.allclose(innovation, 0.0, atol=1e-9)
     assert est.clone_count == 0
     assert est.state().covariance.shape == (15, 15)
+
+
+def test_body_end_kinematic_residual_jacobian_matches_finite_difference():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    q0 = lio.rotmat_to_quat_wxyz(
+        lio._exp_so3(np.array([0.15, -0.10, 0.25]))
+    )
+    est.reset(
+        position_w_b=(0.3, -0.2, 1.1),
+        linear_velocity_w_b=(1.2, -0.4, 0.2),
+        orientation_w_b_wxyz=q0,
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.03, -0.02, 0.08),
+            accel_b=(0.4, -0.2, 9.9),
+            timestamp_s=k * 0.01,
+        )
+
+    H = est.kinematic_residual_body_end_jacobian(
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    base = est.predicted_kinematic_residual_body_end(
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    eps = 1.0e-7
+
+    # Check current attitude, current position, cloned velocity and cloned
+    # position columns. These are all terms in the endpoint-body measurement.
+    columns = list(range(0, 3)) + list(range(6, 9))
+    columns += list(range(15, 18)) + list(range(18, 21))
+    for col in columns:
+        perturbed = copy.deepcopy(est)
+        dx = np.zeros(perturbed.P.shape[0], dtype=np.float64)
+        dx[col] = eps
+        perturbed._inject_error(dx)
+        value = perturbed.predicted_kinematic_residual_body_end(
+            start_timestamp_s=0.0,
+            clone_tolerance_s=1e-9,
+        )
+        numerical = (value - base) / eps
+        np.testing.assert_allclose(
+            numerical,
+            H[:, col],
+            rtol=2e-5,
+            atol=2e-6,
+        )
+
+
+def test_body_end_kinematic_residual_update_accepts_exact_measurement():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    est.reset(
+        linear_velocity_w_b=(1.0, 0.2, -0.1),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.0, 0.0, 0.2),
+            accel_b=(0.2, 0.1, 9.81),
+            timestamp_s=k * 0.01,
+        )
+
+    z = est.predicted_kinematic_residual_body_end(
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    ).copy()
+    innovation = est.update_learned_kinematic_residual_body_end(
+        z,
+        np.eye(3) * 0.01,
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    np.testing.assert_allclose(innovation, 0.0, atol=1e-12)
+    assert est.clone_count == 0
+    assert np.linalg.eigvalsh(est.state().covariance).min() > -1e-10
 
 
 def test_learned_relative_displacement_pulls_position_toward_measurement():
