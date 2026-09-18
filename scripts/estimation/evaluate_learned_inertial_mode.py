@@ -144,6 +144,20 @@ def _quat_to_rpy(q) -> tuple[float, float, float]:
     return float(roll), float(pitch), float(yaw)
 
 
+def _quat_to_rotmat(q) -> np.ndarray:
+    q = np.asarray(q, dtype=np.float64).reshape(4)
+    q = q / np.linalg.norm(q)
+    w, x, y, z = q
+    return np.array(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ],
+        dtype=np.float64,
+    )
+
+
 def _orientation_error_rad(q_est, q_truth) -> float:
     q_est = np.asarray(q_est, dtype=np.float64).reshape(4)
     q_truth = np.asarray(q_truth, dtype=np.float64).reshape(4)
@@ -396,6 +410,9 @@ def main() -> None:
         truth_velocity_by_time = {
             round(start_timestamp_s, 6): _np(robot.data.root_lin_vel_w[0]).astype(np.float64).copy()
         }
+        truth_orientation_by_time = {
+            round(start_timestamp_s, 6): _np(robot.data.root_quat_w[0]).astype(np.float64).copy()
+        }
 
         with trace_path.open("w", newline="", encoding="utf-8", buffering=1) as handle:
             writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
@@ -447,6 +464,7 @@ def main() -> None:
                 timestamp_key = round(float(raw_env._timestamp_s()), 6)
                 truth_position_by_time[timestamp_key] = truth_p.copy()
                 truth_velocity_by_time[timestamp_key] = truth_v.copy()
+                truth_orientation_by_time[timestamp_key] = truth_q.copy()
 
                 innovation = None
                 tcn_prediction = None
@@ -484,7 +502,10 @@ def main() -> None:
                                     "displacement",
                                 )
                             )
-                            if target_mode == "kinematic_residual":
+                            if target_mode in (
+                                "kinematic_residual",
+                                "kinematic_residual_body_end",
+                            ):
                                 if start_key not in truth_velocity_by_time:
                                     raise RuntimeError(
                                         "missing truth start velocity for residual diagnostic"
@@ -497,6 +518,15 @@ def main() -> None:
                                     tcn_gt_dp
                                     - truth_velocity_by_time[start_key] * window_dt
                                 )
+                            if target_mode == "kinematic_residual_body_end":
+                                if end_key not in truth_orientation_by_time:
+                                    raise RuntimeError(
+                                        "missing truth endpoint attitude for body residual diagnostic"
+                                    )
+                                R_end_gt = _quat_to_rotmat(
+                                    truth_orientation_by_time[end_key]
+                                )
+                                tcn_gt_dp = R_end_gt.T @ tcn_gt_dp
                             tcn_pred_error = tcn_prediction - tcn_gt_dp
                             prediction_errors.append(tcn_pred_error.copy())
 
@@ -687,6 +717,11 @@ def main() -> None:
                         "displacement",
                     )
                 )
+            ),
+            "tcn_feature_frame": (
+                None
+                if raw_env._motion_predictor is None
+                else str(getattr(raw_env._motion_predictor, "feature_frame", "world"))
             ),
             "oracle_learned_residual_fusion": bool(
                 cfg.learned_debug_oracle_residual_fusion
