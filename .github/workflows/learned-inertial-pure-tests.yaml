@@ -23,6 +23,7 @@ jobs:
           python -m py_compile estimation/learned_motion_dataset.py
           python -m py_compile scripts/estimation/collect_imo_supervised_data.py
           python -m py_compile scripts/estimation/train_learned_motion.py
+          python -m py_compile scripts/estimation/evaluate_learned_inertial_ab.py
           python -m py_compile tasks/drone_racer/mdp/learned_inertial_observations.py
           python -m py_compile tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py
           python -m py_compile tasks/drone_racer/learned_inertial_racing_env.py
