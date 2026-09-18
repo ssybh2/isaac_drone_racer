@@ -64,6 +64,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._learned_update_skip_count = 0
         self._last_learned_innovation_w = None
         self._last_learned_prediction_w = None
+        self._last_learned_measurement_w = None
+        self._last_learned_measurement_source = None
         self._last_learned_predicted_rel_w = None
         self._last_learned_covariance_raw_w = None
         self._last_learned_covariance_used_w = None
@@ -79,6 +81,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._imu_gyro_bias_b = np.zeros(3, dtype=np.float64)
         self._last_imu_accel_b_meas = None
         self._last_imu_gyro_b_meas = None
+        self._debug_truth_motion_history = {}
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         if self.num_envs != 1:
             raise ValueError("LearnedInertialRacingEnv currently requires num_envs=1")
@@ -182,6 +185,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         )
         self._last_imu_accel_b_meas = None
         self._last_imu_gyro_b_meas = None
+        self._debug_truth_motion_history = {}
         # Anchor the learned fixed-lag schedule on the first valid 100 Hz
         # motion sample, rather than inventing a thrust sample at reset.
         self._learned_epoch_start_s = None
@@ -194,6 +198,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._learned_update_skip_count = 0
         self._last_learned_innovation_w = None
         self._last_learned_prediction_w = None
+        self._last_learned_measurement_w = None
+        self._last_learned_measurement_source = None
         self._last_learned_predicted_rel_w = None
         self._last_learned_covariance_raw_w = None
         self._last_learned_covariance_used_w = None
@@ -338,6 +344,18 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             thrust_w=R_wb @ thrust_b,
         )
 
+        if bool(self.cfg.learned_debug_oracle_residual_fusion):
+            robot = self.scene["robot"]
+            key = round(float(timestamp_s), 9)
+            self._debug_truth_motion_history[key] = (
+                _np(robot.data.root_pos_w[0]).astype(np.float64).copy(),
+                _np(robot.data.root_lin_vel_w[0]).astype(np.float64).copy(),
+            )
+            cutoff = float(timestamp_s) - 2.0 * float(self.cfg.learned_window_time_s)
+            for old_key in list(self._debug_truth_motion_history):
+                if old_key < cutoff:
+                    del self._debug_truth_motion_history[old_key]
+
     def _maybe_update_learned_displacement(self) -> None:
         """Run 0.5 s overlapping TCN constraints at the configured update rate."""
         if self._motion_predictor is None:
@@ -420,10 +438,34 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     f"unsupported learned-motion target mode: {target_mode!r}"
                 )
 
-            innovation = (
-                np.asarray(prediction.displacement_w, dtype=np.float64)
-                - predicted_rel
-            )
+            measurement_w = np.asarray(
+                prediction.displacement_w, dtype=np.float64
+            ).copy()
+            measurement_source = "network"
+            if bool(self.cfg.learned_debug_oracle_residual_fusion):
+                if target_mode != "kinematic_residual":
+                    raise RuntimeError(
+                        "oracle residual fusion requires kinematic_residual checkpoint"
+                    )
+                start_key = round(float(start_s), 9)
+                end_key = round(float(scheduled_end_s), 9)
+                if (
+                    start_key not in self._debug_truth_motion_history
+                    or end_key not in self._debug_truth_motion_history
+                ):
+                    raise RuntimeError(
+                        "oracle residual fusion is missing GT history for window"
+                    )
+                p_start_gt, v_start_gt = self._debug_truth_motion_history[start_key]
+                p_end_gt, _ = self._debug_truth_motion_history[end_key]
+                measurement_w = (
+                    p_end_gt
+                    - p_start_gt
+                    - v_start_gt * float(scheduled_end_s - start_s)
+                )
+                measurement_source = "oracle_kinematic_residual"
+
+            innovation = measurement_w - predicted_rel
             should_fuse = (
                 bool(self.cfg.learned_apply_displacement_updates)
                 and self._learned_update_count % self._learned_fusion_stride == 0
@@ -431,7 +473,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             if should_fuse:
                 if target_mode == "kinematic_residual":
                     self._lio.update_learned_kinematic_residual(
-                        prediction.displacement_w,
+                        measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
                         clone_tolerance_s=timing_tolerance_s,
@@ -439,7 +481,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     )
                 else:
                     self._lio.update_learned_displacement(
-                        prediction.displacement_w,
+                        measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
                         clone_tolerance_s=timing_tolerance_s,
@@ -465,6 +507,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_prediction_w = np.asarray(
             prediction.displacement_w, dtype=np.float64
         ).copy()
+        self._last_learned_measurement_w = np.asarray(
+            measurement_w, dtype=np.float64
+        ).copy()
+        self._last_learned_measurement_source = str(measurement_source)
         self._last_learned_predicted_rel_w = np.asarray(
             predicted_rel, dtype=np.float64
         ).copy()
