@@ -84,6 +84,14 @@ parser.add_argument(
     ),
 )
 parser.add_argument("--disable-visibility", action="store_true")
+parser.add_argument(
+    "--oracle-learned-residual-fusion",
+    action="store_true",
+    help=(
+        "Diagnostic only: keep running the TCN, but fuse exact GT kinematic "
+        "residuals to isolate EKF measurement-model correctness."
+    ),
+)
 parser.add_argument("--replay-npz", type=Path, required=True)
 parser.add_argument("--output-dir", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -203,6 +211,9 @@ def _prepare_cfg():
     cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
     cfg.scene.num_envs = 1
     cfg.episode_length_s = max(float(cfg.episode_length_s), args_cli.steps * 0.01 + 10.0)
+    cfg.learned_debug_oracle_residual_fusion = bool(
+        args_cli.oracle_learned_residual_fusion
+    )
     cfg.terminations.collision = None
     cfg.terminations.flyaway = None
     cfg.commands.target.randomise_start = None
@@ -294,7 +305,7 @@ CSV_FIELDS = [
     "est_qw", "est_qx", "est_qy", "est_qz",
     "orientation_error_deg",
     "learned_updates", "learned_update_skips", "clone_count",
-    "tcn_target_mode",
+    "tcn_target_mode", "learned_measurement_source",
     "tcn_innovation_x", "tcn_innovation_y", "tcn_innovation_z",
     "tcn_innovation_norm_m",
     "tcn_pred_x", "tcn_pred_y", "tcn_pred_z",
@@ -534,6 +545,9 @@ def main() -> None:
                                 )
                             )
                         ),
+                        "learned_measurement_source": (
+                            raw_env._last_learned_measurement_source
+                        ),
                         "tcn_innovation_x": None if innovation is None else innovation[0],
                         "tcn_innovation_y": None if innovation is None else innovation[1],
                         "tcn_innovation_z": None if innovation is None else innovation[2],
@@ -658,6 +672,12 @@ def main() -> None:
                         "displacement",
                     )
                 )
+            ),
+            "oracle_learned_residual_fusion": bool(
+                cfg.learned_debug_oracle_residual_fusion
+            ),
+            "last_learned_measurement_source": (
+                raw_env._last_learned_measurement_source
             ),
             "samples": int(len(pos)),
             "duration_s": float(duration_s),
