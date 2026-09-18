@@ -9,12 +9,27 @@ from pathlib import Path
 import numpy as np
 
 from estimation.learned_motion import build_tcn
-from estimation.learned_motion_dataset import load_trace_windows, split_trace_paths
+from estimation.learned_motion_dataset import (
+    load_trace_split_manifest,
+    load_trace_windows,
+    split_trace_paths,
+)
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("traces", nargs="+", type=Path, help="Complete trajectory CSV traces.")
+    parser.add_argument(
+        "traces",
+        nargs="*",
+        type=Path,
+        help="Complete trajectory CSV traces. Omit when --manifest is used.",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="Explicit V2 train/val/test manifest. Mutually exclusive with positional traces.",
+    )
     parser.add_argument("--output", type=Path, default=Path("artifacts/learned_motion/model.pt"))
     parser.add_argument("--window_time_s", type=float, default=0.5)
     parser.add_argument("--sample_rate_hz", type=float, default=100.0)
@@ -27,6 +42,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1.0e-4)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument(
+        "--selection_metric",
+        choices=("nll", "rmse"),
+        default="nll",
+        help="Metric used to select the best validation checkpoint.",
+    )
     return parser.parse_args()
 
 
@@ -81,6 +102,30 @@ def _evaluate(torch, model, loader, device):
     }
 
 
+def _evaluate_path(torch, model, path, args, device):
+    features, targets = _stack_paths([path], args)
+    if features.shape[0] == 0:
+        return None
+    dataset = torch.utils.data.TensorDataset(
+        torch.from_numpy(features).float(),
+        torch.from_numpy(targets).float(),
+    )
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
+    return _evaluate(torch, model, loader, device)
+
+
+def _per_trace_metrics(torch, model, paths, args, device):
+    return {
+        str(path): _evaluate_path(torch, model, path, args, device)
+        for path in paths
+    }
+
+
 def main() -> None:
     args = _parse_args()
     if args.epochs < 1 or args.batch_size < 1:
@@ -96,16 +141,30 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    trace_paths = [path.expanduser().resolve() for path in args.traces]
-    missing = [str(path) for path in trace_paths if not path.exists()]
+    if args.manifest is not None and args.traces:
+        raise ValueError("Use either --manifest or positional traces, not both")
+    if args.manifest is None and not args.traces:
+        raise ValueError("Provide positional traces or --manifest")
+
+    split_source = "random_whole_trace_split"
+    manifest_path = None
+    if args.manifest is not None:
+        manifest_path = args.manifest.expanduser().resolve()
+        train_paths, val_paths, test_paths = load_trace_split_manifest(manifest_path)
+        split_source = "explicit_manifest"
+    else:
+        trace_paths = [path.expanduser().resolve() for path in args.traces]
+        train_paths, val_paths, test_paths = split_trace_paths(
+            trace_paths,
+            val_fraction=args.val_fraction,
+            test_fraction=args.test_fraction,
+            seed=args.seed,
+        )
+
+    all_paths = list(train_paths) + list(val_paths) + list(test_paths)
+    missing = [str(path) for path in all_paths if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing trace files: {missing}")
-    train_paths, val_paths, test_paths = split_trace_paths(
-        trace_paths,
-        val_fraction=args.val_fraction,
-        test_fraction=args.test_fraction,
-        seed=args.seed,
-    )
     train_x, train_y = _stack_paths(train_paths, args)
     val_x, val_y = _stack_paths(val_paths, args)
     test_x, test_y = _stack_paths(test_paths, args)
@@ -151,6 +210,9 @@ def main() -> None:
         "train_traces": [str(path) for path in train_paths],
         "val_traces": [str(path) for path in val_paths],
         "test_traces": [str(path) for path in test_paths],
+        "split_source": split_source,
+        "manifest": None if manifest_path is None else str(manifest_path),
+        "selection_metric": str(args.selection_metric),
         "seed": int(args.seed),
     }
 
@@ -171,16 +233,22 @@ def main() -> None:
 
         train_nll = float(np.mean(epoch_losses))
         val_metrics = _evaluate(torch, model, val_loader, device)
-        selection_metric = train_nll if val_metrics is None else val_metrics["nll"]
-        if selection_metric < best_metric:
-            best_metric = selection_metric
+        if val_metrics is None:
+            selection_value = train_nll
+        elif args.selection_metric == "rmse":
+            selection_value = val_metrics["rmse_m"]
+        else:
+            selection_value = val_metrics["nll"]
+        if selection_value < best_metric:
+            best_metric = selection_value
             best_epoch = epoch
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
                     "metadata": metadata,
                     "epoch": int(epoch),
-                    "selection_nll": float(selection_metric),
+                    "selection_metric": str(args.selection_metric),
+                    "selection_value": float(selection_value),
                 },
                 args.output,
             )
@@ -198,12 +266,19 @@ def main() -> None:
     report = {
         "checkpoint": str(args.output.resolve()),
         "best_epoch": int(best_epoch),
-        "best_selection_nll": float(best_metric),
+        "best_selection_metric": str(args.selection_metric),
+        "best_selection_value": float(best_metric),
         "train_windows": int(train_x.shape[0]),
         "val_windows": int(val_x.shape[0]),
         "test_windows": int(test_x.shape[0]),
         "validation": val_metrics,
         "test": test_metrics,
+        "validation_by_trace": _per_trace_metrics(
+            torch, model, val_paths, args, device
+        ),
+        "test_by_trace": _per_trace_metrics(
+            torch, model, test_paths, args, device
+        ),
         "metadata": metadata,
     }
     report_path = args.output.with_suffix(args.output.suffix + ".json")
