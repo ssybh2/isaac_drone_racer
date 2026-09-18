@@ -159,6 +159,11 @@ def load_trace_windows(
     features = np.empty((num_windows, 6, sample_count), dtype=np.float32)
     targets = np.empty((num_windows, 3), dtype=np.float32)
     sample_offsets = np.arange(sample_count, dtype=np.float64) / float(sample_rate_hz)
+    rotation_samples = (
+        np.stack([_quat_wxyz_to_rotmat(q) for q in quaternions], axis=0)
+        if target_mode == "kinematic_residual_body_end"
+        else None
+    )
     for window_index, (start, end) in enumerate(zip(starts, ends)):
         sample_times = start + sample_offsets
         for channel in range(6):
@@ -192,10 +197,6 @@ def load_trace_windows(
             # attitude while leaving attitude dependence explicit in the EKF
             # measurement model.
             R_interp = np.empty((3, 3), dtype=np.float64)
-            rotation_samples = np.stack(
-                [_quat_wxyz_to_rotmat(q) for q in quaternions],
-                axis=0,
-            )
             for row in range(3):
                 for col in range(3):
                     R_interp[row, col] = np.interp(
