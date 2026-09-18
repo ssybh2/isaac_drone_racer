@@ -1,14 +1,6 @@
-import importlib.util
-from pathlib import Path
-
 import numpy as np
 
-
-MODULE = Path(__file__).resolve().parents[2] / "estimation" / "learned_inertial_odometry.py"
-spec = importlib.util.spec_from_file_location("learned_inertial_odometry", MODULE)
-lio = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-spec.loader.exec_module(lio)
+import estimation.learned_inertial_odometry as lio
 
 
 def test_static_specific_force_keeps_pose_nearly_fixed():
