@@ -27,6 +27,7 @@ class TraceWindows:
     start_timestamps_s: np.ndarray
     end_timestamps_s: np.ndarray
     source_path: Path
+    target_mode: str = "displacement"
 
 
 def _quat_wxyz_to_rotmat(q) -> np.ndarray:
@@ -45,7 +46,9 @@ def _quat_wxyz_to_rotmat(q) -> np.ndarray:
     )
 
 
-def _read_trace(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _read_trace(
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     with path.open("r", newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         columns = set(reader.fieldnames or ())
@@ -75,12 +78,17 @@ def _read_trace(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     gyro_b = np.column_stack((col("imu_gx"), col("imu_gy"), col("imu_gz")))
     thrust_b = np.column_stack((col("thrust_b_x"), col("thrust_b_y"), col("thrust_b_z")))
 
+    velocity_columns = ("truth_vx", "truth_vy", "truth_vz")
+    velocities = None
+    if all(name in columns for name in velocity_columns):
+        velocities = np.column_stack(tuple(col(name) for name in velocity_columns))
+
     features_w = np.empty((len(rows), 6), dtype=np.float64)
     for index, (q, gyro, thrust) in enumerate(zip(quaternions, gyro_b, thrust_b)):
         R_wb = _quat_wxyz_to_rotmat(q)
         features_w[index, 0:3] = R_wb @ gyro
         features_w[index, 3:6] = R_wb @ thrust
-    return timestamps, positions, features_w
+    return timestamps, positions, features_w, velocities
 
 
 def load_trace_windows(
@@ -89,8 +97,17 @@ def load_trace_windows(
     window_time_s: float = 0.5,
     sample_rate_hz: float = 100.0,
     stride_time_s: float = 0.01,
+    target_mode: str = "displacement",
 ) -> TraceWindows:
-    """Convert one complete trace into fixed-rate motion windows and truth dp labels."""
+    """Convert one complete trace into fixed-rate learned-motion windows.
+
+    target_mode="displacement" produces dp = p1 - p0.
+
+    target_mode="kinematic_residual" produces
+        dp_residual = (p1 - p0) - v0 * window_time_s
+    so the EKF can represent the start-velocity term explicitly instead of
+    forcing the TCN to infer translational velocity from thrust/gyro alone.
+    """
     path = Path(path)
     if window_time_s <= 0.0 or sample_rate_hz <= 0.0 or stride_time_s <= 0.0:
         raise ValueError("window_time_s, sample_rate_hz and stride_time_s must be positive")
@@ -98,7 +115,16 @@ def load_trace_windows(
     if sample_count < 2:
         raise ValueError("learned motion window must contain at least two samples")
 
-    timestamps, positions, source_features = _read_trace(path)
+    if target_mode not in ("displacement", "kinematic_residual"):
+        raise ValueError(
+            "target_mode must be 'displacement' or 'kinematic_residual'"
+        )
+    timestamps, positions, source_features, velocities = _read_trace(path)
+    if target_mode == "kinematic_residual" and velocities is None:
+        raise ValueError(
+            f"trace {path} needs truth_vx/truth_vy/truth_vz for "
+            "kinematic_residual targets"
+        )
     first = float(timestamps[0])
     last_start = float(timestamps[-1] - window_time_s)
     if last_start < first - 1.0e-9:
@@ -124,7 +150,17 @@ def load_trace_windows(
             [np.interp(end, timestamps, positions[:, axis]) for axis in range(3)],
             dtype=np.float64,
         )
-        targets[window_index, :] = (p_end - p_start).astype(np.float32)
+        target = p_end - p_start
+        if target_mode == "kinematic_residual":
+            v_start = np.array(
+                [
+                    np.interp(start, timestamps, velocities[:, axis])
+                    for axis in range(3)
+                ],
+                dtype=np.float64,
+            )
+            target = target - v_start * float(window_time_s)
+        targets[window_index, :] = target.astype(np.float32)
 
     return TraceWindows(
         features=features,
@@ -132,6 +168,7 @@ def load_trace_windows(
         start_timestamps_s=starts,
         end_timestamps_s=ends,
         source_path=path,
+        target_mode=target_mode,
     )
 
 
