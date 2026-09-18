@@ -181,13 +181,28 @@ def _controller_action(
     common = 0.18 * height_error - 0.09 * vertical_velocity
 
     xy_error = target_xy - robot.data.root_pos_w[0, :2]
-    desired_accel_xy = xy_error - 1.5 * robot.data.root_lin_vel_w[0, :2]
-    desired_roll = float(torch.clamp(-desired_accel_xy[1] / 9.81, -0.25, 0.25))
-    desired_pitch = float(torch.clamp(desired_accel_xy[0] / 9.81, -0.25, 0.25))
+    desired_accel_w_xy = xy_error - 1.5 * robot.data.root_lin_vel_w[0, :2]
 
     q = robot.data.root_quat_w[0]
     rates = robot.data.root_ang_vel_b[0]
     roll, pitch, yaw = _quat_to_rpy(q)
+
+    # Convert desired world-frame horizontal acceleration into the current
+    # yaw-aligned body frame before mapping it to roll/pitch. The previous V2
+    # collector implicitly assumed yaw=0:
+    #
+    #   desired_roll  = -a_w_y / g
+    #   desired_pitch =  a_w_x / g
+    #
+    # That is only valid while the vehicle heading is fixed. During
+    # translate+yaw/racing-like traces it rotated the tilt command into the
+    # wrong direction and could drive the vehicle into a runaway trajectory.
+    cy = float(np.cos(yaw))
+    sy = float(np.sin(yaw))
+    accel_body_x = cy * float(desired_accel_w_xy[0]) + sy * float(desired_accel_w_xy[1])
+    accel_body_y = -sy * float(desired_accel_w_xy[0]) + cy * float(desired_accel_w_xy[1])
+    desired_roll = float(np.clip(-accel_body_y / 9.81, -0.25, 0.25))
+    desired_pitch = float(np.clip(accel_body_x / 9.81, -0.25, 0.25))
     yaw_error = float(
         np.arctan2(
             np.sin(yaw - target_yaw_rad),
@@ -313,6 +328,7 @@ def main() -> None:
             "vehicle_mass_kg": float(args_cli.vehicle_mass_kg),
             "thrust_b_units": "m/s^2 (mass-normalized collective thrust)",
             "ground_truth_use": "supervised labels/evaluation only",
+            "controller_revision": "yaw_compensated_world_xy_v2",
             "trajectory": {
                 "amplitude_m": float(args_cli.amplitude_m),
                 "frequency_hz": float(args_cli.frequency_hz),
