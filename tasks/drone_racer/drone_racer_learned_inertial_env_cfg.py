@@ -62,6 +62,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # uncertainty, but prevent implausibly confident EKF measurements.
     learned_sigma_floor_xyz_m: tuple[float, float, float] = (0.10, 0.10, 0.01)
     learned_covariance_scale: float = 1.25
+    # Extra diagnostic/runtime multiplier applied to the final learned
+    # measurement covariance. This is separate from the per-axis sigma floor
+    # and lets us test whether overlapping windows are over-counting
+    # information without changing the trained network.
+    learned_measurement_covariance_multiplier: float = 1.0
     # Evaluation/debug switch: still run the 20 Hz network and clone schedule
     # but do not inject its displacement into the EKF. This enables shadow-mode
     # measurement diagnostics without changing the deployed input contract.
