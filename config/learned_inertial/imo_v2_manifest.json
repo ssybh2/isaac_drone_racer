@@ -1,6 +1,6 @@
 {
   "schema": "isaac_drone_racer.imo_dataset_manifest.v2",
-  "description": "IMO V2 dataset with explicit speed/acceleration/yaw/vertical coverage, fixed whole-trajectory train/val/test splits, and held-out dynamics kept within validated training support.",
+  "description": "IMO V2 dataset with explicit speed/acceleration/yaw/vertical coverage, fixed whole-trajectory train/val/test splits, and yaw-compensated controller traces for all heading-changing motion.",
   "path_base": "../..",
   "collector_defaults": {
     "steps": 2000,
@@ -128,8 +128,8 @@
       }
     },
     {
-      "name": "train_yaw_30deg",
-      "path": "artifacts/imo_dataset_v2/train_yaw_30deg.csv",
+      "name": "train_yaw_30deg_yc2",
+      "path": "artifacts/imo_dataset_v2/train_yaw_30deg_yc2.csv",
       "split": "train",
       "collector": {
         "profile": "yaw_sweep",
@@ -140,8 +140,8 @@
       }
     },
     {
-      "name": "train_yaw_60deg",
-      "path": "artifacts/imo_dataset_v2/train_yaw_60deg.csv",
+      "name": "train_yaw_60deg_yc2",
+      "path": "artifacts/imo_dataset_v2/train_yaw_60deg_yc2.csv",
       "split": "train",
       "collector": {
         "profile": "yaw_sweep",
@@ -152,8 +152,8 @@
       }
     },
     {
-      "name": "train_translate_yaw_3m",
-      "path": "artifacts/imo_dataset_v2/train_translate_yaw_3m.csv",
+      "name": "train_translate_yaw_3m_yc2",
+      "path": "artifacts/imo_dataset_v2/train_translate_yaw_3m_yc2.csv",
       "split": "train",
       "collector": {
         "profile": "translate_yaw",
@@ -202,8 +202,8 @@
       }
     },
     {
-      "name": "train_racing_like_a1p5_f0p12",
-      "path": "artifacts/imo_dataset_v2/train_racing_like_a1p5_f0p12.csv",
+      "name": "train_racing_like_a1p5_f0p12_yc2",
+      "path": "artifacts/imo_dataset_v2/train_racing_like_a1p5_f0p12_yc2.csv",
       "split": "train",
       "collector": {
         "profile": "racing_like",
@@ -277,8 +277,8 @@
       }
     },
     {
-      "name": "val_translate_yaw_3p5m_safe",
-      "path": "artifacts/imo_dataset_v2/val_translate_yaw_3p5m_safe.csv",
+      "name": "val_translate_yaw_3p5m_safe_yc2",
+      "path": "artifacts/imo_dataset_v2/val_translate_yaw_3p5m_safe_yc2.csv",
       "split": "val",
       "collector": {
         "profile": "translate_yaw",
@@ -340,8 +340,8 @@
       }
     },
     {
-      "name": "test_yaw_45deg",
-      "path": "artifacts/imo_dataset_v2/test_yaw_45deg.csv",
+      "name": "test_yaw_45deg_yc2",
+      "path": "artifacts/imo_dataset_v2/test_yaw_45deg_yc2.csv",
       "split": "test",
       "collector": {
         "profile": "yaw_sweep",
@@ -366,8 +366,8 @@
       }
     },
     {
-      "name": "test_racing_like_a1p4_f0p09_safe",
-      "path": "artifacts/imo_dataset_v2/test_racing_like_a1p4_f0p09_safe.csv",
+      "name": "test_racing_like_a1p4_f0p09_safe_yc2",
+      "path": "artifacts/imo_dataset_v2/test_racing_like_a1p4_f0p09_safe_yc2.csv",
       "split": "test",
       "collector": {
         "profile": "racing_like",
