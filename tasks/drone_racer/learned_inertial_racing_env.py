@@ -341,7 +341,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         feature_frame = str(
             getattr(self._motion_predictor, "feature_frame", "world")
         )
-        if feature_frame == "body":
+        if feature_frame in ("body", "body_endpoint_gyro_aligned"):
             feature_gyro = gyro_b
             feature_thrust = thrust_b
         elif feature_frame == "world":
@@ -449,7 +449,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     start_timestamp_s=start_s,
                     clone_tolerance_s=timing_tolerance_s,
                 )
-            elif target_mode == "kinematic_residual_body_end":
+            elif target_mode in (
+                "kinematic_residual_body_end",
+                "kinematic_residual_body_end_gyro_aligned",
+            ):
                 predicted_rel = self._lio.predicted_kinematic_residual_body_end(
                     start_timestamp_s=start_s,
                     clone_tolerance_s=timing_tolerance_s,
@@ -472,6 +475,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 if target_mode not in (
                     "kinematic_residual",
                     "kinematic_residual_body_end",
+                    "kinematic_residual_body_end_gyro_aligned",
                 ):
                     raise RuntimeError(
                         "oracle residual fusion requires a kinematic-residual checkpoint"
@@ -492,7 +496,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     - p_start_gt
                     - v_start_gt * float(scheduled_end_s - start_s)
                 )
-                if target_mode == "kinematic_residual_body_end":
+                if target_mode in (
+                    "kinematic_residual_body_end",
+                    "kinematic_residual_body_end_gyro_aligned",
+                ):
                     robot = self.scene["robot"]
                     R_end_gt = quat_wxyz_to_rotmat(
                         _np(robot.data.root_quat_w[0]).astype(np.float64)
@@ -516,7 +523,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_used_clone=True,
                     )
-                elif target_mode == "kinematic_residual_body_end":
+                elif target_mode in (
+                    "kinematic_residual_body_end",
+                    "kinematic_residual_body_end_gyro_aligned",
+                ):
                     self._lio.update_learned_kinematic_residual_body_end(
                         measurement_w,
                         protected_covariance,
