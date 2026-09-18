@@ -20,6 +20,15 @@ parser.add_argument("--window_time_s", type=float, default=0.5)
 parser.add_argument("--sample_rate_hz", type=float, default=100.0)
 parser.add_argument("--stride_time_s", type=float, default=0.05)
 parser.add_argument("--output", type=Path, default=None)
+parser.add_argument(
+    "--heldout_support_ratio",
+    type=float,
+    default=1.25,
+    help=(
+        "Warn when a val/test axis p95 displacement exceeds this multiple of "
+        "the training axis max displacement."
+    ),
+)
 args = parser.parse_args()
 
 
@@ -115,14 +124,58 @@ def main() -> None:
             flush=True,
         )
 
+    train_axis_max = np.asarray(
+        report["splits"]["train"]["aggregate"]["axis_abs_max_m"],
+        dtype=np.float64,
+    )
+    support_ratio = float(args.heldout_support_ratio)
+    if support_ratio <= 0.0 or not np.isfinite(support_ratio):
+        raise ValueError("--heldout_support_ratio must be positive and finite")
+
+    warnings = []
     for split in ("val", "test"):
         print(f"\n[IMO audit] {split} per-trace:")
         for item in report["splits"][split]["traces"]:
+            p95 = np.asarray(item["axis_abs_p95_m"], dtype=np.float64)
+            ratio = np.divide(
+                p95,
+                np.maximum(train_axis_max, 1.0e-12),
+            )
+            out_axes = [
+                "XYZ"[axis]
+                for axis, value in enumerate(ratio)
+                if value > support_ratio
+            ]
+            status = ""
+            if out_axes:
+                warning = {
+                    "split": split,
+                    "path": item["path"],
+                    "axes": out_axes,
+                    "p95_to_train_max_ratio": ratio.tolist(),
+                }
+                warnings.append(warning)
+                status = f"  OUT_OF_SUPPORT={','.join(out_axes)}"
             print(
                 f"  {Path(item['path']).name:38s} "
                 f"p95_xyz={np.round(item['axis_abs_p95_m'], 4).tolist()} "
-                f"max_norm={item['norm_max_m']:.4f}"
+                f"max_norm={item['norm_max_m']:.4f}{status}"
             )
+
+    report["heldout_support_ratio"] = support_ratio
+    report["support_warnings"] = warnings
+    if warnings:
+        print(
+            f"\n[IMO audit] WARNING: {len(warnings)} held-out traces exceed "
+            f"{support_ratio:.2f}x training-axis max support.",
+            flush=True,
+        )
+    else:
+        print(
+            "\n[IMO audit] held-out p95 displacement is within configured "
+            "training support on all axes.",
+            flush=True,
+        )
 
     if args.output is not None:
         output = args.output.expanduser().resolve()
