@@ -3,7 +3,12 @@ import builtins
 import numpy as np
 import pytest
 
-from estimation.learned_motion import LearnedMotionBuffer, MotionWindow, TorchTcnDisplacementPredictor
+from estimation.learned_motion import (
+    LearnedMotionBuffer,
+    MotionWindow,
+    TorchTcnDisplacementPredictor,
+    endpoint_body_gyro_aligned_features,
+)
 
 
 def _fill(buffer: LearnedMotionBuffer, end_s: float = 0.6, dt: float = 0.01) -> None:
@@ -30,6 +35,29 @@ def test_buffer_resamples_exact_half_second_window_to_100hz_six_channel_tensor()
     assert window.timestamps_s[-1] == pytest.approx(0.49)
     expected_thrust = np.repeat(np.array([[1.0], [2.0], [3.0]]), 50, axis=1)
     np.testing.assert_allclose(window.features[3:, :], expected_thrust)
+
+
+def test_endpoint_body_gyro_alignment_uses_only_relative_rotation():
+    timestamps = np.arange(0.0, 0.50, 0.01)
+    features = np.zeros((6, len(timestamps)), dtype=np.float32)
+    # 90 deg/s yaw throughout the window. Body thrust is fixed along +x.
+    features[2, :] = np.pi / 2.0
+    features[3, :] = 1.0
+
+    aligned = endpoint_body_gyro_aligned_features(
+        features,
+        timestamps,
+        end_timestamp_s=0.5,
+    )
+
+    # At the endpoint the +x body axis is unchanged in endpoint coordinates.
+    np.testing.assert_allclose(aligned[3:6, -1], [1.0, -np.sin(np.deg2rad(0.9)), 0.0], atol=5e-4)
+    # The first sample's +x axis is seen from a frame yawed 45 deg ahead.
+    np.testing.assert_allclose(
+        aligned[3:6, 0],
+        [np.cos(np.pi / 4.0), -np.sin(np.pi / 4.0), 0.0],
+        atol=2e-3,
+    )
 
 
 def test_buffer_rejects_non_monotonic_motion_timestamps():
