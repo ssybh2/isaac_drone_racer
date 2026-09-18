@@ -716,6 +716,10 @@ def main() -> None:
         gate_attempts = int(raw_env._gate_attempt_count)
         gate_accepted = int(raw_env._gate_update_count)
         gate_rejected = int(raw_env._gate_reject_count)
+
+        tail_count = max(1, int(round(0.2 * len(pos))))
+        pos_norm = np.linalg.norm(pos, axis=1)
+        vel_norm = np.linalg.norm(vel, axis=1)
         summary = {
             "mode": args_cli.mode,
             "label": MODE_LABELS[args_cli.mode],
@@ -784,12 +788,24 @@ def main() -> None:
             ),
             "position_rmse_m": float(np.sqrt(np.mean(np.sum(pos**2, axis=1)))),
             "position_axis_rmse_m": np.sqrt(np.mean(pos**2, axis=0)).tolist(),
-            "position_max_error_m": float(np.max(np.linalg.norm(pos, axis=1))),
+            "position_max_error_m": float(np.max(pos_norm)),
+            "position_final_error_m": float(pos_norm[-1]),
+            "position_tail20_rmse_m": float(
+                np.sqrt(np.mean(pos_norm[-tail_count:] ** 2))
+            ),
             "velocity_rmse_mps": float(np.sqrt(np.mean(np.sum(vel**2, axis=1)))),
             "velocity_axis_rmse_mps": np.sqrt(np.mean(vel**2, axis=0)).tolist(),
-            "velocity_max_error_mps": float(np.max(np.linalg.norm(vel, axis=1))),
+            "velocity_max_error_mps": float(np.max(vel_norm)),
+            "velocity_final_error_mps": float(vel_norm[-1]),
+            "velocity_tail20_rmse_mps": float(
+                np.sqrt(np.mean(vel_norm[-tail_count:] ** 2))
+            ),
             "orientation_rmse_deg": float(np.degrees(np.sqrt(np.mean(ori**2)))),
             "orientation_max_error_deg": float(np.degrees(np.max(ori))),
+            "orientation_final_error_deg": float(np.degrees(ori[-1])),
+            "orientation_tail20_rmse_deg": float(
+                np.degrees(np.sqrt(np.mean(ori[-tail_count:] ** 2)))
+            ),
             "learned_updates": learned_updates,
             "learned_fusions": learned_fusions,
             "learned_update_hz_total": float(learned_updates / max(duration_s, 1.0e-12)),
