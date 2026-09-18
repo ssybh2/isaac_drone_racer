@@ -60,12 +60,17 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # uncertainty, but prevent implausibly confident EKF measurements.
     learned_sigma_floor_xyz_m: tuple[float, float, float] = (0.10, 0.10, 0.01)
     learned_covariance_scale: float = 1.25
+    # Evaluation/debug switch: still run the 20 Hz network and clone schedule
+    # but do not inject its displacement into the EKF. This enables shadow-mode
+    # measurement diagnostics without changing the deployed input contract.
+    learned_apply_displacement_updates: bool = True
 
     vehicle_mass_kg: float = 0.6076
     # The PnP builder already estimates world-position covariance from corner
     # perturbations. Until rotational uncertainty is propagated explicitly,
     # use a conservative fixed rotation sigma for the gate orientation update.
     gate_orientation_sigma_deg: float = 5.0
+    gate_use_orientation_update: bool = True
     gate_position_mahalanobis2_max: float = 16.27  # chi2(3), ~99.9%
 
     # Deployment rule: simulator GT is used only once at reset to provide the
