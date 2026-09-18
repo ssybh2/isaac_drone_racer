@@ -213,6 +213,7 @@ CSV_FIELDS = [
     "est_qw", "est_qx", "est_qy", "est_qz",
     "orientation_error_deg",
     "learned_updates", "learned_update_skips", "clone_count",
+    "tcn_target_mode",
     "tcn_innovation_x", "tcn_innovation_y", "tcn_innovation_z",
     "tcn_innovation_norm_m",
     "tcn_pred_x", "tcn_pred_y", "tcn_pred_z",
@@ -289,6 +290,9 @@ def main() -> None:
         truth_position_by_time = {
             round(start_timestamp_s, 6): _np(robot.data.root_pos_w[0]).astype(np.float64).copy()
         }
+        truth_velocity_by_time = {
+            round(start_timestamp_s, 6): _np(robot.data.root_lin_vel_w[0]).astype(np.float64).copy()
+        }
 
         with trace_path.open("w", newline="", encoding="utf-8", buffering=1) as handle:
             writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
@@ -337,7 +341,9 @@ def main() -> None:
                 velocity_errors.append(vel_err.copy())
                 orientation_errors_rad.append(ori_err_rad)
                 clone_counts.append(int(raw_env._lio.clone_count))
-                truth_position_by_time[round(float(raw_env._timestamp_s()), 6)] = truth_p.copy()
+                timestamp_key = round(float(raw_env._timestamp_s()), 6)
+                truth_position_by_time[timestamp_key] = truth_p.copy()
+                truth_velocity_by_time[timestamp_key] = truth_v.copy()
 
                 innovation = None
                 tcn_prediction = None
@@ -368,6 +374,26 @@ def main() -> None:
                                 truth_position_by_time[end_key]
                                 - truth_position_by_time[start_key]
                             )
+                            target_mode = str(
+                                getattr(
+                                    raw_env._motion_predictor,
+                                    "target_mode",
+                                    "displacement",
+                                )
+                            )
+                            if target_mode == "kinematic_residual":
+                                if start_key not in truth_velocity_by_time:
+                                    raise RuntimeError(
+                                        "missing truth start velocity for residual diagnostic"
+                                    )
+                                window_dt = float(
+                                    raw_env._last_learned_window_end_s
+                                    - raw_env._last_learned_window_start_s
+                                )
+                                tcn_gt_dp = (
+                                    tcn_gt_dp
+                                    - truth_velocity_by_time[start_key] * window_dt
+                                )
                             tcn_pred_error = tcn_prediction - tcn_gt_dp
                             prediction_errors.append(tcn_pred_error.copy())
 
@@ -416,6 +442,17 @@ def main() -> None:
                         "learned_updates": int(raw_env._learned_update_count),
                         "learned_update_skips": int(raw_env._learned_update_skip_count),
                         "clone_count": int(raw_env._lio.clone_count),
+                        "tcn_target_mode": (
+                            None
+                            if raw_env._motion_predictor is None
+                            else str(
+                                getattr(
+                                    raw_env._motion_predictor,
+                                    "target_mode",
+                                    "displacement",
+                                )
+                            )
+                        ),
                         "tcn_innovation_x": None if innovation is None else innovation[0],
                         "tcn_innovation_y": None if innovation is None else innovation[1],
                         "tcn_innovation_z": None if innovation is None else innovation[2],
@@ -528,6 +565,17 @@ def main() -> None:
         summary = {
             "mode": args_cli.mode,
             "label": MODE_LABELS[args_cli.mode],
+            "tcn_target_mode": (
+                None
+                if raw_env._motion_predictor is None
+                else str(
+                    getattr(
+                        raw_env._motion_predictor,
+                        "target_mode",
+                        "displacement",
+                    )
+                )
+            ),
             "samples": int(len(pos)),
             "duration_s": float(duration_s),
             "position_rmse_m": float(np.sqrt(np.mean(np.sum(pos**2, axis=1)))),
