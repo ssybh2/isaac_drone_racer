@@ -86,6 +86,56 @@ def test_kinematic_residual_target_subtracts_start_velocity(tmp_path):
     np.testing.assert_allclose(windows.targets, 0.0, atol=1e-8)
 
 
+def test_body_end_residual_uses_body_features_and_endpoint_frame(tmp_path):
+    trace = tmp_path / "body_trace.csv"
+    q = [np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)]  # +90 deg yaw
+    with trace.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        for t in np.arange(0.0, 1.0 + 1.0e-9, 0.01):
+            # Constant +x world acceleration: p=0.5*t^2, v=t.
+            writer.writerow(
+                {
+                    "t_s": t,
+                    "truth_px": 0.5 * t * t,
+                    "truth_py": 0.0,
+                    "truth_pz": 0.0,
+                    "truth_vx": t,
+                    "truth_vy": 0.0,
+                    "truth_vz": 0.0,
+                    "truth_qw": q[0],
+                    "truth_qx": q[1],
+                    "truth_qy": q[2],
+                    "truth_qz": q[3],
+                    "imu_gx": 1.0,
+                    "imu_gy": 2.0,
+                    "imu_gz": 3.0,
+                    "thrust_b_x": 4.0,
+                    "thrust_b_y": 5.0,
+                    "thrust_b_z": 6.0,
+                }
+            )
+
+    windows = load_trace_windows(
+        trace,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        stride_time_s=0.5,
+        target_mode="kinematic_residual_body_end",
+    )
+
+    assert windows.target_mode == "kinematic_residual_body_end"
+    # Body-frame checkpoint receives raw body gyro/thrust, not GT-rotated data.
+    np.testing.assert_allclose(windows.features[0, :, 0], [1, 2, 3, 4, 5, 6])
+    # First window residual_w = 0.125 m along +world-x. With +90 deg yaw,
+    # endpoint body coordinates are [0, -0.125, 0].
+    np.testing.assert_allclose(
+        windows.targets[0],
+        [0.0, -0.125, 0.0],
+        atol=1e-6,
+    )
+
+
 def test_missing_thrust_columns_are_rejected(tmp_path):
     trace = tmp_path / "bad.csv"
     with trace.open("w", newline="", encoding="utf-8") as handle:
