@@ -457,6 +457,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     start_timestamp_s=start_s,
                     clone_tolerance_s=timing_tolerance_s,
                 )
+            elif target_mode == "kinematic_residual_body_end_gravity_compensated":
+                predicted_rel = (
+                    self._lio.predicted_kinematic_residual_body_end_gravity_compensated(
+                        start_timestamp_s=start_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                    )
+                )
             elif target_mode == "displacement":
                 predicted_rel = self._lio.predicted_relative_displacement(
                     start_timestamp_s=start_s,
@@ -476,6 +483,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     "kinematic_residual",
                     "kinematic_residual_body_end",
                     "kinematic_residual_body_end_gyro_aligned",
+                    "kinematic_residual_body_end_gravity_compensated",
                 ):
                     raise RuntimeError(
                         "oracle residual fusion requires a kinematic-residual checkpoint"
@@ -491,14 +499,21 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     )
                 p_start_gt, v_start_gt = self._debug_truth_motion_history[start_key]
                 p_end_gt, _ = self._debug_truth_motion_history[end_key]
+                window_dt = float(scheduled_end_s - start_s)
                 measurement_w = (
                     p_end_gt
                     - p_start_gt
-                    - v_start_gt * float(scheduled_end_s - start_s)
+                    - v_start_gt * window_dt
                 )
+                if target_mode == "kinematic_residual_body_end_gravity_compensated":
+                    measurement_w = (
+                        measurement_w
+                        - 0.5 * self._lio.gravity_w * window_dt * window_dt
+                    )
                 if target_mode in (
                     "kinematic_residual_body_end",
                     "kinematic_residual_body_end_gyro_aligned",
+                    "kinematic_residual_body_end_gravity_compensated",
                 ):
                     robot = self.scene["robot"]
                     R_end_gt = quat_wxyz_to_rotmat(
@@ -528,6 +543,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     "kinematic_residual_body_end_gyro_aligned",
                 ):
                     self._lio.update_learned_kinematic_residual_body_end(
+                        measurement_w,
+                        protected_covariance,
+                        start_timestamp_s=start_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                        marginalize_used_clone=True,
+                    )
+                elif target_mode == "kinematic_residual_body_end_gravity_compensated":
+                    self._lio.update_learned_kinematic_residual_body_end_gravity_compensated(
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
