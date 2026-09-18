@@ -281,6 +281,16 @@ class LearnedInertialOdometry:
         del self._clone_timestamps_s[index]
         self.P = 0.5 * (self.P + self.P.T)
 
+    def marginalize_clone_at_timestamp(
+        self,
+        timestamp_s: float,
+        *,
+        tolerance_s: float = 1.0e-6,
+    ) -> None:
+        """Remove the clone nearest the requested timestamp within tolerance."""
+        clone_index = self._find_clone_index(timestamp_s, tolerance_s=tolerance_s)
+        self.marginalize_clone(clone_index)
+
     def marginalize_clones_before(self, timestamp_s: float, *, inclusive: bool = False) -> int:
         """Drop clones older than a fixed-lag cutoff."""
         threshold = float(timestamp_s)
