@@ -77,6 +77,25 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # measurement diagnostics without changing the deployed input contract.
     learned_apply_displacement_updates: bool = True
 
+    # Synthetic onboard-IMU corruption for estimator robustness experiments.
+    # White-noise sigmas are per simulated sample. Bias random-walk sigmas use
+    # units per sqrt(second), so the increment is sigma * sqrt(dt) * N(0, 1).
+    # All defaults are zero to preserve the existing ideal-IMU baseline.
+    imu_noise_seed: int = 0
+    imu_accel_white_noise_sigma_mps2: float = 0.0
+    imu_gyro_white_noise_sigma_radps: float = 0.0
+    imu_accel_initial_bias_sigma_mps2: float = 0.0
+    imu_gyro_initial_bias_sigma_radps: float = 0.0
+    imu_accel_bias_rw_sigma_mps2_sqrt_s: float = 0.0
+    imu_gyro_bias_rw_sigma_radps_sqrt_s: float = 0.0
+
+    # EKF process-noise assumptions. These are deliberately independent of the
+    # injected sensor corruption so consistency/mismatch can be ablated.
+    ekf_accel_noise_sigma: float = 0.01
+    ekf_gyro_noise_sigma: float = 0.001
+    ekf_accel_bias_rw_sigma: float = 0.001
+    ekf_gyro_bias_rw_sigma: float = 0.0001
+
     vehicle_mass_kg: float = 0.6076
     # The PnP builder already estimates world-position covariance from corner
     # perturbations. Until rotational uncertainty is propagated explicitly,
