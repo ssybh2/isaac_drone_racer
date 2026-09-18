@@ -56,6 +56,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # residual checkpoints can fuse (p_t-p_s)-v_s*dt without treating the EKF
     # start velocity as an independent external measurement.
     learned_update_rate_hz: float = 20.0
+    # Optional lower EKF fusion rate while keeping the TCN evaluated at
+    # learned_update_rate_hz. For a 0.5 s window, 2 Hz gives non-overlapping
+    # measurements and avoids double-counting the same sensor history. None
+    # preserves the legacy behavior and fuses every prediction.
+    learned_fusion_rate_hz: float | None = None
     learned_max_position_clones: int = 11
     # Held-out IMO traces exposed rare horizontal covariance collapse
     # (millimetre sigma with roughly 0.2 m error). Keep learned heteroscedastic
