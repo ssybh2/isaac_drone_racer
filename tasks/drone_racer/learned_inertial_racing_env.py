@@ -21,6 +21,7 @@ from isaaclab.envs import ManagerBasedRLEnv
 
 from estimation.learned_inertial_odometry import (
     LearnedInertialOdometry,
+    protected_displacement_covariance,
     rotmat_to_quat_wxyz,
 )
 from estimation.learned_motion import LearnedMotionBuffer, TorchTcnDisplacementPredictor
@@ -51,19 +52,36 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._lio: LearnedInertialOdometry | None = None
         self._motion_buffer: LearnedMotionBuffer | None = None
         self._motion_predictor = None
-        self._window_start_s: float | None = None
+        self._learned_epoch_start_s: float | None = None
+        self._next_clone_s: float | None = None
         self._next_learned_update_s: float | None = None
         self.swift_detector = None
         self._gate_builder = None
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
         self._learned_update_count = 0
+        self._learned_update_skip_count = 0
         self._gate_update_count = 0
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         if self.num_envs != 1:
             raise ValueError("LearnedInertialRacingEnv currently requires num_envs=1")
 
-        self._lio = LearnedInertialOdometry()
+        learned_rate_hz = float(cfg.learned_update_rate_hz)
+        window_s = float(cfg.learned_window_time_s)
+        if learned_rate_hz <= 0.0:
+            raise ValueError("learned_update_rate_hz must be positive")
+        if window_s <= 0.0:
+            raise ValueError("learned_window_time_s must be positive")
+        required_clones = int(np.ceil(window_s * learned_rate_hz - 1.0e-12)) + 1
+        if int(cfg.learned_max_position_clones) < required_clones:
+            raise ValueError(
+                "learned_max_position_clones is too small for the configured fixed lag: "
+                f"need at least {required_clones}"
+            )
+
+        self._lio = LearnedInertialOdometry(
+            max_position_clones=int(cfg.learned_max_position_clones),
+        )
         self._motion_buffer = LearnedMotionBuffer(
             window_time_s=cfg.learned_window_time_s,
             sample_rate_hz=cfg.learned_sample_rate_hz,
@@ -92,7 +110,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             orientation_w_b_wxyz=tuple(float(v) for v in init.rot),
         )
         self._motion_buffer.reset()
-        self._window_start_s = None
+        # Anchor the learned fixed-lag schedule on the first valid 100 Hz
+        # motion sample, rather than inventing a thrust sample at reset.
+        self._learned_epoch_start_s = None
+        self._next_clone_s = None
         self._next_learned_update_s = None
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
@@ -196,38 +217,78 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         )
 
     def _maybe_update_learned_displacement(self) -> None:
+        """Run 0.5 s overlapping TCN constraints at the configured update rate."""
         if self._motion_predictor is None:
             return
+
         now = self._timestamp_s()
         window_s = float(self.cfg.learned_window_time_s)
+        update_period_s = 1.0 / float(self.cfg.learned_update_rate_hz)
+        timing_tolerance_s = max(1.0e-6, 0.51 * float(self.step_dt))
 
-        if self._window_start_s is None:
-            # First non-overlapping window. This MVP intentionally uses one
-            # position clone at a time; a multi-clone 20 Hz update is the next
-            # fidelity upgrade toward the paper's full EKF.
-            self._window_start_s = now
-            self._lio.begin_displacement_window()
+        if self._learned_epoch_start_s is None:
+            self._learned_epoch_start_s = now
+            self._lio.clone_current_position()
+            self._next_clone_s = now + update_period_s
             self._next_learned_update_s = now + window_s
             return
+
+        # The control loop is 100 Hz and learned updates are 20 Hz by default.
+        if now + 1.0e-9 >= self._next_clone_s:
+            if abs(now - self._next_clone_s) <= timing_tolerance_s:
+                self._lio.clone_current_position()
+            else:
+                # Never label a current state with a historical clone timestamp.
+                self._learned_update_skip_count += 1
+            self._next_clone_s += update_period_s
 
         if now + 1.0e-9 < self._next_learned_update_s:
             return
 
-        try:
-            window = self._motion_buffer.window(self._window_start_s, self._window_start_s + window_s)
-        except ValueError:
-            return
-        prediction = self._motion_predictor.predict(window)
-        self._lio.update_learned_displacement(
-            prediction.displacement_w,
-            prediction.covariance_w,
-        )
-        self._learned_update_count += 1
-        self._motion_buffer.discard_before(now - window_s)
+        scheduled_end_s = float(self._next_learned_update_s)
+        start_s = scheduled_end_s - window_s
+        self._next_learned_update_s += update_period_s
 
-        self._window_start_s = now
-        self._next_learned_update_s = now + window_s
-        self._lio.begin_displacement_window()
+        # A delayed endpoint would pair the TCN window with the wrong current
+        # EKF state, so drop it instead of fusing time-misaligned information.
+        if abs(now - scheduled_end_s) > timing_tolerance_s:
+            self._learned_update_skip_count += 1
+            self._lio.marginalize_clones_before(start_s, inclusive=True)
+            self._motion_buffer.discard_before(start_s)
+            return
+
+        try:
+            window = self._motion_buffer.window(start_s, scheduled_end_s)
+        except ValueError:
+            self._learned_update_skip_count += 1
+            self._lio.marginalize_clones_before(start_s, inclusive=True)
+            self._motion_buffer.discard_before(start_s)
+            return
+
+        prediction = self._motion_predictor.predict(window)
+        protected_covariance = protected_displacement_covariance(
+            prediction.covariance_w,
+            sigma_floor_xyz_m=self.cfg.learned_sigma_floor_xyz_m,
+            covariance_scale=self.cfg.learned_covariance_scale,
+        )
+        try:
+            self._lio.update_learned_displacement(
+                prediction.displacement_w,
+                protected_covariance,
+                start_timestamp_s=start_s,
+                clone_tolerance_s=timing_tolerance_s,
+                marginalize_used_clone=True,
+            )
+        except (KeyError, RuntimeError):
+            self._learned_update_skip_count += 1
+            self._lio.marginalize_clones_before(start_s, inclusive=True)
+            self._motion_buffer.discard_before(start_s)
+            return
+
+        self._learned_update_count += 1
+        # discard_before retains one interpolation predecessor. The next
+        # 0.5 s window begins only 0.05 s later, so the histories overlap.
+        self._motion_buffer.discard_before(start_s)
         self.learned_inertial_state = self._lio.state()
 
     def _camera_due(self) -> bool:
@@ -282,6 +343,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
     def _update_log(self) -> None:
         log = self.extras.setdefault("log", {})
         log["LearnedIO/learned_updates"] = float(self._learned_update_count)
+        log["LearnedIO/learned_update_skips"] = float(self._learned_update_skip_count)
+        log["LearnedIO/position_clones"] = float(self._lio.clone_count)
         log["LearnedIO/gate_updates"] = float(self._gate_update_count)
         log["LearnedIO/has_checkpoint"] = float(self._motion_predictor is not None)
         log["LearnedIO/has_gate_detector"] = float(self.swift_detector is not None)
