@@ -183,7 +183,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         # model mass is 0.6076 kg (same value used to derive thrust coefficient).
         control = self.action_manager.get_term("control_action")
         collective_force_n = float(_np(control.processed_actions[0])[0])
-        mass_kg = 0.6076
+        mass_kg = float(self.cfg.vehicle_mass_kg)
+        if mass_kg <= 0.0:
+            raise ValueError("vehicle_mass_kg must be positive")
         thrust_b = np.array([0.0, 0.0, collective_force_n / mass_kg], dtype=np.float64)
 
         R_wb = self._lio.R
@@ -254,6 +256,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 reference_position_w_b=self._lio.p,
             )
         except (ValueError, RuntimeError):
+            return
+
+        # Reject a visually plausible but globally inconsistent gate association.
+        innovation_p = measurement.position_w_b - self._lio.p
+        Ppp = self._lio.P[6:9, 6:9]
+        S = Ppp + measurement.position_covariance_w
+        d2 = float(innovation_p.T @ np.linalg.solve(S, innovation_p))
+        if d2 > float(self.cfg.gate_position_mahalanobis2_max):
             return
 
         # Gate PnP + mapped T_wg is an absolute body-pose observation.
