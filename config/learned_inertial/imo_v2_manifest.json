@@ -1,6 +1,6 @@
 {
   "schema": "isaac_drone_racer.imo_dataset_manifest.v2",
-  "description": "IMO V2 dataset with explicit speed/acceleration/yaw/vertical coverage and fixed whole-trajectory train/val/test splits.",
+  "description": "IMO V2 dataset with explicit speed/acceleration/yaw/vertical coverage, fixed whole-trajectory train/val/test splits, and held-out dynamics kept within validated training support.",
   "path_base": "../..",
   "collector_defaults": {
     "steps": 2000,
@@ -277,15 +277,15 @@
       }
     },
     {
-      "name": "val_translate_yaw_4m",
-      "path": "artifacts/imo_dataset_v2/val_translate_yaw_4m.csv",
+      "name": "val_translate_yaw_3p5m_safe",
+      "path": "artifacts/imo_dataset_v2/val_translate_yaw_3p5m_safe.csv",
       "split": "val",
       "collector": {
         "profile": "translate_yaw",
-        "translation_m": 4,
-        "motion_duration_s": 5.5,
-        "yaw_amplitude_deg": 60,
-        "yaw_frequency_hz": 0.09,
+        "translation_m": 3.5,
+        "motion_duration_s": 7,
+        "yaw_amplitude_deg": 35,
+        "yaw_frequency_hz": 0.07,
         "phase_rad": 0.6,
         "steps": 2400,
         "seed": 16
@@ -366,15 +366,15 @@
       }
     },
     {
-      "name": "test_racing_like_a1p7_f0p13",
-      "path": "artifacts/imo_dataset_v2/test_racing_like_a1p7_f0p13.csv",
+      "name": "test_racing_like_a1p4_f0p09_safe",
+      "path": "artifacts/imo_dataset_v2/test_racing_like_a1p4_f0p09_safe.csv",
       "split": "test",
       "collector": {
         "profile": "racing_like",
-        "amplitude_m": 1.7,
-        "frequency_hz": 0.13,
-        "yaw_amplitude_deg": 55,
-        "yaw_frequency_hz": 0.11,
+        "amplitude_m": 1.4,
+        "frequency_hz": 0.09,
+        "yaw_amplitude_deg": 35,
+        "yaw_frequency_hz": 0.08,
         "phase_rad": 1.1,
         "steps": 3000,
         "seed": 27
