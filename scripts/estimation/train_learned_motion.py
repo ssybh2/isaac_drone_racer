@@ -41,6 +41,7 @@ def _parse_args() -> argparse.Namespace:
             "kinematic_residual",
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
+            "kinematic_residual_body_end_gravity_compensated",
         ),
         default="displacement",
         help=(
@@ -222,9 +223,15 @@ def main() -> None:
         "sample_rate_hz": float(args.sample_rate_hz),
         "stride_time_s": float(args.stride_time_s),
         "target_mode": str(args.target_mode),
+        "gravity_compensated_target": bool(
+            args.target_mode == "kinematic_residual_body_end_gravity_compensated"
+        ),
         "feature_frame": (
             "body_endpoint_gyro_aligned"
-            if args.target_mode == "kinematic_residual_body_end_gyro_aligned"
+            if args.target_mode in (
+                "kinematic_residual_body_end_gyro_aligned",
+                "kinematic_residual_body_end_gravity_compensated",
+            )
             else (
                 "body"
                 if args.target_mode == "kinematic_residual_body_end"
@@ -233,12 +240,16 @@ def main() -> None:
         ),
         "features": (
             ["gyro_end_x", "gyro_end_y", "gyro_end_z", "thrust_end_x", "thrust_end_y", "thrust_end_z"]
-            if args.target_mode == "kinematic_residual_body_end_gyro_aligned"
+            if args.target_mode in (
+                "kinematic_residual_body_end_gyro_aligned",
+                "kinematic_residual_body_end_gravity_compensated",
+            )
             else (
                 ["gyro_b_x", "gyro_b_y", "gyro_b_z", "thrust_b_x", "thrust_b_y", "thrust_b_z"]
                 if args.target_mode in (
                     "kinematic_residual_body_end",
                     "kinematic_residual_body_end_gyro_aligned",
+                    "kinematic_residual_body_end_gravity_compensated",
                 )
                 else ["gyro_w_x", "gyro_w_y", "gyro_w_z", "thrust_w_x", "thrust_w_y", "thrust_w_z"]
             )
