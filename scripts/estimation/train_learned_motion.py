@@ -34,6 +34,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--window_time_s", type=float, default=0.5)
     parser.add_argument("--sample_rate_hz", type=float, default=100.0)
     parser.add_argument("--stride_time_s", type=float, default=0.01)
+    parser.add_argument(
+        "--target_mode",
+        choices=("displacement", "kinematic_residual"),
+        default="displacement",
+        help=(
+            "Train direct displacement, or residual displacement after "
+            "subtracting v_start * window_time_s."
+        ),
+    )
     parser.add_argument("--val_fraction", type=float, default=0.15)
     parser.add_argument("--test_fraction", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=0)
@@ -60,6 +69,7 @@ def _stack_paths(paths, args):
             window_time_s=args.window_time_s,
             sample_rate_hz=args.sample_rate_hz,
             stride_time_s=args.stride_time_s,
+            target_mode=args.target_mode,
         )
         feature_parts.append(windows.features)
         target_parts.append(windows.targets)
@@ -205,8 +215,20 @@ def main() -> None:
         "window_time_s": float(args.window_time_s),
         "sample_rate_hz": float(args.sample_rate_hz),
         "stride_time_s": float(args.stride_time_s),
+        "target_mode": str(args.target_mode),
         "features": ["gyro_w_x", "gyro_w_y", "gyro_w_z", "thrust_w_x", "thrust_w_y", "thrust_w_z"],
-        "outputs": ["dp_w_x", "dp_w_y", "dp_w_z", "log_var_x", "log_var_y", "log_var_z"],
+        "outputs": (
+            ["dp_w_x", "dp_w_y", "dp_w_z", "log_var_x", "log_var_y", "log_var_z"]
+            if args.target_mode == "displacement"
+            else [
+                "dp_residual_w_x",
+                "dp_residual_w_y",
+                "dp_residual_w_z",
+                "log_var_x",
+                "log_var_y",
+                "log_var_z",
+            ]
+        ),
         "train_traces": [str(path) for path in train_paths],
         "val_traces": [str(path) for path in val_paths],
         "test_traces": [str(path) for path in test_paths],
