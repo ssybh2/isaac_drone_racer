@@ -156,6 +156,85 @@ class LearnedMotionBuffer:
         )
 
 
+def _exp_so3(rotvec) -> np.ndarray:
+    rotvec = np.asarray(rotvec, dtype=np.float64).reshape(3)
+    theta = float(np.linalg.norm(rotvec))
+    if theta < 1.0e-12:
+        K = np.array(
+            [
+                [0.0, -rotvec[2], rotvec[1]],
+                [rotvec[2], 0.0, -rotvec[0]],
+                [-rotvec[1], rotvec[0], 0.0],
+            ],
+            dtype=np.float64,
+        )
+        return np.eye(3) + K
+    axis = rotvec / theta
+    K = np.array(
+        [
+            [0.0, -axis[2], axis[1]],
+            [axis[2], 0.0, -axis[0]],
+            [-axis[1], axis[0], 0.0],
+        ],
+        dtype=np.float64,
+    )
+    return (
+        np.eye(3)
+        + np.sin(theta) * K
+        + (1.0 - np.cos(theta)) * (K @ K)
+    )
+
+
+def endpoint_body_gyro_aligned_features(
+    features_b: np.ndarray,
+    timestamps_s: np.ndarray,
+    *,
+    end_timestamp_s: float,
+) -> np.ndarray:
+    """Rotate body gyro/thrust into the window-end body frame using gyro only.
+
+    This constructs a local frame from relative attitude within the window:
+        Q(t) = R_start^T R(t)
+        v_end(t) = Q(end)^T Q(t) v_body(t)
+
+    No global/EKF attitude is required. Midpoint gyro integration is used
+    between samples, and the final sample is propagated to the requested
+    window endpoint so a 100 Hz 0.5 s window with samples through 0.49 s is
+    aligned to the true 0.50 s endpoint frame.
+    """
+    features = np.asarray(features_b, dtype=np.float64)
+    timestamps = np.asarray(timestamps_s, dtype=np.float64).reshape(-1)
+    if features.ndim != 2 or features.shape[0] != 6:
+        raise ValueError("body features must have shape (6, N)")
+    if features.shape[1] != timestamps.size or timestamps.size < 2:
+        raise ValueError("body feature and timestamp sample counts must match")
+    if np.any(np.diff(timestamps) <= 0.0):
+        raise ValueError("feature timestamps must be strictly increasing")
+    end_s = float(end_timestamp_s)
+    if end_s < timestamps[-1] - 1.0e-12:
+        raise ValueError("end_timestamp_s cannot precede the final sample")
+
+    gyro_b = features[0:3, :]
+    Q = np.empty((timestamps.size, 3, 3), dtype=np.float64)
+    Q[0] = np.eye(3)
+    for k in range(1, timestamps.size):
+        dt = float(timestamps[k] - timestamps[k - 1])
+        omega_mid = 0.5 * (gyro_b[:, k - 1] + gyro_b[:, k])
+        Q[k] = Q[k - 1] @ _exp_so3(omega_mid * dt)
+
+    Q_end = Q[-1]
+    tail_dt = end_s - float(timestamps[-1])
+    if tail_dt > 1.0e-12:
+        Q_end = Q_end @ _exp_so3(gyro_b[:, -1] * tail_dt)
+
+    out = np.empty_like(features)
+    for k in range(timestamps.size):
+        R_end_from_k = Q_end.T @ Q[k]
+        out[0:3, k] = R_end_from_k @ features[0:3, k]
+        out[3:6, k] = R_end_from_k @ features[3:6, k]
+    return out.astype(np.float32)
+
+
 def _import_torch():
     try:
         import torch
@@ -234,12 +313,13 @@ class TorchTcnDisplacementPredictor:
             "displacement",
             "kinematic_residual",
             "kinematic_residual_body_end",
+            "kinematic_residual_body_end_gyro_aligned",
         ):
             raise ValueError(
                 f"unsupported learned-motion target_mode: {self.target_mode!r}"
             )
         self.feature_frame = str(metadata.get("feature_frame", "world"))
-        if self.feature_frame not in ("world", "body"):
+        if self.feature_frame not in ("world", "body", "body_endpoint_gyro_aligned"):
             raise ValueError(
                 f"unsupported learned-motion feature_frame: {self.feature_frame!r}"
             )
@@ -249,6 +329,14 @@ class TorchTcnDisplacementPredictor:
         ):
             raise ValueError(
                 "kinematic_residual_body_end checkpoints must use body-frame features"
+            )
+        if (
+            self.target_mode == "kinematic_residual_body_end_gyro_aligned"
+            and self.feature_frame != "body_endpoint_gyro_aligned"
+        ):
+            raise ValueError(
+                "kinematic_residual_body_end_gyro_aligned checkpoints must use "
+                "body_endpoint_gyro_aligned features"
             )
         self.model = build_tcn(input_dim=6, output_dim=6).to(self.device)
         state = checkpoint.get("model_state_dict", checkpoint)
@@ -261,7 +349,14 @@ class TorchTcnDisplacementPredictor:
         expected_samples = int(round(self.window_time_s * self.sample_rate_hz))
         if window.features.shape != (6, expected_samples):
             raise ValueError("motion window sample count does not match checkpoint metadata")
-        tensor = self._torch.from_numpy(window.features[None, ...]).to(
+        model_features = window.features
+        if self.feature_frame == "body_endpoint_gyro_aligned":
+            model_features = endpoint_body_gyro_aligned_features(
+                window.features,
+                window.timestamps_s,
+                end_timestamp_s=window.end_timestamp_s,
+            )
+        tensor = self._torch.from_numpy(model_features[None, ...]).to(
             device=self.device, dtype=self._torch.float32
         )
         with self._torch.no_grad():
