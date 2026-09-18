@@ -35,6 +35,12 @@ parser.add_argument("--translation_m", type=float, default=3.0)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--progress-every", type=int, default=100)
 parser.add_argument(
+    "--learned-fusion-rate-hz",
+    type=float,
+    default=None,
+    help="Fuse only a subset of learned predictions while keeping prediction rate unchanged.",
+)
+parser.add_argument(
     "--task",
     default="Isaac-Drone-Racer-Learned-Inertial-v0",
 )
@@ -100,6 +106,10 @@ def _worker_command(mode: str, output_dir: Path, replay_npz: Path) -> list[str]:
         "--output-dir", str(output_dir),
         "--device", args.device,
     ]
+    if args.learned_fusion_rate_hz is not None:
+        command.extend(
+            ["--learned-fusion-rate-hz", str(args.learned_fusion_rate_hz)]
+        )
     if args.headless:
         command.append("--headless")
     if args.disable_visibility:
@@ -149,7 +159,8 @@ def main() -> None:
             f"vel={s['velocity_rmse_mps']:.4f}m/s "
             f"ori={s['orientation_rmse_deg']:.3f}deg "
             f"pred_rmse={pred['norm_rmse_m']} "
-            f"learned_hz={s['learned_update_hz_after_warmup']:.2f} "
+            f"pred_hz={s['learned_update_hz_after_warmup']:.2f} "
+            f"fuse_hz={s['learned_fusion_hz_after_warmup']:.2f} "
             f"gate={s['gate_accepted']}/{s['gate_attempts']}"
         )
 
