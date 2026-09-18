@@ -478,6 +478,73 @@ class LearnedInertialOdometry:
         H[:, self._clone_position_slice(clone_index)] = -Rt
         return H
 
+    def predicted_kinematic_residual_body_end_gravity_compensated(
+        self,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Return endpoint-body residual after removing known gravity motion.
+
+        h(x) = R_t^T * [(p_t-p_s) - v_s*dt - 0.5*g*dt^2].
+        """
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-motion kinematic clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+        dt = float(self.timestamp_s - self._clone_timestamps_s[clone_index])
+        if dt <= 0.0 or not np.isfinite(dt):
+            raise ValueError("kinematic-residual window duration must be positive")
+
+        residual_w = (
+            self.p
+            - self._clone_positions[clone_index]
+            - self._clone_velocities[clone_index] * dt
+            - 0.5 * self.gravity_w * dt * dt
+        )
+        return self.R.T @ residual_w
+
+    def kinematic_residual_body_end_gravity_compensated_jacobian(
+        self,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Build H for the gravity-compensated endpoint-body residual."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-motion kinematic clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+        dt = float(self.timestamp_s - self._clone_timestamps_s[clone_index])
+        if dt <= 0.0 or not np.isfinite(dt):
+            raise ValueError("kinematic-residual window duration must be positive")
+
+        residual_w = (
+            self.p
+            - self._clone_positions[clone_index]
+            - self._clone_velocities[clone_index] * dt
+            - 0.5 * self.gravity_w * dt * dt
+        )
+        predicted_b = self.R.T @ residual_w
+        Rt = self.R.T
+
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, 0:3] = _skew(predicted_b)
+        H[:, 6:9] = Rt
+        H[:, self._clone_velocity_slice(clone_index)] = -dt * Rt
+        H[:, self._clone_position_slice(clone_index)] = -Rt
+        return H
+
     def propagate(self, *, gyro_b, accel_b, timestamp_s: float) -> None:
         t = float(timestamp_s)
         dt = t - self.timestamp_s
@@ -686,6 +753,51 @@ class LearnedInertialOdometry:
         )
         innovation = z - predicted
         H = self.kinematic_residual_body_end_jacobian(
+            start_timestamp_s=clone_timestamp,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        self._kalman_update(innovation, H, Rm)
+
+        if marginalize_used_clone:
+            self.marginalize_clone(clone_index)
+        return innovation
+
+    def update_learned_kinematic_residual_body_end_gravity_compensated(
+        self,
+        residual_displacement_b_end,
+        covariance_b_end,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_used_clone: bool = True,
+    ) -> np.ndarray:
+        """Fuse gravity-compensated endpoint-body residual."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-motion kinematic clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+
+        z = np.asarray(residual_displacement_b_end, dtype=np.float64).reshape(3)
+        Rm = np.asarray(covariance_b_end, dtype=np.float64).reshape(3, 3)
+        if not np.all(np.isfinite(Rm)):
+            raise ValueError("learned body residual covariance must be finite")
+        if np.linalg.eigvalsh(0.5 * (Rm + Rm.T))[0] <= 0.0:
+            raise ValueError(
+                "learned body residual covariance must be positive definite"
+            )
+
+        clone_timestamp = self._clone_timestamps_s[clone_index]
+        predicted = self.predicted_kinematic_residual_body_end_gravity_compensated(
+            start_timestamp_s=clone_timestamp,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        innovation = z - predicted
+        H = self.kinematic_residual_body_end_gravity_compensated_jacobian(
             start_timestamp_s=clone_timestamp,
             clone_tolerance_s=clone_tolerance_s,
         )
