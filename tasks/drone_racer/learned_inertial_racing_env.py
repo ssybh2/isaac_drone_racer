@@ -62,6 +62,12 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._learned_update_count = 0
         self._learned_update_skip_count = 0
         self._last_learned_innovation_w = None
+        self._last_learned_prediction_w = None
+        self._last_learned_predicted_rel_w = None
+        self._last_learned_covariance_raw_w = None
+        self._last_learned_covariance_used_w = None
+        self._last_learned_window_start_s = None
+        self._last_learned_window_end_s = None
         self._last_learned_update_timestamp_s = None
         self._gate_attempt_count = 0
         self._gate_update_count = 0
@@ -123,6 +129,12 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
         self._last_learned_innovation_w = None
+        self._last_learned_prediction_w = None
+        self._last_learned_predicted_rel_w = None
+        self._last_learned_covariance_raw_w = None
+        self._last_learned_covariance_used_w = None
+        self._last_learned_window_start_s = None
+        self._last_learned_window_end_s = None
         self._last_learned_update_timestamp_s = None
         self._last_gate_mahalanobis2 = None
         self.learned_inertial_state = self._lio.state()
@@ -280,13 +292,25 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             covariance_scale=self.cfg.learned_covariance_scale,
         )
         try:
-            innovation = self._lio.update_learned_displacement(
-                prediction.displacement_w,
-                protected_covariance,
+            predicted_rel = self._lio.predicted_relative_displacement(
                 start_timestamp_s=start_s,
                 clone_tolerance_s=timing_tolerance_s,
-                marginalize_used_clone=True,
             )
+            innovation = np.asarray(prediction.displacement_w, dtype=np.float64) - predicted_rel
+            if bool(self.cfg.learned_apply_displacement_updates):
+                self._lio.update_learned_displacement(
+                    prediction.displacement_w,
+                    protected_covariance,
+                    start_timestamp_s=start_s,
+                    clone_tolerance_s=timing_tolerance_s,
+                    marginalize_used_clone=True,
+                )
+            else:
+                clone_index = self._lio._find_clone_index(
+                    start_s,
+                    tolerance_s=timing_tolerance_s,
+                )
+                self._lio.marginalize_clone(clone_index)
         except (KeyError, RuntimeError):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
@@ -295,6 +319,20 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
 
         self._learned_update_count += 1
         self._last_learned_innovation_w = np.asarray(innovation, dtype=np.float64).copy()
+        self._last_learned_prediction_w = np.asarray(
+            prediction.displacement_w, dtype=np.float64
+        ).copy()
+        self._last_learned_predicted_rel_w = np.asarray(
+            predicted_rel, dtype=np.float64
+        ).copy()
+        self._last_learned_covariance_raw_w = np.asarray(
+            prediction.covariance_w, dtype=np.float64
+        ).copy()
+        self._last_learned_covariance_used_w = np.asarray(
+            protected_covariance, dtype=np.float64
+        ).copy()
+        self._last_learned_window_start_s = float(start_s)
+        self._last_learned_window_end_s = float(scheduled_end_s)
         self._last_learned_update_timestamp_s = now
         # discard_before retains one interpolation predecessor. The next
         # 0.5 s window begins only 0.05 s later, so the histories overlap.
@@ -356,7 +394,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._lio.update_gate_pose(
             position_w_b=measurement.position_w_b,
             position_covariance_w=measurement.position_covariance_w,
-            orientation_w_b_wxyz=q_wb,
+            orientation_w_b_wxyz=(
+                q_wb if bool(self.cfg.gate_use_orientation_update) else None
+            ),
             orientation_covariance_rad2=np.eye(3) * sigma_rad * sigma_rad,
         )
         self._last_gate_measurement = measurement
