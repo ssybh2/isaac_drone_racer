@@ -22,6 +22,7 @@ from isaaclab.envs import ManagerBasedRLEnv
 from estimation.learned_inertial_odometry import (
     LearnedInertialOdometry,
     protected_displacement_covariance,
+    quat_wxyz_to_rotmat,
     rotmat_to_quat_wxyz,
 )
 from estimation.learned_motion import LearnedMotionBuffer, TorchTcnDisplacementPredictor
@@ -337,7 +338,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             raise ValueError("vehicle_mass_kg must be positive")
         thrust_b = np.array([0.0, 0.0, collective_force_n / mass_kg], dtype=np.float64)
 
-        R_wb = self._lio.R
+        if bool(self.cfg.learned_debug_truth_orientation_for_features):
+            robot = self.scene["robot"]
+            R_wb = quat_wxyz_to_rotmat(
+                _np(robot.data.root_quat_w[0]).astype(np.float64)
+            )
+        else:
+            R_wb = self._lio.R
+
         self._motion_buffer.append(
             timestamp_s,
             gyro_w=R_wb @ gyro_b,
