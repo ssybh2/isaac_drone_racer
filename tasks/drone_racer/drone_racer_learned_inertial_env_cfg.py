@@ -51,8 +51,10 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     learned_motion_device: str = "cuda"
     learned_window_time_s: float = 0.5
     learned_sample_rate_hz: float = 100.0
-    # Paper-style overlapping relative-displacement updates: a 0.5 s history
-    # window is evaluated every 0.05 s, requiring a fixed-lag clone bank.
+    # Overlapping learned-motion updates: a 0.5 s history window is evaluated
+    # every 0.05 s. The fixed-lag bank now clones both velocity and position so
+    # residual checkpoints can fuse (p_t-p_s)-v_s*dt without treating the EKF
+    # start velocity as an independent external measurement.
     learned_update_rate_hz: float = 20.0
     learned_max_position_clones: int = 11
     # Held-out IMO traces exposed rare horizontal covariance collapse
