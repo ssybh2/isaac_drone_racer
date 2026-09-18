@@ -51,8 +51,7 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     learned_motion_device: str = "cuda"
     learned_window_time_s: float = 0.5
     learned_sample_rate_hz: float = 100.0
-    learned_update_rate_hz: float = 20.0
-
+    # Current MVP uses non-overlapping 0.5 s windows (2 Hz). The paper uses\n    # 20 Hz overlapping updates with a fixed-lag multi-state EKF; that is the\n    # next estimator-fidelity milestone on this branch.\n    learned_update_rate_hz: float = 2.0\n    vehicle_mass_kg: float = 0.6076\n
     # The PnP builder already estimates world-position covariance from corner
     # perturbations.  Until rotational uncertainty is propagated explicitly,
     # use a conservative fixed rotation sigma for the gate orientation update.
