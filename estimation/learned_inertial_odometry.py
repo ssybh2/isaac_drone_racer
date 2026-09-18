@@ -471,7 +471,11 @@ class LearnedInertialOdometry:
         expected_dim = self._CURRENT_DIM + self._CLONE_DIM * self.clone_count
         if dx.size != expected_dim:
             raise ValueError(f"error state has size {dx.size}, expected {expected_dim}")
-        self.R = _exp_so3(dx[0:3]) @ self.R
+        dtheta = dx[0:3]
+        # Propagation linearization uses a right-multiplicative attitude error:
+        #     R_true = R_nominal @ Exp(dtheta)
+        # so injection must use the same convention.
+        self.R = self.R @ _exp_so3(dtheta)
         self.v += dx[3:6]
         self.p += dx[6:9]
         self.ba += dx[9:12]
@@ -495,6 +499,13 @@ class LearnedInertialOdometry:
         I = np.eye(self.P.shape[0], dtype=np.float64)
         A = I - K @ H
         self.P = A @ self.P @ A.T + K @ Rm @ K.T
+
+        # Error-state reset after attitude injection. For the local/right
+        # multiplicative error used by F, the first-order reset Jacobian is
+        # I - 0.5*[dtheta]_x on the attitude block.
+        reset = np.eye(self.P.shape[0], dtype=np.float64)
+        reset[0:3, 0:3] = np.eye(3) - 0.5 * _skew(dx[0:3])
+        self.P = reset @ self.P @ reset.T
         self.P = 0.5 * (self.P + self.P.T)
 
     def update_learned_displacement(
@@ -590,7 +601,9 @@ class LearnedInertialOdometry:
 
     def update_absolute_orientation(self, orientation_w_b_wxyz, covariance_rad2=None) -> np.ndarray:
         R_meas = quat_wxyz_to_rotmat(orientation_w_b_wxyz)
-        residual = _log_so3(R_meas @ self.R.T)
+        # Right/local attitude residual, consistent with propagation and
+        # injection: R_true = R_nominal @ Exp(dtheta).
+        residual = _log_so3(self.R.T @ R_meas)
         if covariance_rad2 is None:
             covariance_rad2 = np.eye(3, dtype=np.float64) * np.deg2rad(3.0) ** 2
         Rm = np.asarray(covariance_rad2, dtype=np.float64).reshape(3, 3)
