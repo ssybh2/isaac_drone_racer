@@ -5,12 +5,12 @@ of Cioffi et al. (RAL 2023):
 
 * IMU propagation estimates attitude, velocity, position and IMU biases.
 * Learned 0.5 s relative displacements are injected as Kalman measurements.
-* Timestamped position clones retain the cross-covariances required for
-  overlapping fixed-lag relative-position updates.
+* Timestamped velocity+position clones retain the cross-covariances required
+  for overlapping fixed-lag relative-motion updates.
 * Optional mapped-gate PnP measurements provide absolute pose anchors.
 
 The current error state is [dtheta, dv, dp, dba, dbg] (15 states). Each
-historical position clone appends a 3-D position error state.
+historical kinematic clone appends [dv_clone, dp_clone] (6 states).
 """
 
 from __future__ import annotations
@@ -134,10 +134,10 @@ class LearnedInertialState:
 
 
 class LearnedInertialOdometry:
-    """Fixed-lag error-state EKF with timestamped 3-D position clones."""
+    """Fixed-lag error-state EKF with timestamped velocity+position clones."""
 
     _CURRENT_DIM = 15
-    _CLONE_DIM = 3
+    _CLONE_DIM = 6
 
     def __init__(
         self,
@@ -183,6 +183,7 @@ class LearnedInertialOdometry:
             .reshape(self._CURRENT_DIM, self._CURRENT_DIM)
             .copy()
         )
+        self._clone_velocities: list[np.ndarray] = []
         self._clone_positions: list[np.ndarray] = []
         self._clone_timestamps_s: list[float] = []
 
@@ -193,6 +194,10 @@ class LearnedInertialOdometry:
     @property
     def clone_timestamps_s(self) -> tuple[float, ...]:
         return tuple(self._clone_timestamps_s)
+
+    @property
+    def clone_velocities_w_b(self) -> tuple[np.ndarray, ...]:
+        return tuple(velocity.copy() for velocity in self._clone_velocities)
 
     @property
     def clone_positions_w_b(self) -> tuple[np.ndarray, ...]:
@@ -217,9 +222,17 @@ class LearnedInertialOdometry:
         start = self._CURRENT_DIM + self._CLONE_DIM * int(clone_index)
         return slice(start, start + self._CLONE_DIM)
 
+    def _clone_velocity_slice(self, clone_index: int) -> slice:
+        sl = self._clone_slice(clone_index)
+        return slice(sl.start, sl.start + 3)
+
+    def _clone_position_slice(self, clone_index: int) -> slice:
+        sl = self._clone_slice(clone_index)
+        return slice(sl.start + 3, sl.start + 6)
+
     def _find_clone_index(self, timestamp_s: float, *, tolerance_s: float = 1.0e-6) -> int:
         if not self._clone_timestamps_s:
-            raise RuntimeError("no learned-displacement position clone is available")
+            raise RuntimeError("no learned-motion kinematic clone is available")
         timestamp = float(timestamp_s)
         tolerance = float(tolerance_s)
         if tolerance < 0.0 or not np.isfinite(tolerance):
@@ -229,16 +242,23 @@ class LearnedInertialOdometry:
         error = abs(float(times[index]) - timestamp)
         if error > tolerance:
             raise KeyError(
-                f"no position clone within {tolerance:.6f}s of {timestamp:.6f}s "
+                f"no kinematic clone within {tolerance:.6f}s of {timestamp:.6f}s "
                 f"(nearest={times[index]:.6f}s)"
             )
         return index
 
     def clone_current_position(self) -> float:
-        """Append the current position with full clone cross-covariance."""
+        """Append current velocity+position with full cross-covariance.
+
+        The historical public method name is preserved for compatibility with
+        the existing fixed-lag scheduler. Each clone is now [v, p], enabling a
+        statistically consistent measurement of
+
+            dp_residual = (p_t - p_s) - v_s * dt.
+        """
         timestamp = float(self.timestamp_s)
         if self._clone_timestamps_s and timestamp <= self._clone_timestamps_s[-1] + 1.0e-12:
-            raise ValueError("position clone timestamps must be strictly increasing")
+            raise ValueError("kinematic clone timestamps must be strictly increasing")
 
         while self.clone_count >= self.max_position_clones:
             self.marginalize_clone(0)
@@ -251,19 +271,21 @@ class LearnedInertialOdometry:
         P_aug[:old_dim, :old_dim] = self.P
 
         J = np.zeros((self._CLONE_DIM, old_dim), dtype=np.float64)
-        J[:, 6:9] = np.eye(3)
+        J[0:3, 3:6] = np.eye(3)
+        J[3:6, 6:9] = np.eye(3)
         cross = J @ self.P
         P_aug[old_dim:, :old_dim] = cross
         P_aug[:old_dim, old_dim:] = cross.T
         P_aug[old_dim:, old_dim:] = J @ self.P @ J.T
 
         self.P = 0.5 * (P_aug + P_aug.T)
+        self._clone_velocities.append(self.v.copy())
         self._clone_positions.append(self.p.copy())
         self._clone_timestamps_s.append(timestamp)
         return timestamp
 
     def begin_displacement_window(self) -> None:
-        """Backward-compatible alias for cloning a window-start position."""
+        """Backward-compatible alias for cloning a window-start kinematic state."""
         self.clone_current_position()
 
     def marginalize_clone(self, clone_index: int) -> None:
@@ -272,11 +294,12 @@ class LearnedInertialOdometry:
         if index < 0:
             index += self.clone_count
         if index < 0 or index >= self.clone_count:
-            raise IndexError("position clone index out of range")
+            raise IndexError("kinematic clone index out of range")
         sl = self._clone_slice(index)
         keep = np.ones(self.P.shape[0], dtype=bool)
         keep[sl] = False
         self.P = self.P[np.ix_(keep, keep)].copy()
+        del self._clone_velocities[index]
         del self._clone_positions[index]
         del self._clone_timestamps_s[index]
         self.P = 0.5 * (self.P + self.P.T)
@@ -312,7 +335,7 @@ class LearnedInertialOdometry:
     ) -> np.ndarray:
         """Return p_current - p_historical for the selected clone."""
         if self.clone_count == 0:
-            raise RuntimeError("a learned-displacement position clone is required")
+            raise RuntimeError("a learned-motion kinematic clone is required")
         if start_timestamp_s is None:
             clone_index = 0
         else:
@@ -330,7 +353,7 @@ class LearnedInertialOdometry:
     ) -> np.ndarray:
         """Build H for a current-minus-historical position measurement."""
         if self.clone_count == 0:
-            raise RuntimeError("a learned-displacement position clone is required")
+            raise RuntimeError("a learned-motion kinematic clone is required")
         if start_timestamp_s is None:
             clone_index = 0
         else:
@@ -340,7 +363,59 @@ class LearnedInertialOdometry:
             )
         H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
         H[:, 6:9] = np.eye(3)
-        H[:, self._clone_slice(clone_index)] = -np.eye(3)
+        H[:, self._clone_position_slice(clone_index)] = -np.eye(3)
+        return H
+
+
+    def predicted_kinematic_residual(
+        self,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Return (p_t - p_s) - v_s * (t - s) for a historical clone."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-motion kinematic clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+        dt = float(self.timestamp_s - self._clone_timestamps_s[clone_index])
+        if dt <= 0.0 or not np.isfinite(dt):
+            raise ValueError("kinematic-residual window duration must be positive")
+        return (
+            self.p
+            - self._clone_positions[clone_index]
+            - self._clone_velocities[clone_index] * dt
+        )
+
+    def kinematic_residual_jacobian(
+        self,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Build H for (p_t - p_s) - v_s * dt."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-motion kinematic clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+        dt = float(self.timestamp_s - self._clone_timestamps_s[clone_index])
+        if dt <= 0.0 or not np.isfinite(dt):
+            raise ValueError("kinematic-residual window duration must be positive")
+
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, 6:9] = np.eye(3)
+        H[:, self._clone_velocity_slice(clone_index)] = -dt * np.eye(3)
+        H[:, self._clone_position_slice(clone_index)] = -np.eye(3)
         return H
 
     def propagate(self, *, gyro_b, accel_b, timestamp_s: float) -> None:
@@ -402,7 +477,12 @@ class LearnedInertialOdometry:
         self.ba += dx[9:12]
         self.bg += dx[12:15]
         for clone_index in range(self.clone_count):
-            self._clone_positions[clone_index] += dx[self._clone_slice(clone_index)]
+            self._clone_velocities[clone_index] += dx[
+                self._clone_velocity_slice(clone_index)
+            ]
+            self._clone_positions[clone_index] += dx[
+                self._clone_position_slice(clone_index)
+            ]
 
     def _kalman_update(self, residual: np.ndarray, H: np.ndarray, Rm: np.ndarray) -> None:
         residual = np.asarray(residual, dtype=np.float64).reshape(-1)
@@ -428,7 +508,7 @@ class LearnedInertialOdometry:
     ) -> np.ndarray:
         """Fuse z = p_current - p_historical and return the innovation."""
         if self.clone_count == 0:
-            raise RuntimeError("a learned-displacement position clone is required")
+            raise RuntimeError("a learned-motion kinematic clone is required")
         if start_timestamp_s is None:
             clone_index = 0
         else:
@@ -455,6 +535,49 @@ class LearnedInertialOdometry:
         if marginalize_used_clone:
             self.marginalize_clone(clone_index)
         return residual
+
+    def update_learned_kinematic_residual(
+        self,
+        residual_displacement_w,
+        covariance_w,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_used_clone: bool = True,
+    ) -> np.ndarray:
+        """Fuse z = (p_t - p_s) - v_s * dt and return the innovation."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-motion kinematic clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+
+        z = np.asarray(residual_displacement_w, dtype=np.float64).reshape(3)
+        Rm = np.asarray(covariance_w, dtype=np.float64).reshape(3, 3)
+        if not np.all(np.isfinite(Rm)):
+            raise ValueError("learned residual covariance must be finite")
+        if np.linalg.eigvalsh(0.5 * (Rm + Rm.T))[0] <= 0.0:
+            raise ValueError("learned residual covariance must be positive definite")
+
+        clone_timestamp = self._clone_timestamps_s[clone_index]
+        predicted = self.predicted_kinematic_residual(
+            start_timestamp_s=clone_timestamp,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        innovation = z - predicted
+        H = self.kinematic_residual_jacobian(
+            start_timestamp_s=clone_timestamp,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        self._kalman_update(innovation, H, Rm)
+
+        if marginalize_used_clone:
+            self.marginalize_clone(clone_index)
+        return innovation
 
     def update_absolute_position(self, position_w_b, covariance_w) -> np.ndarray:
         z = np.asarray(position_w_b, dtype=np.float64).reshape(3)
