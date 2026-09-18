@@ -291,6 +291,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             sigma_floor_xyz_m=self.cfg.learned_sigma_floor_xyz_m,
             covariance_scale=self.cfg.learned_covariance_scale,
         )
+        covariance_multiplier = float(
+            self.cfg.learned_measurement_covariance_multiplier
+        )
+        if covariance_multiplier <= 0.0 or not np.isfinite(covariance_multiplier):
+            raise ValueError(
+                "learned_measurement_covariance_multiplier must be positive and finite"
+            )
+        protected_covariance = protected_covariance * covariance_multiplier
         target_mode = str(
             getattr(self._motion_predictor, "target_mode", "displacement")
         )
