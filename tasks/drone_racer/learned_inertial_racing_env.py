@@ -74,6 +74,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._gate_update_count = 0
         self._gate_reject_count = 0
         self._last_gate_mahalanobis2 = None
+        self._imu_rng = None
+        self._imu_accel_bias_b = np.zeros(3, dtype=np.float64)
+        self._imu_gyro_bias_b = np.zeros(3, dtype=np.float64)
+        self._last_imu_accel_b_meas = None
+        self._last_imu_gyro_b_meas = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         if self.num_envs != 1:
             raise ValueError("LearnedInertialRacingEnv currently requires num_envs=1")
@@ -112,7 +117,26 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 f"need at least {required_clones}"
             )
 
+        imu_sigmas = (
+            cfg.imu_accel_white_noise_sigma_mps2,
+            cfg.imu_gyro_white_noise_sigma_radps,
+            cfg.imu_accel_initial_bias_sigma_mps2,
+            cfg.imu_gyro_initial_bias_sigma_radps,
+            cfg.imu_accel_bias_rw_sigma_mps2_sqrt_s,
+            cfg.imu_gyro_bias_rw_sigma_radps_sqrt_s,
+            cfg.ekf_accel_noise_sigma,
+            cfg.ekf_gyro_noise_sigma,
+            cfg.ekf_accel_bias_rw_sigma,
+            cfg.ekf_gyro_bias_rw_sigma,
+        )
+        if any(float(value) < 0.0 or not np.isfinite(float(value)) for value in imu_sigmas):
+            raise ValueError("IMU corruption and EKF noise sigmas must be finite and non-negative")
+
         self._lio = LearnedInertialOdometry(
+            accel_noise_sigma=float(cfg.ekf_accel_noise_sigma),
+            gyro_noise_sigma=float(cfg.ekf_gyro_noise_sigma),
+            accel_bias_rw_sigma=float(cfg.ekf_accel_bias_rw_sigma),
+            gyro_bias_rw_sigma=float(cfg.ekf_gyro_bias_rw_sigma),
             max_position_clones=int(cfg.learned_max_position_clones),
         )
         self._motion_buffer = LearnedMotionBuffer(
@@ -143,6 +167,21 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             orientation_w_b_wxyz=tuple(float(v) for v in init.rot),
         )
         self._motion_buffer.reset()
+        # Re-seed on reset so A/S/B/P/C fresh-process replay comparisons use
+        # exactly the same synthetic sensor realization.
+        self._imu_rng = np.random.default_rng(int(self.cfg.imu_noise_seed))
+        self._imu_accel_bias_b = self._imu_rng.normal(
+            0.0,
+            float(self.cfg.imu_accel_initial_bias_sigma_mps2),
+            size=3,
+        )
+        self._imu_gyro_bias_b = self._imu_rng.normal(
+            0.0,
+            float(self.cfg.imu_gyro_initial_bias_sigma_radps),
+            size=3,
+        )
+        self._last_imu_accel_b_meas = None
+        self._last_imu_gyro_b_meas = None
         # Anchor the learned fixed-lag schedule on the first valid 100 Hz
         # motion sample, rather than inventing a thrust sample at reset.
         self._learned_epoch_start_s = None
@@ -231,10 +270,44 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         timestamp_s = self._timestamp_s()
         if timestamp_s <= self._lio.timestamp_s + 1.0e-12:
             return
+
+        dt = timestamp_s - float(self._lio.timestamp_s)
         imu = self.scene["imu"]
+        accel_ideal = _np(imu.data.lin_acc_b[0]).astype(np.float64)
+        gyro_ideal = _np(imu.data.ang_vel_b[0]).astype(np.float64)
+
+        # Biases evolve as random walks; white noise is sampled independently
+        # per simulated IMU sample. Defaults are all zero, reproducing the
+        # previous ideal sensor path exactly.
+        sqrt_dt = np.sqrt(dt)
+        self._imu_accel_bias_b += (
+            float(self.cfg.imu_accel_bias_rw_sigma_mps2_sqrt_s)
+            * sqrt_dt
+            * self._imu_rng.normal(size=3)
+        )
+        self._imu_gyro_bias_b += (
+            float(self.cfg.imu_gyro_bias_rw_sigma_radps_sqrt_s)
+            * sqrt_dt
+            * self._imu_rng.normal(size=3)
+        )
+        accel_meas = (
+            accel_ideal
+            + self._imu_accel_bias_b
+            + float(self.cfg.imu_accel_white_noise_sigma_mps2)
+            * self._imu_rng.normal(size=3)
+        )
+        gyro_meas = (
+            gyro_ideal
+            + self._imu_gyro_bias_b
+            + float(self.cfg.imu_gyro_white_noise_sigma_radps)
+            * self._imu_rng.normal(size=3)
+        )
+
+        self._last_imu_accel_b_meas = accel_meas.copy()
+        self._last_imu_gyro_b_meas = gyro_meas.copy()
         self._lio.propagate(
-            gyro_b=_np(imu.data.ang_vel_b[0]),
-            accel_b=_np(imu.data.lin_acc_b[0]),
+            gyro_b=gyro_meas,
+            accel_b=accel_meas,
             timestamp_s=timestamp_s,
         )
         self.learned_inertial_state = self._lio.state()
@@ -243,7 +316,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         """Append paper-style world-frame gyro + mass-normalized thrust."""
         timestamp_s = self._timestamp_s()
         imu = self.scene["imu"]
-        gyro_b = _np(imu.data.ang_vel_b[0]).astype(np.float64)
+        gyro_b = (
+            _np(imu.data.ang_vel_b[0]).astype(np.float64)
+            if self._last_imu_gyro_b_meas is None
+            else np.asarray(self._last_imu_gyro_b_meas, dtype=np.float64).copy()
+        )
 
         # Allocation output channel 0 is collective force [N]. The FIVE_IN_DRONE
         # model mass is 0.6076 kg (same value used to derive thrust coefficient).
@@ -481,6 +558,12 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         log["LearnedIO/has_checkpoint"] = float(self._motion_predictor is not None)
         log["LearnedIO/has_gate_detector"] = float(self.swift_detector is not None)
         log["LearnedIO/cov_trace"] = float(np.trace(self._lio.P[:15, :15]))
+        log["LearnedIO/imu_accel_bias_norm"] = float(
+            np.linalg.norm(self._imu_accel_bias_b)
+        )
+        log["LearnedIO/imu_gyro_bias_norm"] = float(
+            np.linalg.norm(self._imu_gyro_bias_b)
+        )
 
     def reset(self, seed=None, env_ids=None, options=None):
         obs, extras = super().reset(seed=seed, env_ids=env_ids, options=options)
