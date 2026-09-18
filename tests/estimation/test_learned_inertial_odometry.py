@@ -21,6 +21,47 @@ def test_static_specific_force_keeps_pose_nearly_fixed():
     assert np.allclose(state.linear_velocity_w_b, 0.0, atol=1e-8)
 
 
+def test_attitude_error_injection_is_right_multiplicative():
+    est = lio.LearnedInertialOdometry()
+    initial_q = np.array(
+        [np.cos(np.deg2rad(30.0) / 2.0), 0.0, 0.0, np.sin(np.deg2rad(30.0) / 2.0)]
+    )
+    est.reset(orientation_w_b_wxyz=initial_q)
+
+    R_before = est.R.copy()
+    dx = np.zeros(15)
+    dx[0:3] = np.array([0.02, -0.01, 0.03])
+    expected = R_before @ lio._exp_so3(dx[0:3])
+
+    est._inject_error(dx)
+
+    assert np.allclose(est.R, expected, atol=1e-12)
+
+
+def test_absolute_orientation_update_uses_local_right_error():
+    est = lio.LearnedInertialOdometry()
+    initial_q = np.array(
+        [np.cos(np.deg2rad(45.0) / 2.0), 0.0, 0.0, np.sin(np.deg2rad(45.0) / 2.0)]
+    )
+    est.reset(
+        orientation_w_b_wxyz=initial_q,
+        initial_covariance=np.eye(15) * 0.1,
+    )
+
+    R_target = est.R @ lio._exp_so3(np.array([0.04, -0.02, 0.01]))
+    q_target = lio.rotmat_to_quat_wxyz(R_target)
+
+    before = lio._log_so3(est.R.T @ R_target)
+    est.update_absolute_orientation(
+        q_target,
+        covariance_rad2=np.eye(3) * 1.0e-8,
+    )
+    after = lio._log_so3(est.R.T @ R_target)
+
+    assert np.linalg.norm(after) < np.linalg.norm(before) * 1.0e-3
+    assert np.linalg.eigvalsh(est.state().covariance).min() > -1.0e-10
+
+
 def test_gyro_propagates_yaw():
     est = lio.LearnedInertialOdometry()
     est.reset()
