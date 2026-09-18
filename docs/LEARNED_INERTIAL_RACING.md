@@ -239,6 +239,62 @@ Repeat each profile with several seeds/trajectory parameters.
   --device cuda
 ```
 
+## Unified estimator A/B/C evaluation
+
+Use the unified evaluator before training the racing policy. One invocation runs
+three estimator modes with the same action replay:
+
+```text
+A: IMU propagation only
+B: IMU + 20 Hz overlapping TCN
+C: IMU + 20 Hz TCN + mapped Gate-PnP
+```
+
+Mode A generates the action sequence once with a deterministic GT-feedback
+trajectory controller. Modes B and C replay those exact actions. Ground truth
+is used only for evaluation and for generating the replay trajectory; it is not
+fed into the estimator after the fixed known start.
+
+Quick smoke evaluation:
+
+```bash
+./.conda-env/bin/python scripts/estimation/evaluate_learned_inertial_ab.py \
+  --headless \
+  --steps 1000 \
+  --profile translate_x \
+  --translation_m 3.0 \
+  --learned-checkpoint artifacts/imo_tcn/model_v1.pt \
+  --output-dir artifacts/learned_inertial_ab/smoke
+```
+
+Longer dynamic evaluation:
+
+```bash
+./.conda-env/bin/python scripts/estimation/evaluate_learned_inertial_ab.py \
+  --headless \
+  --steps 6000 \
+  --profile lissajous \
+  --amplitude_m 1.5 \
+  --frequency_hz 0.10 \
+  --learned-checkpoint artifacts/imo_tcn/model_v1.pt \
+  --gate-checkpoint artifacts/stage2_next_steps_20260911/checkpoints/torchvision_keypointrcnn_best.pt \
+  --visibility-checkpoint artifacts/stage2_next_steps_20260911/checkpoints/gate_keypoint_net_best.pt \
+  --output-dir artifacts/learned_inertial_ab/lissajous_v1
+```
+
+Outputs:
+
+```text
+estimator_ab_trace.csv
+estimator_ab_summary.json
+```
+
+The summary reports position/velocity/orientation RMSE, maximum position error,
+learned-update frequency, clone count, skipped learned updates, TCN innovation
+statistics, Gate-PnP attempts/accepted/rejected counts, and the GT replay
+difference of modes B/C versus A. The replay-difference fields verify that the
+three estimators were compared on the same physical trajectory.
+
 ## Estimator task with a trained checkpoint
 
 The config currently leaves both learned-motion and gate-detector checkpoints
