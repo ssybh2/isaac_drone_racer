@@ -45,6 +45,8 @@ _EXPORTS = {
     "LearnedMotionBuffer": (".learned_motion", "LearnedMotionBuffer"),
     "MotionWindow": (".learned_motion", "MotionWindow"),
     "TorchTcnDisplacementPredictor": (".learned_motion", "TorchTcnDisplacementPredictor"),
+    "LearnedInertialOdometry": (".learned_inertial_odometry", "LearnedInertialOdometry"),
+    "LearnedInertialState": (".learned_inertial_odometry", "LearnedInertialState"),
     "HybridLearnedVioCorrector": (".hybrid_vio_corrector", "HybridLearnedVioCorrector"),
     "HybridVioCorrectionResult": (".hybrid_vio_corrector", "HybridVioCorrectionResult"),
     "body_motion_to_world": (".hybrid_vio_corrector", "body_motion_to_world"),
