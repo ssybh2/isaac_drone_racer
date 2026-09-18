@@ -29,6 +29,17 @@ parser.add_argument("--frequency_hz", type=float, default=0.10)
 parser.add_argument("--translation_m", type=float, default=6.0)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--progress-every", type=int, default=100)
+parser.add_argument("--imu-noise-seed", type=int, default=0)
+parser.add_argument("--imu-accel-white-noise-sigma-mps2", type=float, default=0.0)
+parser.add_argument("--imu-gyro-white-noise-sigma-radps", type=float, default=0.0)
+parser.add_argument("--imu-accel-initial-bias-sigma-mps2", type=float, default=0.0)
+parser.add_argument("--imu-gyro-initial-bias-sigma-radps", type=float, default=0.0)
+parser.add_argument("--imu-accel-bias-rw-sigma-mps2-sqrt-s", type=float, default=0.0)
+parser.add_argument("--imu-gyro-bias-rw-sigma-radps-sqrt-s", type=float, default=0.0)
+parser.add_argument("--ekf-accel-noise-sigma", type=float, default=None)
+parser.add_argument("--ekf-gyro-noise-sigma", type=float, default=None)
+parser.add_argument("--ekf-accel-bias-rw-sigma", type=float, default=None)
+parser.add_argument("--ekf-gyro-bias-rw-sigma", type=float, default=None)
 parser.add_argument(
     "--learned-update-rate-hz",
     type=float,
@@ -196,6 +207,44 @@ def _prepare_cfg():
     cfg.terminations.flyaway = None
     cfg.commands.target.randomise_start = None
     cfg.events.push_robot = None
+    noise_values = (
+        args_cli.imu_accel_white_noise_sigma_mps2,
+        args_cli.imu_gyro_white_noise_sigma_radps,
+        args_cli.imu_accel_initial_bias_sigma_mps2,
+        args_cli.imu_gyro_initial_bias_sigma_radps,
+        args_cli.imu_accel_bias_rw_sigma_mps2_sqrt_s,
+        args_cli.imu_gyro_bias_rw_sigma_radps_sqrt_s,
+    )
+    if any(value < 0.0 for value in noise_values):
+        raise ValueError("IMU corruption sigmas must be non-negative")
+    cfg.imu_noise_seed = int(args_cli.imu_noise_seed)
+    cfg.imu_accel_white_noise_sigma_mps2 = float(
+        args_cli.imu_accel_white_noise_sigma_mps2
+    )
+    cfg.imu_gyro_white_noise_sigma_radps = float(
+        args_cli.imu_gyro_white_noise_sigma_radps
+    )
+    cfg.imu_accel_initial_bias_sigma_mps2 = float(
+        args_cli.imu_accel_initial_bias_sigma_mps2
+    )
+    cfg.imu_gyro_initial_bias_sigma_radps = float(
+        args_cli.imu_gyro_initial_bias_sigma_radps
+    )
+    cfg.imu_accel_bias_rw_sigma_mps2_sqrt_s = float(
+        args_cli.imu_accel_bias_rw_sigma_mps2_sqrt_s
+    )
+    cfg.imu_gyro_bias_rw_sigma_radps_sqrt_s = float(
+        args_cli.imu_gyro_bias_rw_sigma_radps_sqrt_s
+    )
+    if args_cli.ekf_accel_noise_sigma is not None:
+        cfg.ekf_accel_noise_sigma = float(args_cli.ekf_accel_noise_sigma)
+    if args_cli.ekf_gyro_noise_sigma is not None:
+        cfg.ekf_gyro_noise_sigma = float(args_cli.ekf_gyro_noise_sigma)
+    if args_cli.ekf_accel_bias_rw_sigma is not None:
+        cfg.ekf_accel_bias_rw_sigma = float(args_cli.ekf_accel_bias_rw_sigma)
+    if args_cli.ekf_gyro_bias_rw_sigma is not None:
+        cfg.ekf_gyro_bias_rw_sigma = float(args_cli.ekf_gyro_bias_rw_sigma)
+
     if args_cli.learned_update_rate_hz is not None:
         if args_cli.learned_update_rate_hz <= 0.0:
             raise ValueError("--learned-update-rate-hz must be positive")
@@ -612,6 +661,33 @@ def main() -> None:
             ),
             "samples": int(len(pos)),
             "duration_s": float(duration_s),
+            "imu_corruption": {
+                "seed": int(cfg.imu_noise_seed),
+                "accel_white_noise_sigma_mps2": float(
+                    cfg.imu_accel_white_noise_sigma_mps2
+                ),
+                "gyro_white_noise_sigma_radps": float(
+                    cfg.imu_gyro_white_noise_sigma_radps
+                ),
+                "accel_initial_bias_sigma_mps2": float(
+                    cfg.imu_accel_initial_bias_sigma_mps2
+                ),
+                "gyro_initial_bias_sigma_radps": float(
+                    cfg.imu_gyro_initial_bias_sigma_radps
+                ),
+                "accel_bias_rw_sigma_mps2_sqrt_s": float(
+                    cfg.imu_accel_bias_rw_sigma_mps2_sqrt_s
+                ),
+                "gyro_bias_rw_sigma_radps_sqrt_s": float(
+                    cfg.imu_gyro_bias_rw_sigma_radps_sqrt_s
+                ),
+            },
+            "ekf_process_noise": {
+                "accel_noise_sigma": float(cfg.ekf_accel_noise_sigma),
+                "gyro_noise_sigma": float(cfg.ekf_gyro_noise_sigma),
+                "accel_bias_rw_sigma": float(cfg.ekf_accel_bias_rw_sigma),
+                "gyro_bias_rw_sigma": float(cfg.ekf_gyro_bias_rw_sigma),
+            },
             "configured_learned_update_rate_hz": float(cfg.learned_update_rate_hz),
             "configured_learned_fusion_rate_hz": (
                 None
