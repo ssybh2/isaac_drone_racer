@@ -392,6 +392,14 @@ def main() -> None:
     clone_counts: list[int] = []
     innovation_vectors: list[np.ndarray] = []
     prediction_errors: list[np.ndarray] = []
+    accel_bias_norms: list[float] = []
+    gyro_bias_norms: list[float] = []
+    update_nis: list[float] = []
+    update_dx_theta_norm: list[float] = []
+    update_dx_velocity_norm: list[float] = []
+    update_dx_position_norm: list[float] = []
+    update_dx_accel_bias_norm: list[float] = []
+    update_dx_gyro_bias_norm: list[float] = []
 
     try:
         env.reset(seed=int(args_cli.seed))
@@ -404,6 +412,7 @@ def main() -> None:
         step_dt = float(raw_env.step_dt)
         total_duration_s = float(args_cli.steps) * step_dt
         last_seen_innovation_timestamp = None
+        last_seen_update_diag = None
         truth_position_by_time = {
             round(start_timestamp_s, 6): _np(robot.data.root_pos_w[0]).astype(np.float64).copy()
         }
@@ -461,6 +470,19 @@ def main() -> None:
                 velocity_errors.append(vel_err.copy())
                 orientation_errors_rad.append(ori_err_rad)
                 clone_counts.append(int(raw_env._lio.clone_count))
+                accel_bias_norms.append(float(np.linalg.norm(state.accel_bias_b)))
+                gyro_bias_norms.append(float(np.linalg.norm(state.gyro_bias_b)))
+
+                diag = getattr(raw_env._lio, "last_update_diagnostics", None)
+                if diag is not None and diag is not last_seen_update_diag:
+                    last_seen_update_diag = diag
+                    update_nis.append(float(diag["nis"]))
+                    update_dx_theta_norm.append(float(np.linalg.norm(diag["dx_theta"])))
+                    update_dx_velocity_norm.append(float(np.linalg.norm(diag["dx_velocity"])))
+                    update_dx_position_norm.append(float(np.linalg.norm(diag["dx_position"])))
+                    update_dx_accel_bias_norm.append(float(np.linalg.norm(diag["dx_accel_bias"])))
+                    update_dx_gyro_bias_norm.append(float(np.linalg.norm(diag["dx_gyro_bias"])))
+
                 timestamp_key = round(float(raw_env._timestamp_s()), 6)
                 truth_position_by_time[timestamp_key] = truth_p.copy()
                 truth_velocity_by_time[timestamp_key] = truth_v.copy()
@@ -813,6 +835,27 @@ def main() -> None:
             "learned_fusion_hz_total": float(learned_fusions / max(duration_s, 1.0e-12)),
             "learned_fusion_hz_after_warmup": float(learned_fusions / warm_duration_s),
             "learned_update_skips": int(raw_env._learned_update_skip_count),
+            "ekf_bias_diagnostics": {
+                "accel_bias_norm_final": float(accel_bias_norms[-1]),
+                "accel_bias_norm_max": float(np.max(accel_bias_norms)),
+                "gyro_bias_norm_final": float(gyro_bias_norms[-1]),
+                "gyro_bias_norm_max": float(np.max(gyro_bias_norms)),
+            },
+            "learned_update_diagnostics": {
+                "samples": int(len(update_nis)),
+                "nis_mean": None if not update_nis else float(np.nanmean(update_nis)),
+                "nis_max": None if not update_nis else float(np.nanmax(update_nis)),
+                "dx_theta_norm_mean_rad": None if not update_dx_theta_norm else float(np.mean(update_dx_theta_norm)),
+                "dx_theta_norm_max_rad": None if not update_dx_theta_norm else float(np.max(update_dx_theta_norm)),
+                "dx_velocity_norm_mean_mps": None if not update_dx_velocity_norm else float(np.mean(update_dx_velocity_norm)),
+                "dx_velocity_norm_max_mps": None if not update_dx_velocity_norm else float(np.max(update_dx_velocity_norm)),
+                "dx_position_norm_mean_m": None if not update_dx_position_norm else float(np.mean(update_dx_position_norm)),
+                "dx_position_norm_max_m": None if not update_dx_position_norm else float(np.max(update_dx_position_norm)),
+                "dx_accel_bias_norm_mean_mps2": None if not update_dx_accel_bias_norm else float(np.mean(update_dx_accel_bias_norm)),
+                "dx_accel_bias_norm_max_mps2": None if not update_dx_accel_bias_norm else float(np.max(update_dx_accel_bias_norm)),
+                "dx_gyro_bias_norm_mean_radps": None if not update_dx_gyro_bias_norm else float(np.mean(update_dx_gyro_bias_norm)),
+                "dx_gyro_bias_norm_max_radps": None if not update_dx_gyro_bias_norm else float(np.max(update_dx_gyro_bias_norm)),
+            },
             "clone_count_mean": float(np.mean(clones)),
             "clone_count_max": int(np.max(clones)),
             "clone_count_final": int(raw_env._lio.clone_count),
