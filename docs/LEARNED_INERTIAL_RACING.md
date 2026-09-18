@@ -327,6 +327,77 @@ removed based on that test.
 Do not tune covariance floors to hide a biased displacement model. Fix held-out
 motion coverage first, retrain V2, then rerun the same diagnostics.
 
+## V3: velocity-aware residual learned motion
+
+The V2 observability audit showed that a direct mapping from world-frame
+gyro+thrust to total 0.5 s displacement is under-constrained in the current
+low-drag Isaac dynamics. On the held-out 3 m / 7 s translation, the simple
+kinematic term `v_start * dt` reduced displacement RMS from about 0.178 m to
+about 0.029 m. It also reduced the Lissajous and racing-like displacement RMS
+by roughly forty percent.
+
+V3 therefore changes the learned target from total displacement
+
+```text
+dp = p_end - p_start
+```
+
+to the residual
+
+```text
+dp_residual = (p_end - p_start) - v_start * dt
+```
+
+without adding simulator truth to runtime. During deployment, `v_start` is a
+historical EKF state. The fixed-lag clone bank now stores both velocity and
+position with full covariance, and the learned measurement is fused directly
+as
+
+```text
+z_residual = (p_current - p_clone) - v_clone * dt
+```
+
+so the start-velocity uncertainty and its cross-correlation remain inside the
+Kalman state.
+
+Train the V3 residual model from the already collected V2 traces; no data
+recollection is required because V2 CSV files contain truth velocity for
+supervised label construction:
+
+```bash
+./.conda-env/bin/python scripts/estimation/train_learned_motion.py \
+  --manifest config/learned_inertial/imo_v2_manifest.json \
+  --output artifacts/imo_tcn/model_v3_residual.pt \
+  --window_time_s 0.5 \
+  --sample_rate_hz 100 \
+  --stride_time_s 0.01 \
+  --target_mode kinematic_residual \
+  --epochs 200 \
+  --batch_size 128 \
+  --lr 1e-4 \
+  --device cuda \
+  --selection_metric nll
+```
+
+For EKF use, select by validation NLL rather than RMSE alone because the
+network's variance head is part of the Kalman measurement covariance. The V2
+RMSE-selected checkpoint had a held-out normalized squared error norm around
+33.8 versus an ideal value near 3, demonstrating severe overconfidence.
+
+Evaluate V3 before online fusion:
+
+```bash
+./.conda-env/bin/python scripts/estimation/evaluate_learned_motion_checkpoint.py \
+  --checkpoint artifacts/imo_tcn/model_v3_residual.pt \
+  --manifest config/learned_inertial/imo_v2_manifest.json \
+  --split test \
+  --device cuda \
+  --output artifacts/imo_tcn/model_v3_residual_calibration.json
+```
+
+Only after the residual mean and covariance calibration are acceptable should
+the A/S/B/P/C estimator diagnostic be rerun with the V3 checkpoint.
+
 ## Unified estimator A/B/C evaluation
 
 Use the unified evaluator before training the racing policy. One invocation runs
