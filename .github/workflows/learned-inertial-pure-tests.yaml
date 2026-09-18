@@ -1,0 +1,35 @@
+name: learned inertial pure checks
+
+on:
+  push:
+    branches: ["feature/learned-inertial-racing"]
+  pull_request:
+    branches: ["debug/openvins-imu-convention-isolation", master]
+
+jobs:
+  pure-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install pure-test dependencies
+        run: python -m pip install --upgrade pip pytest numpy
+      - name: Compile learned-inertial modules
+        run: |
+          python -m py_compile estimation/learned_inertial_odometry.py
+          python -m py_compile estimation/learned_motion.py
+          python -m py_compile estimation/learned_motion_dataset.py
+          python -m py_compile scripts/estimation/collect_imo_supervised_data.py
+          python -m py_compile scripts/estimation/train_learned_motion.py
+          python -m py_compile tasks/drone_racer/mdp/learned_inertial_observations.py
+          python -m py_compile tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py
+          python -m py_compile tasks/drone_racer/learned_inertial_racing_env.py
+      - name: Run pure estimator tests
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q tests/estimation/test_learned_inertial_odometry.py \
+            tests/estimation/test_learned_motion.py \
+            tests/estimation/test_learned_motion_dataset.py
