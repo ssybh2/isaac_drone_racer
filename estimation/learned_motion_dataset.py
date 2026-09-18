@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Iterable
 
@@ -166,3 +167,59 @@ def split_trace_paths(
     test = shuffled[n_val : n_val + n_test]
     train = shuffled[n_val + n_test :]
     return train, val, test
+
+
+def load_trace_split_manifest(
+    manifest_path: str | Path,
+) -> tuple[list[Path], list[Path], list[Path]]:
+    """Load explicit train/val/test trace paths from a dataset manifest.
+
+    Manifest paths are resolved relative to manifest.parent / path_base.
+    This keeps experiment splits deterministic and prevents random splitting
+    from placing an entire motion family only in the training set.
+    """
+    manifest_path = Path(manifest_path).expanduser().resolve()
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if data.get("schema") != "isaac_drone_racer.imo_dataset_manifest.v2":
+        raise ValueError(
+            "unsupported IMO dataset manifest schema: "
+            f"{data.get('schema')!r}"
+        )
+
+    path_base = Path(data.get("path_base", "."))
+    if path_base.is_absolute():
+        base_dir = path_base
+    else:
+        base_dir = (manifest_path.parent / path_base).resolve()
+
+    traces = data.get("traces")
+    if not isinstance(traces, list) or not traces:
+        raise ValueError("manifest must contain a non-empty traces list")
+
+    splits = {"train": [], "val": [], "test": []}
+    seen_paths: set[Path] = set()
+
+    for index, entry in enumerate(traces):
+        if not isinstance(entry, dict):
+            raise ValueError(f"manifest trace entry {index} must be an object")
+        split = entry.get("split")
+        if split not in splits:
+            raise ValueError(
+                f"manifest trace entry {index} has invalid split {split!r}"
+            )
+        raw_path = entry.get("path")
+        if not raw_path:
+            raise ValueError(f"manifest trace entry {index} is missing path")
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = (base_dir / path).resolve()
+        else:
+            path = path.resolve()
+        if path in seen_paths:
+            raise ValueError(f"manifest contains duplicate trace path: {path}")
+        seen_paths.add(path)
+        splits[split].append(path)
+
+    if not splits["train"]:
+        raise ValueError("manifest must contain at least one training trace")
+    return splits["train"], splits["val"], splits["test"]
