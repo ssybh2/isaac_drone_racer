@@ -10,6 +10,8 @@ from typing import Iterable
 
 import numpy as np
 
+from .learned_motion import endpoint_body_gyro_aligned_features
+
 
 _REQUIRED_COLUMNS = (
     "t_s",
@@ -113,6 +115,11 @@ def load_trace_windows(
         dp_residual_b1 = R_wb(t1)^T * dp_residual_w.
     This removes estimator attitude from the network input contract while
     making the output-frame dependence explicit in the EKF measurement model.
+
+    target_mode="kinematic_residual_body_end_gyro_aligned" uses the same
+    endpoint-body residual target, but first uses gyro-only relative attitude
+    integration to rotate every body gyro/thrust sample into the window-end
+    body frame. This keeps a common feature frame without any global attitude.
     """
     path = Path(path)
     if window_time_s <= 0.0 or sample_rate_hz <= 0.0 or stride_time_s <= 0.0:
@@ -125,6 +132,7 @@ def load_trace_windows(
         "displacement",
         "kinematic_residual",
         "kinematic_residual_body_end",
+        "kinematic_residual_body_end_gyro_aligned",
     )
     if target_mode not in valid_target_modes:
         raise ValueError(
@@ -140,10 +148,17 @@ def load_trace_windows(
     ) = _read_trace(path)
     source_features = (
         features_b
-        if target_mode == "kinematic_residual_body_end"
+        if target_mode in (
+            "kinematic_residual_body_end",
+            "kinematic_residual_body_end_gyro_aligned",
+        )
         else features_w
     )
-    if target_mode in ("kinematic_residual", "kinematic_residual_body_end") and velocities is None:
+    if target_mode in (
+        "kinematic_residual",
+        "kinematic_residual_body_end",
+        "kinematic_residual_body_end_gyro_aligned",
+    ) and velocities is None:
         raise ValueError(
             f"trace {path} needs truth_vx/truth_vy/truth_vz for "
             "kinematic_residual targets"
@@ -170,6 +185,12 @@ def load_trace_windows(
             features[window_index, channel, :] = np.interp(
                 sample_times, timestamps, source_features[:, channel]
             ).astype(np.float32)
+        if target_mode == "kinematic_residual_body_end_gyro_aligned":
+            features[window_index, :, :] = endpoint_body_gyro_aligned_features(
+                features[window_index, :, :],
+                sample_times,
+                end_timestamp_s=end,
+            )
         p_start = np.array(
             [np.interp(start, timestamps, positions[:, axis]) for axis in range(3)],
             dtype=np.float64,
@@ -179,7 +200,11 @@ def load_trace_windows(
             dtype=np.float64,
         )
         target = p_end - p_start
-        if target_mode in ("kinematic_residual", "kinematic_residual_body_end"):
+        if target_mode in (
+            "kinematic_residual",
+            "kinematic_residual_body_end",
+            "kinematic_residual_body_end_gyro_aligned",
+        ):
             v_start = np.array(
                 [
                     np.interp(start, timestamps, velocities[:, axis])
@@ -189,7 +214,10 @@ def load_trace_windows(
             )
             target = target - v_start * float(window_time_s)
 
-        if target_mode == "kinematic_residual_body_end":
+        if target_mode in (
+            "kinematic_residual_body_end",
+            "kinematic_residual_body_end_gyro_aligned",
+        ):
             # Interpolate the endpoint attitude and project the matrix back to
             # SO(3). The target is expressed in the endpoint body frame:
             #   z_b(t) = R_wb(t)^T [(p_t-p_s) - v_s * dt]
