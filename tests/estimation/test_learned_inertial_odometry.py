@@ -40,7 +40,7 @@ def test_multi_clone_augmentation_preserves_cross_covariance():
 
     est.clone_current_position()
     assert est.clone_count == 1
-    assert est.state().covariance.shape == (18, 18)
+    assert est.state().covariance.shape == (21, 21)
 
     for k in range(1, 6):
         est.propagate(
@@ -52,8 +52,8 @@ def test_multi_clone_augmentation_preserves_cross_covariance():
 
     P = est.state().covariance
     assert est.clone_count == 2
-    assert P.shape == (21, 21)
-    assert np.linalg.norm(P[15:18, 18:21]) > 1.0e-6
+    assert P.shape == (27, 27)
+    assert np.linalg.norm(P[15:21, 21:27]) > 1.0e-6
     assert np.allclose(P, P.T, atol=1e-12)
 
 
@@ -72,13 +72,13 @@ def test_20hz_clone_cadence_retains_half_second_history():
 
     timestamps = np.asarray(est.clone_timestamps_s)
     assert est.clone_count == 11
-    assert est.state().covariance.shape == (48, 48)
+    assert est.state().covariance.shape == (81, 81)
     assert np.allclose(np.diff(timestamps), 0.05, atol=1e-12)
     assert np.isclose(timestamps[-1] - timestamps[0], 0.5)
 
     H = est.relative_displacement_jacobian(start_timestamp_s=0.0)
     assert np.allclose(H[:, 6:9], np.eye(3))
-    assert np.allclose(H[:, 15:18], -np.eye(3))
+    assert np.allclose(H[:, 18:21], -np.eye(3))
 
 
 def test_relative_displacement_jacobian_selects_historical_clone():
@@ -94,9 +94,9 @@ def test_relative_displacement_jacobian_selects_historical_clone():
         est.clone_current_position()
 
     H = est.relative_displacement_jacobian(start_timestamp_s=0.10)
-    clone_start = 15 + 3 * 2
+    clone_start = 15 + 6 * 2
     assert np.allclose(H[:, 6:9], np.eye(3))
-    assert np.allclose(H[:, clone_start : clone_start + 3], -np.eye(3))
+    assert np.allclose(H[:, clone_start + 3 : clone_start + 6], -np.eye(3))
     assert np.count_nonzero(H) == 6
 
 
@@ -115,8 +115,48 @@ def test_clone_marginalization_updates_covariance_dimension_and_order():
     removed = est.marginalize_clones_before(0.10)
     assert removed == 2
     assert np.allclose(est.clone_timestamps_s, (0.10, 0.15, 0.20))
-    assert est.state().covariance.shape == (24, 24)
+    assert est.state().covariance.shape == (33, 33)
     assert np.allclose(est.state().covariance, est.state().covariance.T, atol=1e-12)
+
+
+def test_kinematic_residual_removes_known_start_velocity_term():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    est.reset(
+        linear_velocity_w_b=(2.0, -1.0, 0.5),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.0, 0.0, 0.0),
+            accel_b=(0.0, 0.0, 9.81),
+            timestamp_s=k * 0.01,
+        )
+
+    predicted = est.predicted_kinematic_residual(
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    assert np.allclose(predicted, 0.0, atol=1e-9)
+
+    H = est.kinematic_residual_jacobian(
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    assert np.allclose(H[:, 6:9], np.eye(3))
+    assert np.allclose(H[:, 15:18], -0.5 * np.eye(3))
+    assert np.allclose(H[:, 18:21], -np.eye(3))
+
+    innovation = est.update_learned_kinematic_residual(
+        residual_displacement_w=(0.0, 0.0, 0.0),
+        covariance_w=np.eye(3) * 0.01,
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    assert np.allclose(innovation, 0.0, atol=1e-9)
+    assert est.clone_count == 0
+    assert est.state().covariance.shape == (15, 15)
 
 
 def test_learned_relative_displacement_pulls_position_toward_measurement():
@@ -144,7 +184,7 @@ def test_learned_relative_displacement_pulls_position_toward_measurement():
     assert residual[0] < 0.0
     assert abs(after) < abs(before)
     assert est.clone_count == 10
-    assert est.state().covariance.shape == (45, 45)
+    assert est.state().covariance.shape == (75, 75)
 
 
 def test_overlapping_half_second_updates_can_run_continuously():
@@ -192,7 +232,7 @@ def test_max_clone_count_bounds_fixed_lag_state():
         est.clone_current_position()
     assert est.clone_count == 3
     assert np.allclose(est.clone_timestamps_s, (0.15, 0.20, 0.25))
-    assert est.state().covariance.shape == (24, 24)
+    assert est.state().covariance.shape == (33, 33)
 
 
 def test_learned_covariance_protection_blocks_millimetre_horizontal_sigma():
@@ -216,4 +256,4 @@ def test_gate_position_update_moves_state_toward_absolute_anchor_with_clones():
     )
     assert est.state().position_w_b[0] < 1.01
     assert est.clone_count == 1
-    assert est.state().covariance.shape == (18, 18)
+    assert est.state().covariance.shape == (21, 21)
