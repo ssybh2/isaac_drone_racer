@@ -230,9 +230,25 @@ class TorchTcnDisplacementPredictor:
         self.window_time_s = float(metadata.get("window_time_s", 0.5))
         self.sample_rate_hz = float(metadata.get("sample_rate_hz", 100.0))
         self.target_mode = str(metadata.get("target_mode", "displacement"))
-        if self.target_mode not in ("displacement", "kinematic_residual"):
+        if self.target_mode not in (
+            "displacement",
+            "kinematic_residual",
+            "kinematic_residual_body_end",
+        ):
             raise ValueError(
                 f"unsupported learned-motion target_mode: {self.target_mode!r}"
+            )
+        self.feature_frame = str(metadata.get("feature_frame", "world"))
+        if self.feature_frame not in ("world", "body"):
+            raise ValueError(
+                f"unsupported learned-motion feature_frame: {self.feature_frame!r}"
+            )
+        if (
+            self.target_mode == "kinematic_residual_body_end"
+            and self.feature_frame != "body"
+        ):
+            raise ValueError(
+                "kinematic_residual_body_end checkpoints must use body-frame features"
             )
         self.model = build_tcn(input_dim=6, output_dim=6).to(self.device)
         state = checkpoint.get("model_state_dict", checkpoint)
