@@ -36,7 +36,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--stride_time_s", type=float, default=0.01)
     parser.add_argument(
         "--target_mode",
-        choices=("displacement", "kinematic_residual", "kinematic_residual_body_end"),
+        choices=(
+            "displacement",
+            "kinematic_residual",
+            "kinematic_residual_body_end",
+            "kinematic_residual_body_end_gyro_aligned",
+        ),
         default="displacement",
         help=(
             "Train direct displacement, world-frame residual displacement, "
@@ -218,14 +223,25 @@ def main() -> None:
         "stride_time_s": float(args.stride_time_s),
         "target_mode": str(args.target_mode),
         "feature_frame": (
-            "body"
-            if args.target_mode == "kinematic_residual_body_end"
-            else "world"
+            "body_endpoint_gyro_aligned"
+            if args.target_mode == "kinematic_residual_body_end_gyro_aligned"
+            else (
+                "body"
+                if args.target_mode == "kinematic_residual_body_end"
+                else "world"
+            )
         ),
         "features": (
-            ["gyro_b_x", "gyro_b_y", "gyro_b_z", "thrust_b_x", "thrust_b_y", "thrust_b_z"]
-            if args.target_mode == "kinematic_residual_body_end"
-            else ["gyro_w_x", "gyro_w_y", "gyro_w_z", "thrust_w_x", "thrust_w_y", "thrust_w_z"]
+            ["gyro_end_x", "gyro_end_y", "gyro_end_z", "thrust_end_x", "thrust_end_y", "thrust_end_z"]
+            if args.target_mode == "kinematic_residual_body_end_gyro_aligned"
+            else (
+                ["gyro_b_x", "gyro_b_y", "gyro_b_z", "thrust_b_x", "thrust_b_y", "thrust_b_z"]
+                if args.target_mode in (
+                    "kinematic_residual_body_end",
+                    "kinematic_residual_body_end_gyro_aligned",
+                )
+                else ["gyro_w_x", "gyro_w_y", "gyro_w_z", "thrust_w_x", "thrust_w_y", "thrust_w_z"]
+            )
         ),
         "outputs": (
             ["dp_w_x", "dp_w_y", "dp_w_z", "log_var_x", "log_var_y", "log_var_z"]
