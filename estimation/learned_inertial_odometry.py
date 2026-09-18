@@ -186,6 +186,7 @@ class LearnedInertialOdometry:
         self._clone_velocities: list[np.ndarray] = []
         self._clone_positions: list[np.ndarray] = []
         self._clone_timestamps_s: list[float] = []
+        self.last_update_diagnostics: dict[str, object] | None = None
 
     @property
     def clone_count(self) -> int:
@@ -622,6 +623,25 @@ class LearnedInertialOdometry:
         PHt = self.P @ H.T
         K = np.linalg.solve(S.T, PHt.T).T
         dx = K @ residual
+
+        try:
+            nis = float(residual.T @ np.linalg.solve(S, residual))
+        except np.linalg.LinAlgError:
+            nis = float("nan")
+        self.last_update_diagnostics = {
+            "innovation": residual.copy(),
+            "nis": nis,
+            "dx_theta": dx[0:3].copy(),
+            "dx_velocity": dx[3:6].copy(),
+            "dx_position": dx[6:9].copy(),
+            "dx_accel_bias": dx[9:12].copy(),
+            "dx_gyro_bias": dx[12:15].copy(),
+            "kalman_gain_current_norm": float(
+                np.linalg.norm(K[: self._CURRENT_DIM, :])
+            ),
+            "innovation_covariance_diag": np.diag(S).copy(),
+        }
+
         self._inject_error(dx)
         I = np.eye(self.P.shape[0], dtype=np.float64)
         A = I - K @ H
