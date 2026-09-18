@@ -206,16 +206,16 @@ def _prepare_cfg(mode: str):
         cfg.swift_detector_checkpoint = None
         cfg.swift_visibility_checkpoint = None
     elif mode == "B":
-        cfg.learned_motion_checkpoint = str(args_cli.learned_checkpoint.resolve())
+        cfg.learned_motion_checkpoint = str(args_cli.learned_checkpoint.expanduser().resolve())
         cfg.swift_detector_checkpoint = None
         cfg.swift_visibility_checkpoint = None
     elif mode == "C":
-        cfg.learned_motion_checkpoint = str(args_cli.learned_checkpoint.resolve())
-        cfg.swift_detector_checkpoint = str(args_cli.gate_checkpoint.resolve())
+        cfg.learned_motion_checkpoint = str(args_cli.learned_checkpoint.expanduser().resolve())
+        cfg.swift_detector_checkpoint = str(args_cli.gate_checkpoint.expanduser().resolve())
         cfg.swift_visibility_checkpoint = (
             None
             if args_cli.disable_visibility
-            else str(args_cli.visibility_checkpoint.resolve())
+            else str(args_cli.visibility_checkpoint.expanduser().resolve())
         )
     else:
         raise ValueError(f"unsupported mode: {mode}")
