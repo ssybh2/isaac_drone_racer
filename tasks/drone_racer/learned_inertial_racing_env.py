@@ -306,11 +306,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     marginalize_used_clone=True,
                 )
             else:
-                clone_index = self._lio._find_clone_index(
+                self._lio.marginalize_clone_at_timestamp(
                     start_s,
                     tolerance_s=timing_tolerance_s,
                 )
-                self._lio.marginalize_clone(clone_index)
         except (KeyError, RuntimeError):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
