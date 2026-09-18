@@ -36,6 +36,12 @@ parser.add_argument(
     help="Override learned measurement fusion/evaluation rate for correlation diagnostics.",
 )
 parser.add_argument(
+    "--learned-covariance-multiplier",
+    type=float,
+    default=None,
+    help="Multiply the final learned measurement covariance for fusion-weight diagnostics.",
+)
+parser.add_argument(
     "--task",
     default="Isaac-Drone-Racer-Learned-Inertial-v0",
 )
@@ -188,6 +194,12 @@ def _prepare_cfg():
         if args_cli.learned_update_rate_hz <= 0.0:
             raise ValueError("--learned-update-rate-hz must be positive")
         cfg.learned_update_rate_hz = float(args_cli.learned_update_rate_hz)
+    if args_cli.learned_covariance_multiplier is not None:
+        if args_cli.learned_covariance_multiplier <= 0.0:
+            raise ValueError("--learned-covariance-multiplier must be positive")
+        cfg.learned_measurement_covariance_multiplier = float(
+            args_cli.learned_covariance_multiplier
+        )
 
     if args_cli.mode == "A":
         cfg.learned_motion_checkpoint = None
@@ -589,6 +601,9 @@ def main() -> None:
             "samples": int(len(pos)),
             "duration_s": float(duration_s),
             "configured_learned_update_rate_hz": float(cfg.learned_update_rate_hz),
+            "learned_measurement_covariance_multiplier": float(
+                cfg.learned_measurement_covariance_multiplier
+            ),
             "position_rmse_m": float(np.sqrt(np.mean(np.sum(pos**2, axis=1)))),
             "position_axis_rmse_m": np.sqrt(np.mean(pos**2, axis=0)).tolist(),
             "position_max_error_m": float(np.max(np.linalg.norm(pos, axis=1))),
