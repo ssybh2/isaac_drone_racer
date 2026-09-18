@@ -34,6 +34,17 @@ parser.add_argument("--frequency_hz", type=float, default=0.10)
 parser.add_argument("--translation_m", type=float, default=3.0)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--progress-every", type=int, default=100)
+parser.add_argument("--imu-noise-seed", type=int, default=0)
+parser.add_argument("--imu-accel-white-noise-sigma-mps2", type=float, default=0.0)
+parser.add_argument("--imu-gyro-white-noise-sigma-radps", type=float, default=0.0)
+parser.add_argument("--imu-accel-initial-bias-sigma-mps2", type=float, default=0.0)
+parser.add_argument("--imu-gyro-initial-bias-sigma-radps", type=float, default=0.0)
+parser.add_argument("--imu-accel-bias-rw-sigma-mps2-sqrt-s", type=float, default=0.0)
+parser.add_argument("--imu-gyro-bias-rw-sigma-radps-sqrt-s", type=float, default=0.0)
+parser.add_argument("--ekf-accel-noise-sigma", type=float, default=None)
+parser.add_argument("--ekf-gyro-noise-sigma", type=float, default=None)
+parser.add_argument("--ekf-accel-bias-rw-sigma", type=float, default=None)
+parser.add_argument("--ekf-gyro-bias-rw-sigma", type=float, default=None)
 parser.add_argument(
     "--learned-fusion-rate-hz",
     type=float,
@@ -98,6 +109,13 @@ def _worker_command(mode: str, output_dir: Path, replay_npz: Path) -> list[str]:
         "--translation_m", str(args.translation_m),
         "--seed", str(args.seed),
         "--progress-every", str(args.progress_every),
+        "--imu-noise-seed", str(args.imu_noise_seed),
+        "--imu-accel-white-noise-sigma-mps2", str(args.imu_accel_white_noise_sigma_mps2),
+        "--imu-gyro-white-noise-sigma-radps", str(args.imu_gyro_white_noise_sigma_radps),
+        "--imu-accel-initial-bias-sigma-mps2", str(args.imu_accel_initial_bias_sigma_mps2),
+        "--imu-gyro-initial-bias-sigma-radps", str(args.imu_gyro_initial_bias_sigma_radps),
+        "--imu-accel-bias-rw-sigma-mps2-sqrt-s", str(args.imu_accel_bias_rw_sigma_mps2_sqrt_s),
+        "--imu-gyro-bias-rw-sigma-radps-sqrt-s", str(args.imu_gyro_bias_rw_sigma_radps_sqrt_s),
         "--task", args.task,
         "--learned-checkpoint", str(args.learned_checkpoint.expanduser()),
         "--gate-checkpoint", str(args.gate_checkpoint.expanduser()),
@@ -110,6 +128,15 @@ def _worker_command(mode: str, output_dir: Path, replay_npz: Path) -> list[str]:
         command.extend(
             ["--learned-fusion-rate-hz", str(args.learned_fusion_rate_hz)]
         )
+    optional_noise_args = (
+        ("--ekf-accel-noise-sigma", args.ekf_accel_noise_sigma),
+        ("--ekf-gyro-noise-sigma", args.ekf_gyro_noise_sigma),
+        ("--ekf-accel-bias-rw-sigma", args.ekf_accel_bias_rw_sigma),
+        ("--ekf-gyro-bias-rw-sigma", args.ekf_gyro_bias_rw_sigma),
+    )
+    for flag, value in optional_noise_args:
+        if value is not None:
+            command.extend([flag, str(value)])
     if args.headless:
         command.append("--headless")
     if args.disable_visibility:
