@@ -17,7 +17,7 @@ from isaaclab.app import AppLauncher
 
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--mode", choices=("A", "B", "C"), required=True)
+parser.add_argument("--mode", choices=("A", "S", "B", "P", "C"), required=True)
 parser.add_argument("--steps", type=int, default=6000)
 parser.add_argument(
     "--profile",
@@ -76,8 +76,10 @@ import tasks  # noqa: F401
 
 MODE_LABELS = {
     "A": "imu_only",
+    "S": "imu_tcn_shadow",
     "B": "imu_tcn_20hz",
-    "C": "imu_tcn_gate",
+    "P": "imu_tcn_gate_position_only",
+    "C": "imu_tcn_gate_pose",
 }
 
 
@@ -181,18 +183,20 @@ def _prepare_cfg():
         cfg.learned_motion_checkpoint = None
         cfg.swift_detector_checkpoint = None
         cfg.swift_visibility_checkpoint = None
-    elif args_cli.mode == "B":
-        cfg.learned_motion_checkpoint = str(args_cli.learned_checkpoint.expanduser().resolve())
-        cfg.swift_detector_checkpoint = None
-        cfg.swift_visibility_checkpoint = None
     else:
         cfg.learned_motion_checkpoint = str(args_cli.learned_checkpoint.expanduser().resolve())
-        cfg.swift_detector_checkpoint = str(args_cli.gate_checkpoint.expanduser().resolve())
-        cfg.swift_visibility_checkpoint = (
-            None
-            if args_cli.disable_visibility
-            else str(args_cli.visibility_checkpoint.expanduser().resolve())
-        )
+        cfg.learned_apply_displacement_updates = args_cli.mode != "S"
+        if args_cli.mode in ("P", "C"):
+            cfg.swift_detector_checkpoint = str(args_cli.gate_checkpoint.expanduser().resolve())
+            cfg.swift_visibility_checkpoint = (
+                None
+                if args_cli.disable_visibility
+                else str(args_cli.visibility_checkpoint.expanduser().resolve())
+            )
+            cfg.gate_use_orientation_update = args_cli.mode == "C"
+        else:
+            cfg.swift_detector_checkpoint = None
+            cfg.swift_visibility_checkpoint = None
     return cfg
 
 
@@ -211,6 +215,10 @@ CSV_FIELDS = [
     "learned_updates", "learned_update_skips", "clone_count",
     "tcn_innovation_x", "tcn_innovation_y", "tcn_innovation_z",
     "tcn_innovation_norm_m",
+    "tcn_pred_x", "tcn_pred_y", "tcn_pred_z",
+    "tcn_gt_dp_x", "tcn_gt_dp_y", "tcn_gt_dp_z",
+    "tcn_pred_err_x", "tcn_pred_err_y", "tcn_pred_err_z",
+    "tcn_pred_err_norm_m",
     "gate_attempts", "gate_accepted", "gate_rejected",
 ]
 
@@ -220,19 +228,19 @@ def _validate_inputs() -> None:
         raise ValueError("--steps must be positive")
     if args_cli.progress_every < 1:
         raise ValueError("--progress-every must be positive")
-    if args_cli.mode in ("B", "C") and not args_cli.learned_checkpoint.expanduser().exists():
+    if args_cli.mode in ("S", "B", "P", "C") and not args_cli.learned_checkpoint.expanduser().exists():
         raise FileNotFoundError(f"learned checkpoint not found: {args_cli.learned_checkpoint}")
-    if args_cli.mode == "C" and not args_cli.gate_checkpoint.expanduser().exists():
+    if args_cli.mode in ("P", "C") and not args_cli.gate_checkpoint.expanduser().exists():
         raise FileNotFoundError(f"gate checkpoint not found: {args_cli.gate_checkpoint}")
     if (
-        args_cli.mode == "C"
+        args_cli.mode in ("P", "C")
         and not args_cli.disable_visibility
         and not args_cli.visibility_checkpoint.expanduser().exists()
     ):
         raise FileNotFoundError(
             f"visibility checkpoint not found: {args_cli.visibility_checkpoint}"
         )
-    if args_cli.mode in ("B", "C") and not args_cli.replay_npz.expanduser().exists():
+    if args_cli.mode in ("S", "B", "P", "C") and not args_cli.replay_npz.expanduser().exists():
         raise FileNotFoundError(f"replay file not found: {args_cli.replay_npz}")
 
 
@@ -265,6 +273,7 @@ def main() -> None:
     orientation_errors_rad: list[float] = []
     clone_counts: list[int] = []
     innovation_vectors: list[np.ndarray] = []
+    prediction_errors: list[np.ndarray] = []
 
     try:
         env.reset(seed=int(args_cli.seed))
@@ -277,6 +286,9 @@ def main() -> None:
         step_dt = float(raw_env.step_dt)
         total_duration_s = float(args_cli.steps) * step_dt
         last_seen_innovation_timestamp = None
+        truth_position_by_time = {
+            round(start_timestamp_s, 6): _np(robot.data.root_pos_w[0]).astype(np.float64).copy()
+        }
 
         with trace_path.open("w", newline="", encoding="utf-8", buffering=1) as handle:
             writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
@@ -325,8 +337,12 @@ def main() -> None:
                 velocity_errors.append(vel_err.copy())
                 orientation_errors_rad.append(ori_err_rad)
                 clone_counts.append(int(raw_env._lio.clone_count))
+                truth_position_by_time[round(float(raw_env._timestamp_s()), 6)] = truth_p.copy()
 
                 innovation = None
+                tcn_prediction = None
+                tcn_gt_dp = None
+                tcn_pred_error = None
                 innovation_timestamp = raw_env._last_learned_update_timestamp_s
                 if (
                     innovation_timestamp is not None
@@ -339,6 +355,21 @@ def main() -> None:
                     ).copy()
                     innovation_vectors.append(innovation)
                     last_seen_innovation_timestamp = innovation_timestamp
+
+                    if raw_env._last_learned_prediction_w is not None:
+                        tcn_prediction = np.asarray(
+                            raw_env._last_learned_prediction_w,
+                            dtype=np.float64,
+                        ).copy()
+                        start_key = round(float(raw_env._last_learned_window_start_s), 6)
+                        end_key = round(float(raw_env._last_learned_window_end_s), 6)
+                        if start_key in truth_position_by_time and end_key in truth_position_by_time:
+                            tcn_gt_dp = (
+                                truth_position_by_time[end_key]
+                                - truth_position_by_time[start_key]
+                            )
+                            tcn_pred_error = tcn_prediction - tcn_gt_dp
+                            prediction_errors.append(tcn_pred_error.copy())
 
                 action_np = _np(action).astype(np.float64)
                 t_s = float(raw_env._timestamp_s()) - start_timestamp_s
@@ -391,6 +422,18 @@ def main() -> None:
                         "tcn_innovation_norm_m": (
                             None if innovation is None else float(np.linalg.norm(innovation))
                         ),
+                        "tcn_pred_x": None if tcn_prediction is None else tcn_prediction[0],
+                        "tcn_pred_y": None if tcn_prediction is None else tcn_prediction[1],
+                        "tcn_pred_z": None if tcn_prediction is None else tcn_prediction[2],
+                        "tcn_gt_dp_x": None if tcn_gt_dp is None else tcn_gt_dp[0],
+                        "tcn_gt_dp_y": None if tcn_gt_dp is None else tcn_gt_dp[1],
+                        "tcn_gt_dp_z": None if tcn_gt_dp is None else tcn_gt_dp[2],
+                        "tcn_pred_err_x": None if tcn_pred_error is None else tcn_pred_error[0],
+                        "tcn_pred_err_y": None if tcn_pred_error is None else tcn_pred_error[1],
+                        "tcn_pred_err_z": None if tcn_pred_error is None else tcn_pred_error[2],
+                        "tcn_pred_err_norm_m": (
+                            None if tcn_pred_error is None else float(np.linalg.norm(tcn_pred_error))
+                        ),
                         "gate_attempts": int(raw_env._gate_attempt_count),
                         "gate_accepted": int(raw_env._gate_update_count),
                         "gate_rejected": int(raw_env._gate_reject_count),
@@ -422,6 +465,11 @@ def main() -> None:
         innovations = (
             np.asarray(innovation_vectors, dtype=np.float64)
             if innovation_vectors
+            else np.empty((0, 3), dtype=np.float64)
+        )
+        pred_errors = (
+            np.asarray(prediction_errors, dtype=np.float64)
+            if prediction_errors
             else np.empty((0, 3), dtype=np.float64)
         )
 
@@ -456,6 +504,24 @@ def main() -> None:
                 }
             )
 
+        prediction_summary = {
+            "samples": int(len(pred_errors)),
+            "axis_rmse_m": None,
+            "norm_rmse_m": None,
+            "norm_mean_m": None,
+            "norm_max_m": None,
+        }
+        if len(pred_errors):
+            pred_norm = np.linalg.norm(pred_errors, axis=1)
+            prediction_summary.update(
+                {
+                    "axis_rmse_m": np.sqrt(np.mean(pred_errors**2, axis=0)).tolist(),
+                    "norm_rmse_m": float(np.sqrt(np.mean(pred_norm**2))),
+                    "norm_mean_m": float(np.mean(pred_norm)),
+                    "norm_max_m": float(np.max(pred_norm)),
+                }
+            )
+
         gate_attempts = int(raw_env._gate_attempt_count)
         gate_accepted = int(raw_env._gate_update_count)
         gate_rejected = int(raw_env._gate_reject_count)
@@ -480,6 +546,7 @@ def main() -> None:
             "clone_count_max": int(np.max(clones)),
             "clone_count_final": int(raw_env._lio.clone_count),
             "tcn_innovation": innovation_summary,
+            "tcn_prediction_error_vs_gt": prediction_summary,
             "gate_attempts": gate_attempts,
             "gate_accepted": gate_accepted,
             "gate_rejected": gate_rejected,
