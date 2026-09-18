@@ -60,6 +60,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
         self._learned_update_count = 0
+        self._learned_fusion_count = 0
         self._learned_update_skip_count = 0
         self._last_learned_innovation_w = None
         self._last_learned_prediction_w = None
@@ -83,6 +84,27 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             raise ValueError("learned_update_rate_hz must be positive")
         if window_s <= 0.0:
             raise ValueError("learned_window_time_s must be positive")
+
+        fusion_rate_hz = (
+            learned_rate_hz
+            if cfg.learned_fusion_rate_hz is None
+            else float(cfg.learned_fusion_rate_hz)
+        )
+        if fusion_rate_hz <= 0.0:
+            raise ValueError("learned_fusion_rate_hz must be positive when set")
+        if fusion_rate_hz > learned_rate_hz + 1.0e-12:
+            raise ValueError(
+                "learned_fusion_rate_hz cannot exceed learned_update_rate_hz"
+            )
+        fusion_stride = learned_rate_hz / fusion_rate_hz
+        rounded_stride = int(round(fusion_stride))
+        if rounded_stride < 1 or abs(fusion_stride - rounded_stride) > 1.0e-9:
+            raise ValueError(
+                "learned_update_rate_hz / learned_fusion_rate_hz must be an integer"
+            )
+        self._learned_fusion_stride = rounded_stride
+        self._learned_fusion_rate_hz = fusion_rate_hz
+
         required_clones = int(np.ceil(window_s * learned_rate_hz - 1.0e-12)) + 1
         if int(cfg.learned_max_position_clones) < required_clones:
             raise ValueError(
@@ -128,6 +150,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._next_learned_update_s = None
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
+        self._learned_update_count = 0
+        self._learned_fusion_count = 0
+        self._learned_update_skip_count = 0
         self._last_learned_innovation_w = None
         self._last_learned_prediction_w = None
         self._last_learned_predicted_rel_w = None
@@ -322,7 +347,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 np.asarray(prediction.displacement_w, dtype=np.float64)
                 - predicted_rel
             )
-            if bool(self.cfg.learned_apply_displacement_updates):
+            should_fuse = (
+                bool(self.cfg.learned_apply_displacement_updates)
+                and self._learned_update_count % self._learned_fusion_stride == 0
+            )
+            if should_fuse:
                 if target_mode == "kinematic_residual":
                     self._lio.update_learned_kinematic_residual(
                         prediction.displacement_w,
@@ -339,7 +368,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_used_clone=True,
                     )
+                self._learned_fusion_count += 1
             else:
+                # Keep 20 Hz predictions for diagnostics, but fuse only a
+                # statistically safer subset. The skipped window's start clone
+                # is no longer needed after this prediction.
                 self._lio.marginalize_clone_at_timestamp(
                     start_s,
                     tolerance_s=timing_tolerance_s,
@@ -439,6 +472,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
     def _update_log(self) -> None:
         log = self.extras.setdefault("log", {})
         log["LearnedIO/learned_updates"] = float(self._learned_update_count)
+        log["LearnedIO/learned_fusions"] = float(self._learned_fusion_count)
         log["LearnedIO/learned_update_skips"] = float(self._learned_update_skip_count)
         log["LearnedIO/position_clones"] = float(self._lio.clone_count)
         log["LearnedIO/gate_attempts"] = float(self._gate_attempt_count)
