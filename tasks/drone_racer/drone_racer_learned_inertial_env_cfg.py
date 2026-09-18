@@ -76,6 +76,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # but do not inject its displacement into the EKF. This enables shadow-mode
     # measurement diagnostics without changing the deployed input contract.
     learned_apply_displacement_updates: bool = True
+    # Diagnostic-only oracle measurement source. When enabled, the TCN still
+    # runs for shadow accuracy metrics, but EKF fusion receives the exact GT
+    # kinematic residual for the same window. This must never be enabled for
+    # training/deployment; it isolates EKF measurement-model correctness.
+    learned_debug_oracle_residual_fusion: bool = False
 
     # Synthetic onboard-IMU corruption for estimator robustness experiments.
     # White-noise sigmas are per simulated sample. Bias random-walk sigmas use
