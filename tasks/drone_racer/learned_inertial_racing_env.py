@@ -291,20 +291,46 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             sigma_floor_xyz_m=self.cfg.learned_sigma_floor_xyz_m,
             covariance_scale=self.cfg.learned_covariance_scale,
         )
+        target_mode = str(
+            getattr(self._motion_predictor, "target_mode", "displacement")
+        )
         try:
-            predicted_rel = self._lio.predicted_relative_displacement(
-                start_timestamp_s=start_s,
-                clone_tolerance_s=timing_tolerance_s,
-            )
-            innovation = np.asarray(prediction.displacement_w, dtype=np.float64) - predicted_rel
-            if bool(self.cfg.learned_apply_displacement_updates):
-                self._lio.update_learned_displacement(
-                    prediction.displacement_w,
-                    protected_covariance,
+            if target_mode == "kinematic_residual":
+                predicted_rel = self._lio.predicted_kinematic_residual(
                     start_timestamp_s=start_s,
                     clone_tolerance_s=timing_tolerance_s,
-                    marginalize_used_clone=True,
                 )
+            elif target_mode == "displacement":
+                predicted_rel = self._lio.predicted_relative_displacement(
+                    start_timestamp_s=start_s,
+                    clone_tolerance_s=timing_tolerance_s,
+                )
+            else:
+                raise RuntimeError(
+                    f"unsupported learned-motion target mode: {target_mode!r}"
+                )
+
+            innovation = (
+                np.asarray(prediction.displacement_w, dtype=np.float64)
+                - predicted_rel
+            )
+            if bool(self.cfg.learned_apply_displacement_updates):
+                if target_mode == "kinematic_residual":
+                    self._lio.update_learned_kinematic_residual(
+                        prediction.displacement_w,
+                        protected_covariance,
+                        start_timestamp_s=start_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                        marginalize_used_clone=True,
+                    )
+                else:
+                    self._lio.update_learned_displacement(
+                        prediction.displacement_w,
+                        protected_covariance,
+                        start_timestamp_s=start_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                        marginalize_used_clone=True,
+                    )
             else:
                 self._lio.marginalize_clone_at_timestamp(
                     start_s,
