@@ -120,6 +120,11 @@ def load_trace_windows(
     endpoint-body residual target, but first uses gyro-only relative attitude
     integration to rotate every body gyro/thrust sample into the window-end
     body frame. This keeps a common feature frame without any global attitude.
+
+    target_mode="kinematic_residual_body_end_gravity_compensated" additionally
+    subtracts the known 0.5*g*dt^2 term before expressing the target in the
+    endpoint body frame. This removes absolute gravity direction from what the
+    network must infer from gyro+thrust alone.
     """
     path = Path(path)
     if window_time_s <= 0.0 or sample_rate_hz <= 0.0 or stride_time_s <= 0.0:
@@ -133,6 +138,7 @@ def load_trace_windows(
         "kinematic_residual",
         "kinematic_residual_body_end",
         "kinematic_residual_body_end_gyro_aligned",
+        "kinematic_residual_body_end_gravity_compensated",
     )
     if target_mode not in valid_target_modes:
         raise ValueError(
@@ -151,6 +157,7 @@ def load_trace_windows(
         if target_mode in (
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
+            "kinematic_residual_body_end_gravity_compensated",
         )
         else features_w
     )
@@ -158,6 +165,7 @@ def load_trace_windows(
         "kinematic_residual",
         "kinematic_residual_body_end",
         "kinematic_residual_body_end_gyro_aligned",
+        "kinematic_residual_body_end_gravity_compensated",
     ) and velocities is None:
         raise ValueError(
             f"trace {path} needs truth_vx/truth_vy/truth_vz for "
@@ -179,6 +187,7 @@ def load_trace_windows(
         if target_mode in (
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
+            "kinematic_residual_body_end_gravity_compensated",
         )
         else None
     )
@@ -188,7 +197,10 @@ def load_trace_windows(
             features[window_index, channel, :] = np.interp(
                 sample_times, timestamps, source_features[:, channel]
             ).astype(np.float32)
-        if target_mode == "kinematic_residual_body_end_gyro_aligned":
+        if target_mode in (
+            "kinematic_residual_body_end_gyro_aligned",
+            "kinematic_residual_body_end_gravity_compensated",
+        ):
             features[window_index, :, :] = endpoint_body_gyro_aligned_features(
                 features[window_index, :, :],
                 sample_times,
@@ -207,6 +219,7 @@ def load_trace_windows(
             "kinematic_residual",
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
+            "kinematic_residual_body_end_gravity_compensated",
         ):
             v_start = np.array(
                 [
@@ -217,16 +230,17 @@ def load_trace_windows(
             )
             target = target - v_start * float(window_time_s)
 
+        if target_mode == "kinematic_residual_body_end_gravity_compensated":
+            gravity_w = np.array([0.0, 0.0, -9.81], dtype=np.float64)
+            target = target - 0.5 * gravity_w * float(window_time_s) ** 2
+
         if target_mode in (
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
+            "kinematic_residual_body_end_gravity_compensated",
         ):
             # Interpolate the endpoint attitude and project the matrix back to
-            # SO(3). The target is expressed in the endpoint body frame:
-            #   z_b(t) = R_wb(t)^T [(p_t-p_s) - v_s * dt]
-            # This makes both network inputs and outputs invariant to global
-            # attitude while leaving attitude dependence explicit in the EKF
-            # measurement model.
+            # SO(3). The target is expressed in the endpoint body frame.
             R_interp = np.empty((3, 3), dtype=np.float64)
             for row in range(3):
                 for col in range(3):
