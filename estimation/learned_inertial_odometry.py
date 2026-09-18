@@ -294,6 +294,24 @@ class LearnedInertialOdometry:
             removed += 1
         return removed
 
+    def predicted_relative_displacement(
+        self,
+        *,
+        start_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Return p_current - p_historical for the selected clone."""
+        if self.clone_count == 0:
+            raise RuntimeError("a learned-displacement position clone is required")
+        if start_timestamp_s is None:
+            clone_index = 0
+        else:
+            clone_index = self._find_clone_index(
+                start_timestamp_s,
+                tolerance_s=clone_tolerance_s,
+            )
+        return self.p - self._clone_positions[clone_index]
+
     def relative_displacement_jacobian(
         self,
         *,
