@@ -1,0 +1,384 @@
+{
+  "schema": "isaac_drone_racer.imo_dataset_manifest.v2",
+  "description": "IMO V2 dataset with explicit speed/acceleration/yaw/vertical coverage and fixed whole-trajectory train/val/test splits.",
+  "path_base": "../..",
+  "collector_defaults": {
+    "steps": 2000,
+    "vehicle_mass_kg": 0.6076,
+    "seed": 0
+  },
+  "traces": [
+    {
+      "name": "train_hover_20s",
+      "path": "artifacts/imo_dataset_v2/train_hover_20s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "hover",
+        "steps": 2000
+      }
+    },
+    {
+      "name": "train_tx_scurve_1m_3s",
+      "path": "artifacts/imo_dataset_v2/train_tx_scurve_1m_3s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 1,
+        "motion_duration_s": 3,
+        "steps": 1400
+      }
+    },
+    {
+      "name": "train_tx_scurve_2m_4s",
+      "path": "artifacts/imo_dataset_v2/train_tx_scurve_2m_4s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 2,
+        "motion_duration_s": 4,
+        "steps": 1600
+      }
+    },
+    {
+      "name": "train_tx_scurve_3m_5s",
+      "path": "artifacts/imo_dataset_v2/train_tx_scurve_3m_5s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 3,
+        "motion_duration_s": 5,
+        "steps": 1800
+      }
+    },
+    {
+      "name": "train_tx_scurve_4m_6s",
+      "path": "artifacts/imo_dataset_v2/train_tx_scurve_4m_6s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 4,
+        "motion_duration_s": 6,
+        "steps": 2000
+      }
+    },
+    {
+      "name": "train_tx_scurve_5m_7s",
+      "path": "artifacts/imo_dataset_v2/train_tx_scurve_5m_7s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 5,
+        "motion_duration_s": 7,
+        "steps": 2200
+      }
+    },
+    {
+      "name": "train_tx_scurve_6m_8s",
+      "path": "artifacts/imo_dataset_v2/train_tx_scurve_6m_8s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 6,
+        "motion_duration_s": 8,
+        "steps": 2400
+      }
+    },
+    {
+      "name": "train_tx_fast_3m_3s",
+      "path": "artifacts/imo_dataset_v2/train_tx_fast_3m_3s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 3,
+        "motion_duration_s": 3,
+        "steps": 1600
+      }
+    },
+    {
+      "name": "train_tx_fast_5m_4s",
+      "path": "artifacts/imo_dataset_v2/train_tx_fast_5m_4s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 5,
+        "motion_duration_s": 4,
+        "steps": 1800
+      }
+    },
+    {
+      "name": "train_vertical_up_1m_4s",
+      "path": "artifacts/imo_dataset_v2/train_vertical_up_1m_4s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "vertical",
+        "vertical_m": 1,
+        "motion_duration_s": 4,
+        "steps": 1800
+      }
+    },
+    {
+      "name": "train_vertical_down_0p8m_4s",
+      "path": "artifacts/imo_dataset_v2/train_vertical_down_0p8m_4s.csv",
+      "split": "train",
+      "collector": {
+        "profile": "vertical",
+        "vertical_m": -0.8,
+        "motion_duration_s": 4,
+        "steps": 1800
+      }
+    },
+    {
+      "name": "train_yaw_30deg",
+      "path": "artifacts/imo_dataset_v2/train_yaw_30deg.csv",
+      "split": "train",
+      "collector": {
+        "profile": "yaw_sweep",
+        "yaw_amplitude_deg": 30,
+        "yaw_frequency_hz": 0.12,
+        "phase_rad": 0,
+        "steps": 2400
+      }
+    },
+    {
+      "name": "train_yaw_60deg",
+      "path": "artifacts/imo_dataset_v2/train_yaw_60deg.csv",
+      "split": "train",
+      "collector": {
+        "profile": "yaw_sweep",
+        "yaw_amplitude_deg": 60,
+        "yaw_frequency_hz": 0.08,
+        "phase_rad": 0.4,
+        "steps": 2600
+      }
+    },
+    {
+      "name": "train_translate_yaw_3m",
+      "path": "artifacts/imo_dataset_v2/train_translate_yaw_3m.csv",
+      "split": "train",
+      "collector": {
+        "profile": "translate_yaw",
+        "translation_m": 3,
+        "motion_duration_s": 5,
+        "yaw_amplitude_deg": 45,
+        "yaw_frequency_hz": 0.1,
+        "phase_rad": 0.2,
+        "steps": 2200
+      }
+    },
+    {
+      "name": "train_circle_a1p5_f0p08",
+      "path": "artifacts/imo_dataset_v2/train_circle_a1p5_f0p08.csv",
+      "split": "train",
+      "collector": {
+        "profile": "circle",
+        "amplitude_m": 1.5,
+        "frequency_hz": 0.08,
+        "phase_rad": 0,
+        "steps": 2600
+      }
+    },
+    {
+      "name": "train_circle_a2_f0p12",
+      "path": "artifacts/imo_dataset_v2/train_circle_a2_f0p12.csv",
+      "split": "train",
+      "collector": {
+        "profile": "circle",
+        "amplitude_m": 2,
+        "frequency_hz": 0.12,
+        "phase_rad": 0.4,
+        "steps": 2600
+      }
+    },
+    {
+      "name": "train_lissajous_a1p5_f0p10",
+      "path": "artifacts/imo_dataset_v2/train_lissajous_a1p5_f0p10.csv",
+      "split": "train",
+      "collector": {
+        "profile": "lissajous",
+        "amplitude_m": 1.5,
+        "frequency_hz": 0.1,
+        "phase_rad": 0,
+        "steps": 2800
+      }
+    },
+    {
+      "name": "train_racing_like_a1p5_f0p12",
+      "path": "artifacts/imo_dataset_v2/train_racing_like_a1p5_f0p12.csv",
+      "split": "train",
+      "collector": {
+        "profile": "racing_like",
+        "amplitude_m": 1.5,
+        "frequency_hz": 0.12,
+        "yaw_amplitude_deg": 45,
+        "yaw_frequency_hz": 0.1,
+        "phase_rad": 0.3,
+        "steps": 3000
+      }
+    },
+    {
+      "name": "val_tx_scurve_1p5m_4p5s",
+      "path": "artifacts/imo_dataset_v2/val_tx_scurve_1p5m_4p5s.csv",
+      "split": "val",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 1.5,
+        "motion_duration_s": 4.5,
+        "steps": 1700,
+        "seed": 11
+      }
+    },
+    {
+      "name": "val_tx_scurve_3p5m_4p5s",
+      "path": "artifacts/imo_dataset_v2/val_tx_scurve_3p5m_4p5s.csv",
+      "split": "val",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 3.5,
+        "motion_duration_s": 4.5,
+        "steps": 1900,
+        "seed": 12
+      }
+    },
+    {
+      "name": "val_tx_scurve_5p5m_6s",
+      "path": "artifacts/imo_dataset_v2/val_tx_scurve_5p5m_6s.csv",
+      "split": "val",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 5.5,
+        "motion_duration_s": 6,
+        "steps": 2200,
+        "seed": 13
+      }
+    },
+    {
+      "name": "val_vertical_up_0p6m_3p5s",
+      "path": "artifacts/imo_dataset_v2/val_vertical_up_0p6m_3p5s.csv",
+      "split": "val",
+      "collector": {
+        "profile": "vertical",
+        "vertical_m": 0.6,
+        "motion_duration_s": 3.5,
+        "steps": 1700,
+        "seed": 14
+      }
+    },
+    {
+      "name": "val_circle_a1p75_f0p10",
+      "path": "artifacts/imo_dataset_v2/val_circle_a1p75_f0p10.csv",
+      "split": "val",
+      "collector": {
+        "profile": "circle",
+        "amplitude_m": 1.75,
+        "frequency_hz": 0.1,
+        "phase_rad": 0.7,
+        "steps": 2600,
+        "seed": 15
+      }
+    },
+    {
+      "name": "val_translate_yaw_4m",
+      "path": "artifacts/imo_dataset_v2/val_translate_yaw_4m.csv",
+      "split": "val",
+      "collector": {
+        "profile": "translate_yaw",
+        "translation_m": 4,
+        "motion_duration_s": 5.5,
+        "yaw_amplitude_deg": 60,
+        "yaw_frequency_hz": 0.09,
+        "phase_rad": 0.6,
+        "steps": 2400,
+        "seed": 16
+      }
+    },
+    {
+      "name": "test_translate_x_3m_7s",
+      "path": "artifacts/imo_dataset_v2/test_translate_x_3m_7s.csv",
+      "split": "test",
+      "collector": {
+        "profile": "translate_x",
+        "translation_m": 3,
+        "motion_duration_s": 7,
+        "steps": 1000,
+        "seed": 21
+      }
+    },
+    {
+      "name": "test_tx_scurve_2p5m_3p5s",
+      "path": "artifacts/imo_dataset_v2/test_tx_scurve_2p5m_3p5s.csv",
+      "split": "test",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 2.5,
+        "motion_duration_s": 3.5,
+        "steps": 1700,
+        "seed": 22
+      }
+    },
+    {
+      "name": "test_tx_scurve_4p5m_5s",
+      "path": "artifacts/imo_dataset_v2/test_tx_scurve_4p5m_5s.csv",
+      "split": "test",
+      "collector": {
+        "profile": "translate_scurve",
+        "translation_m": 4.5,
+        "motion_duration_s": 5,
+        "steps": 2000,
+        "seed": 23
+      }
+    },
+    {
+      "name": "test_vertical_down_1m_5s",
+      "path": "artifacts/imo_dataset_v2/test_vertical_down_1m_5s.csv",
+      "split": "test",
+      "collector": {
+        "profile": "vertical",
+        "vertical_m": -1,
+        "motion_duration_s": 5,
+        "steps": 1900,
+        "seed": 24
+      }
+    },
+    {
+      "name": "test_yaw_45deg",
+      "path": "artifacts/imo_dataset_v2/test_yaw_45deg.csv",
+      "split": "test",
+      "collector": {
+        "profile": "yaw_sweep",
+        "yaw_amplitude_deg": 45,
+        "yaw_frequency_hz": 0.1,
+        "phase_rad": 1,
+        "steps": 2400,
+        "seed": 25
+      }
+    },
+    {
+      "name": "test_lissajous_a1p8_f0p11",
+      "path": "artifacts/imo_dataset_v2/test_lissajous_a1p8_f0p11.csv",
+      "split": "test",
+      "collector": {
+        "profile": "lissajous",
+        "amplitude_m": 1.8,
+        "frequency_hz": 0.11,
+        "phase_rad": 0.9,
+        "steps": 2800,
+        "seed": 26
+      }
+    },
+    {
+      "name": "test_racing_like_a1p7_f0p13",
+      "path": "artifacts/imo_dataset_v2/test_racing_like_a1p7_f0p13.csv",
+      "split": "test",
+      "collector": {
+        "profile": "racing_like",
+        "amplitude_m": 1.7,
+        "frequency_hz": 0.13,
+        "yaw_amplitude_deg": 55,
+        "yaw_frequency_hz": 0.11,
+        "phase_rad": 1.1,
+        "steps": 3000,
+        "seed": 27
+      }
+    }
+  ]
+}
