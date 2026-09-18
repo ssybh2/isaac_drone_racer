@@ -38,28 +38,42 @@ Simulator ground truth is allowed in two places only:
 
 It must not enter the deployed estimator or policy observations after reset.
 
-## What is implemented in the first branch slice
+## What is implemented
 
-### 1. Standalone EKF
+### 1. 20 Hz fixed-lag multi-clone EKF
 
 `estimation/learned_inertial_odometry.py`
 
-State:
+Nominal state:
 
 ```text
 R_wb, v_wb, p_wb, b_a, b_g
 ```
 
-Propagation uses gyroscope and accelerometer measurements. A cloned
-window-start position gives the learned displacement update the relative
-measurement:
+The current error-state block is 15-D:
 
 ```text
-r = dp_NN - (p_j - p_i)
-H = [ ... +I(current p) ... -I(cloned p) ]
+[dtheta, dv, dp, dba, dbg]
 ```
 
-The module also accepts absolute position/orientation anchors.
+Every 0.05 s the runtime clones the current 3-D position. Clone augmentation
+keeps the full current/clone and clone/clone cross-covariance. With a 0.5 s
+learned window, the default 11-clone bank covers both fixed-lag endpoints.
+
+Each learned displacement is fused as:
+
+```text
+z = dp_NN(i,j)
+h(x) = p_j - p_i
+r = z - h(x)
+H_current_p = +I
+H_historical_clone_i = -I
+```
+
+The used historical clone is marginalized after its relative update. IMU
+propagation evolves only the current 15-D state dynamics while the augmented
+transition preserves all cross-covariances. Absolute gate position/orientation
+anchors remain compatible with the augmented state.
 
 ### 2. Supervised learned-motion model reuse
 
@@ -147,15 +161,28 @@ Config:
 tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py
 ```
 
-## Important MVP limitation
+## Current estimator limitations
 
-The paper performs overlapping learned-displacement updates at 20 Hz while
-keeping multiple past filter states. The first implementation on this branch
-uses one cloned position and therefore non-overlapping 0.5 s updates (2 Hz).
+The runtime now uses overlapping 0.5 s learned-displacement windows at 20 Hz
+with timestamped position clones. It is still not a claim of line-for-line
+paper equivalence. Current remaining differences include:
 
-Do not call the estimator paper-equivalent yet. The next estimator milestone is
-a fixed-lag multi-clone covariance state so a new clone can be created every
-0.05 s and the 0.5 s learned constraint can be applied at 20 Hz.
+- clones store historical position rather than a full historical pose state;
+- the repository TCN predicts both displacement and log variance rather than
+  reproducing the paper training code exactly;
+- held-out V1 traces showed rare horizontal uncertainty collapse, so runtime
+  covariance is protected by an axis-wise sigma floor and scale;
+- gate PnP orientation uncertainty still uses a configurable fixed sigma;
+- more yaw/braking/vertical/racing-like supervised trajectories are needed.
+
+The default covariance protection is:
+
+```text
+sigma_floor_xyz_m = (0.10, 0.10, 0.01)
+covariance_scale = 1.25
+sigma_used = max(sigma_NN, sigma_floor)
+R_used = diag((covariance_scale * sigma_used)^2)
+```
 
 ## Recommended experiment order
 
@@ -167,9 +194,9 @@ Do not train the final racing policy first.
 2. Split by whole trajectory, never by adjacent windows from the same trace.
 3. Train the TCN and validate held-out displacement RMSE/calibration.
 4. Run estimator-only evaluation with no camera:
-   IMU propagation vs IMU+TCN.
+   IMU propagation vs IMU+20 Hz TCN.
 5. Add Stage2 Gate-PnP anchors and compare drift between visible-gate intervals.
-6. Upgrade the EKF to 20 Hz overlapping multi-clone updates.
+6. Verify learned-update timing, clone count and skipped-update diagnostics.
 7. Only after the estimator is stable, train PPO/SKRL with estimator-backed
    actor observations.
 
