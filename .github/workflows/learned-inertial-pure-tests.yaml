@@ -25,6 +25,7 @@ jobs:
           python -m py_compile scripts/estimation/collect_imo_manifest.py
           python -m py_compile scripts/estimation/audit_imo_dataset.py
           python -m py_compile scripts/estimation/train_learned_motion.py
+          python -m py_compile scripts/estimation/evaluate_learned_motion_checkpoint.py
           python -m py_compile scripts/estimation/evaluate_learned_inertial_ab.py
           python -m py_compile scripts/estimation/evaluate_learned_inertial_mode.py
           python -m py_compile scripts/estimation/diagnose_learned_inertial.py
