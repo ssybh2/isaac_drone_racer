@@ -42,6 +42,12 @@ parser.add_argument(
     help="Multiply the final learned measurement covariance for fusion-weight diagnostics.",
 )
 parser.add_argument(
+    "--learned-fusion-rate-hz",
+    type=float,
+    default=None,
+    help="Fuse only a subset of learned predictions while preserving the prediction rate.",
+)
+parser.add_argument(
     "--task",
     default="Isaac-Drone-Racer-Learned-Inertial-v0",
 )
@@ -200,6 +206,10 @@ def _prepare_cfg():
         cfg.learned_measurement_covariance_multiplier = float(
             args_cli.learned_covariance_multiplier
         )
+    if args_cli.learned_fusion_rate_hz is not None:
+        if args_cli.learned_fusion_rate_hz <= 0.0:
+            raise ValueError("--learned-fusion-rate-hz must be positive")
+        cfg.learned_fusion_rate_hz = float(args_cli.learned_fusion_rate_hz)
 
     if args_cli.mode == "A":
         cfg.learned_motion_checkpoint = None
@@ -506,6 +516,7 @@ def main() -> None:
                     print(
                         f"[estimator-ab:{args_cli.mode}] step={step + 1}/{args_cli.steps} "
                         f"learned={raw_env._learned_update_count} "
+                        f"fused={raw_env._learned_fusion_count} "
                         f"clones={raw_env._lio.clone_count} "
                         f"skips={raw_env._learned_update_skip_count} "
                         f"gate={raw_env._gate_update_count}/{raw_env._gate_attempt_count} "
@@ -534,6 +545,7 @@ def main() -> None:
 
         duration_s = len(pos) * step_dt
         learned_updates = int(raw_env._learned_update_count)
+        learned_fusions = int(raw_env._learned_fusion_count)
         warm_duration_s = max(duration_s - float(cfg.learned_window_time_s), 1.0e-12)
 
         replay_position_max_diff_m = None
@@ -601,6 +613,11 @@ def main() -> None:
             "samples": int(len(pos)),
             "duration_s": float(duration_s),
             "configured_learned_update_rate_hz": float(cfg.learned_update_rate_hz),
+            "configured_learned_fusion_rate_hz": (
+                None
+                if cfg.learned_fusion_rate_hz is None
+                else float(cfg.learned_fusion_rate_hz)
+            ),
             "learned_measurement_covariance_multiplier": float(
                 cfg.learned_measurement_covariance_multiplier
             ),
@@ -613,8 +630,11 @@ def main() -> None:
             "orientation_rmse_deg": float(np.degrees(np.sqrt(np.mean(ori**2)))),
             "orientation_max_error_deg": float(np.degrees(np.max(ori))),
             "learned_updates": learned_updates,
+            "learned_fusions": learned_fusions,
             "learned_update_hz_total": float(learned_updates / max(duration_s, 1.0e-12)),
             "learned_update_hz_after_warmup": float(learned_updates / warm_duration_s),
+            "learned_fusion_hz_total": float(learned_fusions / max(duration_s, 1.0e-12)),
+            "learned_fusion_hz_after_warmup": float(learned_fusions / warm_duration_s),
             "learned_update_skips": int(raw_env._learned_update_skip_count),
             "clone_count_mean": float(np.mean(clones)),
             "clone_count_max": int(np.max(clones)),
