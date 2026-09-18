@@ -200,7 +200,73 @@ Do not train the final racing policy first.
 7. Only after the estimator is stable, train PPO/SKRL with estimator-backed
    actor observations.
 
-## Example data collection
+## IMO V2 dataset: explicit speed coverage and fixed splits
+
+The first V1 dataset exposed an important generalization failure. Its
+`translate_x` traces were 6000 steps long, so the legacy target ramp occupied
+about 42 s. The later 3 m smoke evaluation used a 7 s target ramp. The V1 TCN
+therefore saw much slower forward motion during training and under-predicted
+the faster held-out displacement (roughly 0.26 * GT plus an offset in the
+diagnostic linear fit).
+
+V2 fixes this at the data contract level:
+
+- motion duration is explicit and independent of trace length;
+- quintic S-curve translation covers acceleration and braking;
+- vertical, yaw, translate+yaw, circle, Lissajous and mixed racing-like motion
+  are included;
+- train/validation/test membership is declared before collection;
+- the camera is disabled during supervised IMO collection because the TCN only
+  needs IMU/thrust plus GT labels;
+- dataset displacement coverage can be audited before training.
+
+The canonical manifest is:
+
+```text
+config/learned_inertial/imo_v2_manifest.json
+```
+
+Collect all V2 traces in fresh Isaac processes:
+
+```bash
+./.conda-env/bin/python scripts/estimation/collect_imo_manifest.py \
+  config/learned_inertial/imo_v2_manifest.json \
+  --headless \
+  --resume
+```
+
+Audit 0.5 s displacement coverage before training:
+
+```bash
+./.conda-env/bin/python scripts/estimation/audit_imo_dataset.py \
+  config/learned_inertial/imo_v2_manifest.json \
+  --output artifacts/imo_dataset_v2/audit.json
+```
+
+Train from the explicit manifest. Selecting the checkpoint by held-out RMSE is
+recommended for the current displacement-quality milestone even though the
+network is still optimized with Gaussian NLL:
+
+```bash
+./.conda-env/bin/python scripts/estimation/train_learned_motion.py \
+  --manifest config/learned_inertial/imo_v2_manifest.json \
+  --output artifacts/imo_tcn/model_v2.pt \
+  --window_time_s 0.5 \
+  --sample_rate_hz 100 \
+  --stride_time_s 0.01 \
+  --epochs 200 \
+  --batch_size 128 \
+  --lr 1e-4 \
+  --device cuda \
+  --selection_metric rmse
+```
+
+The training report now contains aggregate validation/test metrics plus
+`validation_by_trace` and `test_by_trace` so held-out translation, yaw,
+vertical and coupled-motion failures are visible rather than hidden in one
+aggregate score.
+
+## Legacy manual data collection
 
 Run several separate traces so train/validation/test can be split at the
 trajectory-file level:
@@ -238,6 +304,28 @@ Repeat each profile with several seeds/trajectory parameters.
   --epochs 200 \
   --device cuda
 ```
+
+## Diagnostic interpretation from the first 20 Hz smoke test
+
+The 10 s 3 m translation diagnostic produced a useful separation:
+
+```text
+A  IMU only                    position RMSE ~0.284 m
+S  IMU + TCN shadow            same state as A; TCN dp RMSE ~0.155 m
+B  IMU + fused 20 Hz TCN       position RMSE ~1.65 m
+P  B + Gate position only      position RMSE ~0.40 m, attitude drifted
+C  B + Gate position+attitude  position RMSE ~0.40 m, attitude improved
+```
+
+The 20 Hz scheduler itself was healthy (20 Hz, ten retained clones, zero
+skips). The shadow mode showed that the dominant issue was the V1 TCN's
+held-out forward-displacement bias, not the clone cadence. Position-only gate
+updates also demonstrated strong pose cross-covariance effects; the gate
+orientation anchor reduced the resulting attitude drift, so it should not be
+removed based on that test.
+
+Do not tune covariance floors to hide a biased displacement model. Fix held-out
+motion coverage first, retrain V2, then rerun the same diagnostics.
 
 ## Unified estimator A/B/C evaluation
 
