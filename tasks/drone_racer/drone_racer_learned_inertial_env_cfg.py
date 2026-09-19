@@ -72,6 +72,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # and lets us test whether overlapping windows are over-counting
     # information without changing the trained network.
     learned_measurement_covariance_multiplier: float = 1.0
+    # Offline-calibrated network mean error, defined as E[prediction - truth]
+    # in the learned target frame [m]. Runtime network measurements subtract
+    # this vector before fusion. Keep zero unless estimated from an independent
+    # train/validation split; never fit it on the evaluation replay.
+    learned_network_bias_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
     # Diagnostic-only learned relative-motion Kalman-gain constraint. "full"
     # preserves the production path. The freeze modes zero selected gain rows
     # before both state injection and Joseph covariance update, allowing us to
