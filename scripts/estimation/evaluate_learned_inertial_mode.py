@@ -65,6 +65,9 @@ parser.add_argument(
         "freeze_attitude_bias",
         "freeze_position",
         "freeze_position_attitude_bias",
+        "freeze_clones",
+        "freeze_clones_attitude_bias",
+        "freeze_kinematic_state",
     ),
     default=None,
     help=(
