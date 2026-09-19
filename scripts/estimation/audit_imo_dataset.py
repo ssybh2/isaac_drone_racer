@@ -19,6 +19,18 @@ parser.add_argument("manifest", type=Path)
 parser.add_argument("--window_time_s", type=float, default=0.5)
 parser.add_argument("--sample_rate_hz", type=float, default=100.0)
 parser.add_argument("--stride_time_s", type=float, default=0.05)
+parser.add_argument(
+    "--target_mode",
+    choices=(
+        "displacement",
+        "kinematic_residual",
+        "kinematic_residual_body_end",
+        "kinematic_residual_body_end_gyro_aligned",
+        "kinematic_residual_body_end_gravity_compensated",
+    ),
+    default="displacement",
+    help="Audit the same target representation that will be used for training.",
+)
 parser.add_argument("--output", type=Path, default=None)
 parser.add_argument(
     "--heldout_support_ratio",
@@ -38,6 +50,7 @@ def _metrics(path: Path) -> dict:
         window_time_s=args.window_time_s,
         sample_rate_hz=args.sample_rate_hz,
         stride_time_s=args.stride_time_s,
+        target_mode=args.target_mode,
     )
     target = windows.targets.astype(np.float64)
     norm = np.linalg.norm(target, axis=1)
@@ -62,6 +75,7 @@ def _aggregate(items: list[dict], paths: list[Path]) -> dict:
             window_time_s=args.window_time_s,
             sample_rate_hz=args.sample_rate_hz,
             stride_time_s=args.stride_time_s,
+            target_mode=args.target_mode,
         )
         targets.append(windows.targets.astype(np.float64))
     if not targets:
@@ -103,6 +117,7 @@ def main() -> None:
         "window_time_s": float(args.window_time_s),
         "sample_rate_hz": float(args.sample_rate_hz),
         "stride_time_s": float(args.stride_time_s),
+        "target_mode": str(args.target_mode),
         "splits": {},
     }
 
