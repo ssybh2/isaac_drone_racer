@@ -53,6 +53,17 @@ parser.add_argument(
     help="Multiply the final learned measurement covariance for fusion-weight diagnostics.",
 )
 parser.add_argument(
+    "--learned-network-bias-m",
+    type=float,
+    nargs=3,
+    metavar=("BX", "BY", "BZ"),
+    default=None,
+    help=(
+        "Offline-calibrated E[prediction-truth] bias [m] in the learned target "
+        "frame. This vector is subtracted from network measurements before fusion."
+    ),
+)
+parser.add_argument(
     "--learned-fusion-rate-hz",
     type=float,
     default=None,
@@ -421,6 +432,11 @@ def _prepare_cfg():
         cfg.learned_measurement_covariance_multiplier = float(
             args_cli.learned_covariance_multiplier
         )
+    if args_cli.learned_network_bias_m is not None:
+        bias = np.asarray(args_cli.learned_network_bias_m, dtype=np.float64)
+        if bias.shape != (3,) or not np.all(np.isfinite(bias)):
+            raise ValueError("--learned-network-bias-m requires three finite values")
+        cfg.learned_network_bias_m = tuple(float(v) for v in bias)
     if args_cli.learned_fusion_rate_hz is not None:
         if args_cli.learned_fusion_rate_hz <= 0.0:
             raise ValueError("--learned-fusion-rate-hz must be positive")
@@ -1073,6 +1089,9 @@ def main() -> None:
             "learned_measurement_covariance_multiplier": float(
                 cfg.learned_measurement_covariance_multiplier
             ),
+            "configured_learned_network_bias_m": [
+                float(v) for v in cfg.learned_network_bias_m
+            ],
             "configured_learned_kalman_gain_mode": str(
                 cfg.learned_kalman_gain_mode
             ),
