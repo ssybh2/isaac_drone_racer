@@ -142,6 +142,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             accel_bias_rw_sigma=float(cfg.ekf_accel_bias_rw_sigma),
             gyro_bias_rw_sigma=float(cfg.ekf_gyro_bias_rw_sigma),
             max_position_clones=int(cfg.learned_max_position_clones),
+            learned_kalman_gain_mode=str(cfg.learned_kalman_gain_mode),
         )
         self._motion_buffer = LearnedMotionBuffer(
             window_time_s=cfg.learned_window_time_s,
