@@ -387,6 +387,137 @@ def test_learned_relative_displacement_pulls_position_toward_measurement():
     assert est.state().covariance.shape == (75, 75)
 
 
+def test_post_update_endpoint_clone_prevents_next_window_correction_echo():
+    """A future window must start from the corrected endpoint state.
+
+    With freeze_clones_attitude_bias, cloning before a learned update leaves a
+    stale endpoint clone because only the current velocity/position may move.
+    The next relative-motion prediction then contains the previous correction
+    as a deterministic innovation echo. Cloning after the update must remove
+    that artifact and augment from the corrected covariance.
+    """
+    base = lio.LearnedInertialOdometry(
+        max_position_clones=3,
+        learned_kalman_gain_mode="freeze_clones_attitude_bias",
+    )
+    base.reset(initial_covariance=np.eye(15) * 0.1)
+    base.clone_current_position()
+
+    for k in range(1, 51):
+        base.propagate(
+            gyro_b=(0.0, 0.0, 0.0),
+            accel_b=(0.0, 0.0, 9.81),
+            timestamp_s=k * 0.01,
+        )
+
+    corrected = copy.deepcopy(base)
+    stale = copy.deepcopy(base)
+
+    predicted_first = base.predicted_kinematic_residual_body_end_gravity_compensated(
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    measurement_first = predicted_first + np.array([0.20, -0.10, 0.05])
+    measurement_covariance = np.eye(3) * 1.0e-4
+
+    # Correct scheduler semantics: update using the historical start clone,
+    # then create the endpoint clone from the corrected current state/P.
+    corrected.update_learned_kinematic_residual_body_end_gravity_compensated(
+        measurement_first,
+        measurement_covariance,
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    dx_v = corrected.last_update_diagnostics["dx_velocity"].copy()
+    dx_p = corrected.last_update_diagnostics["dx_position"].copy()
+    assert np.linalg.norm(dx_v) > 1.0e-6
+    assert np.linalg.norm(dx_p) > 1.0e-6
+    assert corrected.clone_count == 0
+
+    P_after_update = corrected.P.copy()
+    corrected_v = corrected.v.copy()
+    corrected_p = corrected.p.copy()
+    corrected.clone_current_position()
+
+    np.testing.assert_allclose(corrected._clone_velocities[0], corrected_v, atol=1e-12)
+    np.testing.assert_allclose(corrected._clone_positions[0], corrected_p, atol=1e-12)
+
+    J = np.zeros((6, 15), dtype=np.float64)
+    J[0:3, 3:6] = np.eye(3)
+    J[3:6, 6:9] = np.eye(3)
+    expected_cross = J @ P_after_update
+    np.testing.assert_allclose(
+        corrected.P[15:21, :15],
+        expected_cross,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+    np.testing.assert_allclose(
+        corrected.P[15:21, 15:21],
+        J @ P_after_update @ J.T,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+
+    # Old scheduler semantics for comparison: clone the endpoint before the
+    # constrained update. The endpoint nominal state is then frozen/stale.
+    stale.clone_current_position()
+    stale.update_learned_kinematic_residual_body_end_gravity_compensated(
+        measurement_first,
+        measurement_covariance,
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    np.testing.assert_allclose(
+        stale.last_update_diagnostics["dx_velocity"],
+        dx_v,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+    np.testing.assert_allclose(
+        stale.last_update_diagnostics["dx_position"],
+        dx_p,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+    assert stale.clone_count == 1
+
+    # Propagate the next 0.5 s with zero world acceleration. A correctly cloned
+    # endpoint yields only the known gravity-compensation term. The stale clone
+    # adds exactly the previous dp + dt*dv correction to the predicted residual.
+    for est in (corrected, stale):
+        est.propagate(
+            gyro_b=(0.0, 0.0, 0.0),
+            accel_b=(0.0, 0.0, 9.81),
+            timestamp_s=1.0,
+        )
+
+    dt = 0.5
+    exact_second = -0.5 * corrected.gravity_w * dt * dt
+    corrected_prediction = (
+        corrected.predicted_kinematic_residual_body_end_gravity_compensated(
+            start_timestamp_s=0.5,
+            clone_tolerance_s=1e-9,
+        )
+    )
+    stale_prediction = (
+        stale.predicted_kinematic_residual_body_end_gravity_compensated(
+            start_timestamp_s=0.5,
+            clone_tolerance_s=1e-9,
+        )
+    )
+
+    np.testing.assert_allclose(corrected_prediction, exact_second, atol=1e-10)
+    expected_echo = dx_p + dt * dx_v
+    assert np.linalg.norm(expected_echo) > 1.0e-3
+    np.testing.assert_allclose(
+        stale_prediction - exact_second,
+        expected_echo,
+        rtol=1e-10,
+        atol=1e-10,
+    )
+
+
 def test_overlapping_half_second_updates_can_run_continuously():
     est = lio.LearnedInertialOdometry(max_position_clones=11)
     est.reset(initial_covariance=np.eye(15) * 0.05)
