@@ -73,6 +73,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_window_start_s = None
         self._last_learned_window_end_s = None
         self._last_learned_update_timestamp_s = None
+        self._last_learned_fused = False
         self._gate_attempt_count = 0
         self._gate_update_count = 0
         self._gate_reject_count = 0
@@ -208,6 +209,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_window_start_s = None
         self._last_learned_window_end_s = None
         self._last_learned_update_timestamp_s = None
+        self._last_learned_fused = False
         self._last_gate_mahalanobis2 = None
         self.learned_inertial_state = self._lio.state()
 
@@ -602,6 +604,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_window_start_s = float(start_s)
         self._last_learned_window_end_s = float(scheduled_end_s)
         self._last_learned_update_timestamp_s = now
+        self._last_learned_fused = bool(should_fuse)
         # discard_before retains one interpolation predecessor. The next
         # 0.5 s window begins only 0.05 s later, so the histories overlap.
         self._motion_buffer.discard_before(start_s)
