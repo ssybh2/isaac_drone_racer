@@ -519,6 +519,44 @@ def test_learned_kalman_gain_modes_zero_expected_rows():
             0.0,
         )
 
+    freeze_clones = est._constrain_kalman_gain(K, "freeze_clones")
+    np.testing.assert_allclose(freeze_clones[:15], 1.0)
+    for clone_index in range(est.clone_count):
+        np.testing.assert_allclose(
+            freeze_clones[est._clone_velocity_slice(clone_index)],
+            0.0,
+        )
+        np.testing.assert_allclose(
+            freeze_clones[est._clone_position_slice(clone_index)],
+            0.0,
+        )
+
+    freeze_clones_attitude_bias = est._constrain_kalman_gain(
+        K,
+        "freeze_clones_attitude_bias",
+    )
+    np.testing.assert_allclose(freeze_clones_attitude_bias[0:3], 0.0)
+    np.testing.assert_allclose(freeze_clones_attitude_bias[3:9], 1.0)
+    np.testing.assert_allclose(freeze_clones_attitude_bias[9:15], 0.0)
+    for clone_index in range(est.clone_count):
+        np.testing.assert_allclose(
+            freeze_clones_attitude_bias[est._clone_slice(clone_index)],
+            0.0,
+        )
+
+    freeze_kinematic_state = est._constrain_kalman_gain(
+        K,
+        "freeze_kinematic_state",
+    )
+    np.testing.assert_allclose(freeze_kinematic_state[0:3], 1.0)
+    np.testing.assert_allclose(freeze_kinematic_state[3:9], 0.0)
+    np.testing.assert_allclose(freeze_kinematic_state[9:15], 1.0)
+    for clone_index in range(est.clone_count):
+        np.testing.assert_allclose(
+            freeze_kinematic_state[est._clone_slice(clone_index)],
+            0.0,
+        )
+
 
 def test_constrained_kalman_update_uses_effective_gain_for_joseph_update():
     est = lio.LearnedInertialOdometry(
