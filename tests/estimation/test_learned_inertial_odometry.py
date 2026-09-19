@@ -457,3 +457,162 @@ def test_gate_position_update_moves_state_toward_absolute_anchor_with_clones():
     assert est.state().position_w_b[0] < 1.01
     assert est.clone_count == 1
     assert est.state().covariance.shape == (21, 21)
+
+
+def test_learned_kalman_gain_modes_zero_expected_rows():
+    est = lio.LearnedInertialOdometry(max_position_clones=3)
+    est.reset(initial_covariance=np.eye(15) * 0.1)
+    est.clone_current_position()
+    est.propagate(
+        gyro_b=(0.0, 0.0, 0.0),
+        accel_b=(0.0, 0.0, 9.81),
+        timestamp_s=0.05,
+    )
+    est.clone_current_position()
+
+    K = np.ones((est.P.shape[0], 3), dtype=np.float64)
+
+    full = est._constrain_kalman_gain(K, "full")
+    np.testing.assert_allclose(full, K)
+
+    freeze_attitude_bias = est._constrain_kalman_gain(
+        K,
+        "freeze_attitude_bias",
+    )
+    np.testing.assert_allclose(freeze_attitude_bias[0:3], 0.0)
+    np.testing.assert_allclose(freeze_attitude_bias[9:15], 0.0)
+    np.testing.assert_allclose(freeze_attitude_bias[3:9], 1.0)
+    for clone_index in range(est.clone_count):
+        np.testing.assert_allclose(
+            freeze_attitude_bias[est._clone_slice(clone_index)],
+            1.0,
+        )
+
+    freeze_position = est._constrain_kalman_gain(K, "freeze_position")
+    np.testing.assert_allclose(freeze_position[6:9], 0.0)
+    np.testing.assert_allclose(freeze_position[0:6], 1.0)
+    np.testing.assert_allclose(freeze_position[9:15], 1.0)
+    for clone_index in range(est.clone_count):
+        np.testing.assert_allclose(
+            freeze_position[est._clone_velocity_slice(clone_index)],
+            1.0,
+        )
+        np.testing.assert_allclose(
+            freeze_position[est._clone_position_slice(clone_index)],
+            0.0,
+        )
+
+    combined = est._constrain_kalman_gain(
+        K,
+        "freeze_position_attitude_bias",
+    )
+    np.testing.assert_allclose(combined[0:3], 0.0)
+    np.testing.assert_allclose(combined[3:6], 1.0)
+    np.testing.assert_allclose(combined[6:15], 0.0)
+    for clone_index in range(est.clone_count):
+        np.testing.assert_allclose(
+            combined[est._clone_velocity_slice(clone_index)],
+            1.0,
+        )
+        np.testing.assert_allclose(
+            combined[est._clone_position_slice(clone_index)],
+            0.0,
+        )
+
+
+def test_constrained_kalman_update_uses_effective_gain_for_joseph_update():
+    est = lio.LearnedInertialOdometry(
+        max_position_clones=2,
+        learned_kalman_gain_mode="freeze_position_attitude_bias",
+    )
+    est.reset(initial_covariance=np.eye(15) * 0.1)
+    est.clone_current_position()
+
+    rng = np.random.default_rng(7)
+    A0 = rng.normal(size=(est.P.shape[0], est.P.shape[0]))
+    P0 = 0.002 * (A0 @ A0.T) + np.eye(est.P.shape[0]) * 0.05
+    est.P = P0.copy()
+
+    H = np.zeros((3, est.P.shape[0]), dtype=np.float64)
+    H[:, 3:6] = np.eye(3)
+    H[:, 6:9] = 0.4 * np.eye(3)
+    H[:, est._clone_velocity_slice(0)] = -0.3 * np.eye(3)
+    H[:, est._clone_position_slice(0)] = -0.2 * np.eye(3)
+    Rm = np.eye(3) * 0.03
+    residual = np.array([0.08, -0.04, 0.02], dtype=np.float64)
+
+    S = H @ P0 @ H.T + Rm
+    K_raw = np.linalg.solve(S.T, (P0 @ H.T).T).T
+    K_eff = est._constrain_kalman_gain(
+        K_raw,
+        "freeze_position_attitude_bias",
+    )
+    dx_expected = K_eff @ residual
+    I = np.eye(P0.shape[0], dtype=np.float64)
+    joseph = I - K_eff @ H
+    P_expected = joseph @ P0 @ joseph.T + K_eff @ Rm @ K_eff.T
+    P_expected = 0.5 * (P_expected + P_expected.T)
+
+    p_before = est.p.copy()
+    R_before = est.R.copy()
+    ba_before = est.ba.copy()
+    bg_before = est.bg.copy()
+    clone_p_before = est._clone_positions[0].copy()
+    v_before = est.v.copy()
+    clone_v_before = est._clone_velocities[0].copy()
+
+    est._kalman_update(
+        residual,
+        H,
+        Rm,
+        gain_mode="freeze_position_attitude_bias",
+    )
+
+    np.testing.assert_allclose(est.p, p_before, atol=1e-12)
+    np.testing.assert_allclose(est.R, R_before, atol=1e-12)
+    np.testing.assert_allclose(est.ba, ba_before, atol=1e-12)
+    np.testing.assert_allclose(est.bg, bg_before, atol=1e-12)
+    np.testing.assert_allclose(est._clone_positions[0], clone_p_before, atol=1e-12)
+    np.testing.assert_allclose(est.v, v_before + dx_expected[3:6], atol=1e-12)
+    np.testing.assert_allclose(
+        est._clone_velocities[0],
+        clone_v_before + dx_expected[est._clone_velocity_slice(0)],
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(est.P, P_expected, rtol=1e-11, atol=1e-11)
+    assert est.last_update_diagnostics["kalman_gain_mode"] == (
+        "freeze_position_attitude_bias"
+    )
+    assert est.last_update_diagnostics["kalman_gain_position_norm"] == 0.0
+    assert est.last_update_diagnostics["kalman_gain_clone_position_norm"] == 0.0
+
+
+def test_learned_update_uses_configured_gain_mode_but_absolute_update_stays_full():
+    est = lio.LearnedInertialOdometry(
+        max_position_clones=2,
+        learned_kalman_gain_mode="freeze_position",
+    )
+    est.reset(initial_covariance=np.eye(15) * 0.1)
+    est.clone_current_position()
+    est.propagate(
+        gyro_b=(0.0, 0.0, 0.0),
+        accel_b=(0.3, 0.0, 9.81),
+        timestamp_s=0.5,
+    )
+
+    est.update_learned_kinematic_residual(
+        residual_displacement_w=(0.0, 0.0, 0.0),
+        covariance_w=np.eye(3) * 0.01,
+        start_timestamp_s=0.0,
+        clone_tolerance_s=1e-9,
+    )
+    assert est.last_update_diagnostics["kalman_gain_mode"] == "freeze_position"
+    assert est.last_update_diagnostics["kalman_gain_position_norm"] == 0.0
+    assert est.last_update_diagnostics["kalman_gain_clone_position_norm"] == 0.0
+
+    est.update_absolute_position(
+        position_w_b=(0.0, 0.0, 0.0),
+        covariance_w=np.eye(3) * 0.1,
+    )
+    assert est.last_update_diagnostics["kalman_gain_mode"] == "full"
+    assert est.last_update_diagnostics["kalman_gain_position_norm"] > 0.0
