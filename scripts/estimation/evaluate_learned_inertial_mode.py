@@ -59,6 +59,20 @@ parser.add_argument(
     help="Fuse only a subset of learned predictions while preserving the prediction rate.",
 )
 parser.add_argument(
+    "--learned-kalman-gain-mode",
+    choices=(
+        "full",
+        "freeze_attitude_bias",
+        "freeze_position",
+        "freeze_position_attitude_bias",
+    ),
+    default=None,
+    help=(
+        "Diagnostic learned-relative Kalman-gain ablation. Selected gain rows "
+        "are zeroed consistently for state injection and Joseph covariance update."
+    ),
+)
+parser.add_argument(
     "--task",
     default="Isaac-Drone-Racer-Learned-Inertial-v0",
 )
@@ -295,6 +309,8 @@ def _prepare_cfg():
         if args_cli.learned_fusion_rate_hz <= 0.0:
             raise ValueError("--learned-fusion-rate-hz must be positive")
         cfg.learned_fusion_rate_hz = float(args_cli.learned_fusion_rate_hz)
+    if args_cli.learned_kalman_gain_mode is not None:
+        cfg.learned_kalman_gain_mode = str(args_cli.learned_kalman_gain_mode)
 
     if args_cli.mode == "A":
         cfg.learned_motion_checkpoint = None
@@ -400,6 +416,17 @@ def main() -> None:
     update_dx_position_norm: list[float] = []
     update_dx_accel_bias_norm: list[float] = []
     update_dx_gyro_bias_norm: list[float] = []
+    update_dx_clone_velocity_norm: list[float] = []
+    update_dx_clone_position_norm: list[float] = []
+    update_k_raw_current_norm: list[float] = []
+    update_k_current_norm: list[float] = []
+    update_k_theta_norm: list[float] = []
+    update_k_velocity_norm: list[float] = []
+    update_k_position_norm: list[float] = []
+    update_k_accel_bias_norm: list[float] = []
+    update_k_gyro_bias_norm: list[float] = []
+    update_k_clone_velocity_norm: list[float] = []
+    update_k_clone_position_norm: list[float] = []
 
     try:
         env.reset(seed=int(args_cli.seed))
@@ -482,6 +509,39 @@ def main() -> None:
                     update_dx_position_norm.append(float(np.linalg.norm(diag["dx_position"])))
                     update_dx_accel_bias_norm.append(float(np.linalg.norm(diag["dx_accel_bias"])))
                     update_dx_gyro_bias_norm.append(float(np.linalg.norm(diag["dx_gyro_bias"])))
+                    update_dx_clone_velocity_norm.append(
+                        float(diag["dx_clone_velocity_norm"])
+                    )
+                    update_dx_clone_position_norm.append(
+                        float(diag["dx_clone_position_norm"])
+                    )
+                    update_k_raw_current_norm.append(
+                        float(diag["kalman_gain_raw_current_norm"])
+                    )
+                    update_k_current_norm.append(
+                        float(diag["kalman_gain_current_norm"])
+                    )
+                    update_k_theta_norm.append(
+                        float(diag["kalman_gain_theta_norm"])
+                    )
+                    update_k_velocity_norm.append(
+                        float(diag["kalman_gain_velocity_norm"])
+                    )
+                    update_k_position_norm.append(
+                        float(diag["kalman_gain_position_norm"])
+                    )
+                    update_k_accel_bias_norm.append(
+                        float(diag["kalman_gain_accel_bias_norm"])
+                    )
+                    update_k_gyro_bias_norm.append(
+                        float(diag["kalman_gain_gyro_bias_norm"])
+                    )
+                    update_k_clone_velocity_norm.append(
+                        float(diag["kalman_gain_clone_velocity_norm"])
+                    )
+                    update_k_clone_position_norm.append(
+                        float(diag["kalman_gain_clone_position_norm"])
+                    )
 
                 timestamp_key = round(float(raw_env._timestamp_s()), 6)
                 truth_position_by_time[timestamp_key] = truth_p.copy()
@@ -808,6 +868,9 @@ def main() -> None:
             "learned_measurement_covariance_multiplier": float(
                 cfg.learned_measurement_covariance_multiplier
             ),
+            "configured_learned_kalman_gain_mode": str(
+                cfg.learned_kalman_gain_mode
+            ),
             "position_rmse_m": float(np.sqrt(np.mean(np.sum(pos**2, axis=1)))),
             "position_axis_rmse_m": np.sqrt(np.mean(pos**2, axis=0)).tolist(),
             "position_max_error_m": float(np.max(pos_norm)),
@@ -855,6 +918,28 @@ def main() -> None:
                 "dx_accel_bias_norm_max_mps2": None if not update_dx_accel_bias_norm else float(np.max(update_dx_accel_bias_norm)),
                 "dx_gyro_bias_norm_mean_radps": None if not update_dx_gyro_bias_norm else float(np.mean(update_dx_gyro_bias_norm)),
                 "dx_gyro_bias_norm_max_radps": None if not update_dx_gyro_bias_norm else float(np.max(update_dx_gyro_bias_norm)),
+                "dx_clone_velocity_norm_mean_mps": None if not update_dx_clone_velocity_norm else float(np.mean(update_dx_clone_velocity_norm)),
+                "dx_clone_velocity_norm_max_mps": None if not update_dx_clone_velocity_norm else float(np.max(update_dx_clone_velocity_norm)),
+                "dx_clone_position_norm_mean_m": None if not update_dx_clone_position_norm else float(np.mean(update_dx_clone_position_norm)),
+                "dx_clone_position_norm_max_m": None if not update_dx_clone_position_norm else float(np.max(update_dx_clone_position_norm)),
+                "kalman_gain_raw_current_norm_mean": None if not update_k_raw_current_norm else float(np.mean(update_k_raw_current_norm)),
+                "kalman_gain_raw_current_norm_max": None if not update_k_raw_current_norm else float(np.max(update_k_raw_current_norm)),
+                "kalman_gain_current_norm_mean": None if not update_k_current_norm else float(np.mean(update_k_current_norm)),
+                "kalman_gain_current_norm_max": None if not update_k_current_norm else float(np.max(update_k_current_norm)),
+                "kalman_gain_theta_norm_mean": None if not update_k_theta_norm else float(np.mean(update_k_theta_norm)),
+                "kalman_gain_theta_norm_max": None if not update_k_theta_norm else float(np.max(update_k_theta_norm)),
+                "kalman_gain_velocity_norm_mean": None if not update_k_velocity_norm else float(np.mean(update_k_velocity_norm)),
+                "kalman_gain_velocity_norm_max": None if not update_k_velocity_norm else float(np.max(update_k_velocity_norm)),
+                "kalman_gain_position_norm_mean": None if not update_k_position_norm else float(np.mean(update_k_position_norm)),
+                "kalman_gain_position_norm_max": None if not update_k_position_norm else float(np.max(update_k_position_norm)),
+                "kalman_gain_accel_bias_norm_mean": None if not update_k_accel_bias_norm else float(np.mean(update_k_accel_bias_norm)),
+                "kalman_gain_accel_bias_norm_max": None if not update_k_accel_bias_norm else float(np.max(update_k_accel_bias_norm)),
+                "kalman_gain_gyro_bias_norm_mean": None if not update_k_gyro_bias_norm else float(np.mean(update_k_gyro_bias_norm)),
+                "kalman_gain_gyro_bias_norm_max": None if not update_k_gyro_bias_norm else float(np.max(update_k_gyro_bias_norm)),
+                "kalman_gain_clone_velocity_norm_mean": None if not update_k_clone_velocity_norm else float(np.mean(update_k_clone_velocity_norm)),
+                "kalman_gain_clone_velocity_norm_max": None if not update_k_clone_velocity_norm else float(np.max(update_k_clone_velocity_norm)),
+                "kalman_gain_clone_position_norm_mean": None if not update_k_clone_position_norm else float(np.mean(update_k_clone_position_norm)),
+                "kalman_gain_clone_position_norm_max": None if not update_k_clone_position_norm else float(np.max(update_k_clone_position_norm)),
             },
             "clone_count_mean": float(np.mean(clones)),
             "clone_count_max": int(np.max(clones)),
