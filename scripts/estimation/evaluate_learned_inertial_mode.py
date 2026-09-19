@@ -184,6 +184,119 @@ def _orientation_error_rad(q_est, q_truth) -> float:
     return float(2.0 * np.arccos(alignment))
 
 
+def _axis_lag_autocorrelation(values: np.ndarray, lag: int) -> list[float | None]:
+    values = np.asarray(values, dtype=np.float64).reshape(-1, 3)
+    if lag < 1 or len(values) <= lag:
+        return [None, None, None]
+    result: list[float | None] = []
+    for axis in range(3):
+        x = values[:-lag, axis]
+        y = values[lag:, axis]
+        x = x - np.mean(x)
+        y = y - np.mean(y)
+        denom = float(np.sqrt(np.sum(x * x) * np.sum(y * y)))
+        result.append(
+            None
+            if denom <= 1.0e-15
+            else float(np.sum(x * y) / denom)
+        )
+    return result
+
+
+def _axis_coverage(normalized: np.ndarray, threshold: float) -> list[float | None]:
+    normalized = np.asarray(normalized, dtype=np.float64).reshape(-1, 3)
+    result: list[float | None] = []
+    for axis in range(3):
+        finite = np.isfinite(normalized[:, axis])
+        result.append(
+            None
+            if not np.any(finite)
+            else float(
+                np.mean(np.abs(normalized[finite, axis]) <= float(threshold))
+            )
+        )
+    return result
+
+
+def _summarize_fusion_schedule_errors(
+    errors: np.ndarray,
+    raw_sigmas: np.ndarray,
+    used_sigmas: np.ndarray,
+) -> dict[str, object]:
+    errors = np.asarray(errors, dtype=np.float64).reshape(-1, 3)
+    raw_sigmas = np.asarray(raw_sigmas, dtype=np.float64).reshape(-1, 3)
+    used_sigmas = np.asarray(used_sigmas, dtype=np.float64).reshape(-1, 3)
+    summary: dict[str, object] = {
+        "samples": int(len(errors)),
+        "axis_rmse_m": None,
+        "axis_bias_m": None,
+        "norm_mean_m": None,
+        "norm_rmse_m": None,
+        "norm_max_m": None,
+        "lag1_axis_autocorr": [None, None, None],
+        "lag2_axis_autocorr": [None, None, None],
+        "cumulative_error_final_m": None,
+        "cumulative_error_max_norm_m": None,
+        "raw_sigma_mean_m": None,
+        "used_sigma_mean_m": None,
+        "raw_normalized_axis_rmse": None,
+        "used_normalized_axis_rmse": None,
+        "raw_axis_coverage_leq_1sigma": None,
+        "raw_axis_coverage_leq_2sigma": None,
+        "raw_axis_coverage_leq_3sigma": None,
+        "used_axis_coverage_leq_1sigma": None,
+        "used_axis_coverage_leq_2sigma": None,
+        "used_axis_coverage_leq_3sigma": None,
+    }
+    if not len(errors):
+        return summary
+
+    error_norm = np.linalg.norm(errors, axis=1)
+    cumulative = np.cumsum(errors, axis=0)
+    cumulative_norm = np.linalg.norm(cumulative, axis=1)
+    raw_normalized = np.divide(
+        errors,
+        raw_sigmas,
+        out=np.full_like(errors, np.nan),
+        where=raw_sigmas > 1.0e-12,
+    )
+    used_normalized = np.divide(
+        errors,
+        used_sigmas,
+        out=np.full_like(errors, np.nan),
+        where=used_sigmas > 1.0e-12,
+    )
+
+    summary.update(
+        {
+            "axis_rmse_m": np.sqrt(np.mean(errors**2, axis=0)).tolist(),
+            "axis_bias_m": np.mean(errors, axis=0).tolist(),
+            "norm_mean_m": float(np.mean(error_norm)),
+            "norm_rmse_m": float(np.sqrt(np.mean(error_norm**2))),
+            "norm_max_m": float(np.max(error_norm)),
+            "lag1_axis_autocorr": _axis_lag_autocorrelation(errors, 1),
+            "lag2_axis_autocorr": _axis_lag_autocorrelation(errors, 2),
+            "cumulative_error_final_m": cumulative[-1].tolist(),
+            "cumulative_error_max_norm_m": float(np.max(cumulative_norm)),
+            "raw_sigma_mean_m": np.mean(raw_sigmas, axis=0).tolist(),
+            "used_sigma_mean_m": np.mean(used_sigmas, axis=0).tolist(),
+            "raw_normalized_axis_rmse": np.sqrt(
+                np.nanmean(raw_normalized**2, axis=0)
+            ).tolist(),
+            "used_normalized_axis_rmse": np.sqrt(
+                np.nanmean(used_normalized**2, axis=0)
+            ).tolist(),
+            "raw_axis_coverage_leq_1sigma": _axis_coverage(raw_normalized, 1.0),
+            "raw_axis_coverage_leq_2sigma": _axis_coverage(raw_normalized, 2.0),
+            "raw_axis_coverage_leq_3sigma": _axis_coverage(raw_normalized, 3.0),
+            "used_axis_coverage_leq_1sigma": _axis_coverage(used_normalized, 1.0),
+            "used_axis_coverage_leq_2sigma": _axis_coverage(used_normalized, 2.0),
+            "used_axis_coverage_leq_3sigma": _axis_coverage(used_normalized, 3.0),
+        }
+    )
+    return summary
+
+
 def _target_xy(initial_xy: torch.Tensor, t_s: float, total_duration_s: float) -> torch.Tensor:
     target = initial_xy.clone()
     amp = float(args_cli.amplitude_m)
@@ -356,6 +469,11 @@ CSV_FIELDS = [
     "tcn_gt_dp_x", "tcn_gt_dp_y", "tcn_gt_dp_z",
     "tcn_pred_err_x", "tcn_pred_err_y", "tcn_pred_err_z",
     "tcn_pred_err_norm_m",
+    "learned_fused_this_update",
+    "tcn_raw_sigma_x", "tcn_raw_sigma_y", "tcn_raw_sigma_z",
+    "tcn_used_sigma_x", "tcn_used_sigma_y", "tcn_used_sigma_z",
+    "tcn_used_normalized_err_x", "tcn_used_normalized_err_y",
+    "tcn_used_normalized_err_z",
     "gate_attempts", "gate_accepted", "gate_rejected",
 ]
 
@@ -411,6 +529,9 @@ def main() -> None:
     clone_counts: list[int] = []
     innovation_vectors: list[np.ndarray] = []
     prediction_errors: list[np.ndarray] = []
+    fusion_schedule_prediction_errors: list[np.ndarray] = []
+    fusion_schedule_raw_sigmas: list[np.ndarray] = []
+    fusion_schedule_used_sigmas: list[np.ndarray] = []
     accel_bias_norms: list[float] = []
     gyro_bias_norms: list[float] = []
     update_nis: list[float] = []
@@ -555,6 +676,10 @@ def main() -> None:
                 tcn_prediction = None
                 tcn_gt_dp = None
                 tcn_pred_error = None
+                learned_fused_this_update = False
+                tcn_raw_sigma = None
+                tcn_used_sigma = None
+                tcn_used_normalized_error = None
                 innovation_timestamp = raw_env._last_learned_update_timestamp_s
                 if (
                     innovation_timestamp is not None
@@ -626,6 +751,40 @@ def main() -> None:
                                 tcn_gt_dp = R_end_gt.T @ tcn_gt_dp
                             tcn_pred_error = tcn_prediction - tcn_gt_dp
                             prediction_errors.append(tcn_pred_error.copy())
+
+                            learned_fused_this_update = bool(
+                                getattr(raw_env, "_last_learned_fused", False)
+                            )
+                            if learned_fused_this_update:
+                                raw_cov = np.asarray(
+                                    raw_env._last_learned_covariance_raw_w,
+                                    dtype=np.float64,
+                                ).reshape(3, 3)
+                                used_cov = np.asarray(
+                                    raw_env._last_learned_covariance_used_w,
+                                    dtype=np.float64,
+                                ).reshape(3, 3)
+                                tcn_raw_sigma = np.sqrt(
+                                    np.maximum(np.diag(raw_cov), 0.0)
+                                )
+                                tcn_used_sigma = np.sqrt(
+                                    np.maximum(np.diag(used_cov), 0.0)
+                                )
+                                tcn_used_normalized_error = np.divide(
+                                    tcn_pred_error,
+                                    tcn_used_sigma,
+                                    out=np.full(3, np.nan, dtype=np.float64),
+                                    where=tcn_used_sigma > 1.0e-12,
+                                )
+                                fusion_schedule_prediction_errors.append(
+                                    tcn_pred_error.copy()
+                                )
+                                fusion_schedule_raw_sigmas.append(
+                                    tcn_raw_sigma.copy()
+                                )
+                                fusion_schedule_used_sigmas.append(
+                                    tcn_used_sigma.copy()
+                                )
 
                 action_np = _np(action).astype(np.float64)
                 t_s = float(raw_env._timestamp_s()) - start_timestamp_s
@@ -704,6 +863,28 @@ def main() -> None:
                         "tcn_pred_err_norm_m": (
                             None if tcn_pred_error is None else float(np.linalg.norm(tcn_pred_error))
                         ),
+                        "learned_fused_this_update": int(learned_fused_this_update),
+                        "tcn_raw_sigma_x": None if tcn_raw_sigma is None else tcn_raw_sigma[0],
+                        "tcn_raw_sigma_y": None if tcn_raw_sigma is None else tcn_raw_sigma[1],
+                        "tcn_raw_sigma_z": None if tcn_raw_sigma is None else tcn_raw_sigma[2],
+                        "tcn_used_sigma_x": None if tcn_used_sigma is None else tcn_used_sigma[0],
+                        "tcn_used_sigma_y": None if tcn_used_sigma is None else tcn_used_sigma[1],
+                        "tcn_used_sigma_z": None if tcn_used_sigma is None else tcn_used_sigma[2],
+                        "tcn_used_normalized_err_x": (
+                            None
+                            if tcn_used_normalized_error is None
+                            else tcn_used_normalized_error[0]
+                        ),
+                        "tcn_used_normalized_err_y": (
+                            None
+                            if tcn_used_normalized_error is None
+                            else tcn_used_normalized_error[1]
+                        ),
+                        "tcn_used_normalized_err_z": (
+                            None
+                            if tcn_used_normalized_error is None
+                            else tcn_used_normalized_error[2]
+                        ),
                         "gate_attempts": int(raw_env._gate_attempt_count),
                         "gate_accepted": int(raw_env._gate_update_count),
                         "gate_rejected": int(raw_env._gate_reject_count),
@@ -741,6 +922,21 @@ def main() -> None:
         pred_errors = (
             np.asarray(prediction_errors, dtype=np.float64)
             if prediction_errors
+            else np.empty((0, 3), dtype=np.float64)
+        )
+        fusion_pred_errors = (
+            np.asarray(fusion_schedule_prediction_errors, dtype=np.float64)
+            if fusion_schedule_prediction_errors
+            else np.empty((0, 3), dtype=np.float64)
+        )
+        fusion_raw_sigmas = (
+            np.asarray(fusion_schedule_raw_sigmas, dtype=np.float64)
+            if fusion_schedule_raw_sigmas
+            else np.empty((0, 3), dtype=np.float64)
+        )
+        fusion_used_sigmas = (
+            np.asarray(fusion_schedule_used_sigmas, dtype=np.float64)
+            if fusion_schedule_used_sigmas
             else np.empty((0, 3), dtype=np.float64)
         )
 
@@ -797,6 +993,12 @@ def main() -> None:
                     "norm_max_m": float(np.max(pred_norm)),
                 }
             )
+
+        fusion_schedule_prediction_summary = _summarize_fusion_schedule_errors(
+            fusion_pred_errors,
+            fusion_raw_sigmas,
+            fusion_used_sigmas,
+        )
 
         gate_attempts = int(raw_env._gate_attempt_count)
         gate_accepted = int(raw_env._gate_update_count)
@@ -949,6 +1151,13 @@ def main() -> None:
             "clone_count_final": int(raw_env._lio.clone_count),
             "tcn_innovation": innovation_summary,
             "tcn_prediction_error_vs_gt": prediction_summary,
+            "tcn_fusion_schedule_prediction_error_vs_gt": (
+                fusion_schedule_prediction_summary
+            ),
+            "tcn_fusion_schedule_sample_count_matches_learned_fusions": (
+                int(fusion_schedule_prediction_summary["samples"])
+                == int(learned_fusions)
+            ),
             "gate_attempts": gate_attempts,
             "gate_accepted": gate_accepted,
             "gate_rejected": gate_rejected,
