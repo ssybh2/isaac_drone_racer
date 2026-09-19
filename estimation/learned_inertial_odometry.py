@@ -143,6 +143,9 @@ class LearnedInertialOdometry:
         "freeze_attitude_bias",
         "freeze_position",
         "freeze_position_attitude_bias",
+        "freeze_clones",
+        "freeze_clones_attitude_bias",
+        "freeze_kinematic_state",
     )
 
     def __init__(
@@ -652,14 +655,40 @@ class LearnedInertialOdometry:
             )
 
         K_eff = np.asarray(K, dtype=np.float64).copy()
-        if mode in ("freeze_attitude_bias", "freeze_position_attitude_bias"):
+
+        freeze_attitude_bias = mode in (
+            "freeze_attitude_bias",
+            "freeze_position_attitude_bias",
+            "freeze_clones_attitude_bias",
+        )
+        freeze_position = mode in (
+            "freeze_position",
+            "freeze_position_attitude_bias",
+            "freeze_kinematic_state",
+        )
+        freeze_velocity = mode == "freeze_kinematic_state"
+        freeze_all_clones = mode in (
+            "freeze_clones",
+            "freeze_clones_attitude_bias",
+            "freeze_kinematic_state",
+        )
+
+        if freeze_attitude_bias:
             K_eff[0:3, :] = 0.0
             K_eff[9:12, :] = 0.0
             K_eff[12:15, :] = 0.0
 
-        if mode in ("freeze_position", "freeze_position_attitude_bias"):
+        if freeze_velocity:
+            K_eff[3:6, :] = 0.0
+
+        if freeze_position:
             K_eff[6:9, :] = 0.0
-            for clone_index in range(self.clone_count):
+
+        for clone_index in range(self.clone_count):
+            if freeze_all_clones:
+                K_eff[self._clone_velocity_slice(clone_index), :] = 0.0
+                K_eff[self._clone_position_slice(clone_index), :] = 0.0
+            elif freeze_position:
                 K_eff[self._clone_position_slice(clone_index), :] = 0.0
 
         return K_eff
