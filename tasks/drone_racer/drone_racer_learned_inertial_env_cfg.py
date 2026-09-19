@@ -72,6 +72,12 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # and lets us test whether overlapping windows are over-counting
     # information without changing the trained network.
     learned_measurement_covariance_multiplier: float = 1.0
+    # Diagnostic-only learned relative-motion Kalman-gain constraint. "full"
+    # preserves the production path. The freeze modes zero selected gain rows
+    # before both state injection and Joseph covariance update, allowing us to
+    # isolate gauge/cross-covariance driven instability without changing the
+    # learned measurement itself. Absolute gate pose updates always use full.
+    learned_kalman_gain_mode: str = "full"
     # Evaluation/debug switch: still run the 20 Hz network and clone schedule
     # but do not inject its displacement into the EKF. This enables shadow-mode
     # measurement diagnostics without changing the deployed input contract.
