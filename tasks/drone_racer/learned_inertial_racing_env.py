@@ -480,7 +480,18 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             measurement_w = np.asarray(
                 prediction.displacement_w, dtype=np.float64
             ).copy()
-            measurement_source = "network"
+            network_bias_m = np.asarray(
+                self.cfg.learned_network_bias_m,
+                dtype=np.float64,
+            ).reshape(3)
+            if not np.all(np.isfinite(network_bias_m)):
+                raise ValueError("learned_network_bias_m must be finite")
+            measurement_w = measurement_w - network_bias_m
+            measurement_source = (
+                "network_bias_calibrated"
+                if np.any(np.abs(network_bias_m) > 0.0)
+                else "network"
+            )
             if bool(self.cfg.learned_debug_oracle_residual_fusion):
                 if target_mode not in (
                     "kinematic_residual",
