@@ -59,6 +59,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument(
+        "--train_sampling",
+        choices=("window_uniform", "trace_balanced"),
+        default="window_uniform",
+        help=(
+            "window_uniform samples every window equally (legacy behavior). "
+            "trace_balanced uses inverse per-trace window-count weights so every "
+            "training trajectory contributes equal expected mass per epoch."
+        ),
+    )
+    parser.add_argument(
         "--selection_metric",
         choices=("nll", "rmse"),
         default="nll",
@@ -67,9 +77,10 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _stack_paths(paths, args):
+def _stack_paths(paths, args, *, return_counts: bool = False):
     feature_parts = []
     target_parts = []
+    counts = []
     for path in paths:
         windows = load_trace_windows(
             path,
@@ -80,9 +91,19 @@ def _stack_paths(paths, args):
         )
         feature_parts.append(windows.features)
         target_parts.append(windows.targets)
+        counts.append(int(windows.features.shape[0]))
     if not feature_parts:
-        return np.empty((0, 6, int(round(args.window_time_s * args.sample_rate_hz))), np.float32), np.empty((0, 3), np.float32)
-    return np.concatenate(feature_parts, axis=0), np.concatenate(target_parts, axis=0)
+        features = np.empty(
+            (0, 6, int(round(args.window_time_s * args.sample_rate_hz))),
+            np.float32,
+        )
+        targets = np.empty((0, 3), np.float32)
+    else:
+        features = np.concatenate(feature_parts, axis=0)
+        targets = np.concatenate(target_parts, axis=0)
+    if return_counts:
+        return features, targets, counts
+    return features, targets
 
 
 def _gaussian_displacement_nll(torch, output, target):
@@ -99,22 +120,33 @@ def _evaluate(torch, model, loader, device):
         return None
     model.eval()
     losses = []
-    squared_errors = []
+    residual_parts = []
+    sigma_parts = []
     with torch.no_grad():
         for features, targets in loader:
             features = features.to(device)
             targets = targets.to(device)
             output = model(features)
             loss, mean = _gaussian_displacement_nll(torch, output, targets)
+            log_var = torch.clamp(output[:, 3:], min=-12.0, max=6.0)
+            sigma = torch.sqrt(torch.exp(log_var) + 1.0e-6)
             losses.append(float(loss.detach().cpu()))
-            squared_errors.append((mean - targets).pow(2).detach().cpu().numpy())
+            residual_parts.append((mean - targets).detach().cpu().numpy())
+            sigma_parts.append(sigma.detach().cpu().numpy())
     if not losses:
         return None
-    squared = np.concatenate(squared_errors, axis=0)
+    residual = np.concatenate(residual_parts, axis=0).astype(np.float64)
+    sigma = np.concatenate(sigma_parts, axis=0).astype(np.float64)
+    squared = residual**2
+    norm_squared = np.sum(squared, axis=1)
     return {
         "nll": float(np.mean(losses)),
+        # Historical scalar-coordinate RMSE, kept for selection compatibility.
         "rmse_m": float(np.sqrt(np.mean(squared))),
+        "norm_rmse_m": float(np.sqrt(np.mean(norm_squared))),
         "axis_rmse_m": np.sqrt(np.mean(squared, axis=0)).tolist(),
+        "axis_bias_m": np.mean(residual, axis=0).tolist(),
+        "predicted_sigma_mean_m": np.mean(sigma, axis=0).tolist(),
         "samples": int(squared.shape[0]),
     }
 
@@ -182,7 +214,11 @@ def main() -> None:
     missing = [str(path) for path in all_paths if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing trace files: {missing}")
-    train_x, train_y = _stack_paths(train_paths, args)
+    train_x, train_y, train_trace_counts = _stack_paths(
+        train_paths,
+        args,
+        return_counts=True,
+    )
     val_x, val_y = _stack_paths(val_paths, args)
     test_x, test_y = _stack_paths(test_paths, args)
     if train_x.shape[0] == 0:
@@ -194,13 +230,44 @@ def main() -> None:
         requested_device = "cpu"
     device = torch.device(requested_device)
 
-    def loader(features, targets, *, shuffle):
+    def loader(
+        features,
+        targets,
+        *,
+        shuffle,
+        trace_counts=None,
+        sampling="window_uniform",
+    ):
         if features.shape[0] == 0:
             return None
         dataset = torch.utils.data.TensorDataset(
             torch.from_numpy(features).float(),
             torch.from_numpy(targets).float(),
         )
+        if sampling == "trace_balanced":
+            if not trace_counts or sum(trace_counts) != len(dataset):
+                raise ValueError(
+                    "trace-balanced sampling requires per-trace counts matching "
+                    "the concatenated training dataset"
+                )
+            sample_weights = np.concatenate(
+                [
+                    np.full(count, 1.0 / max(count, 1), dtype=np.float64)
+                    for count in trace_counts
+                ]
+            )
+            sampler = torch.utils.data.WeightedRandomSampler(
+                weights=torch.from_numpy(sample_weights).double(),
+                num_samples=len(dataset),
+                replacement=True,
+            )
+            return torch.utils.data.DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                sampler=sampler,
+                shuffle=False,
+                num_workers=args.num_workers,
+            )
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=args.batch_size,
@@ -208,7 +275,13 @@ def main() -> None:
             num_workers=args.num_workers,
         )
 
-    train_loader = loader(train_x, train_y, shuffle=True)
+    train_loader = loader(
+        train_x,
+        train_y,
+        shuffle=True,
+        trace_counts=train_trace_counts,
+        sampling=args.train_sampling,
+    )
     val_loader = loader(val_x, val_y, shuffle=False)
     test_loader = loader(test_x, test_y, shuffle=False)
 
@@ -283,6 +356,11 @@ def main() -> None:
         "split_source": split_source,
         "manifest": None if manifest_path is None else str(manifest_path),
         "selection_metric": str(args.selection_metric),
+        "train_sampling": str(args.train_sampling),
+        "train_trace_window_counts": {
+            str(path): int(count)
+            for path, count in zip(train_paths, train_trace_counts)
+        },
         "seed": int(args.seed),
     }
 
@@ -343,6 +421,9 @@ def main() -> None:
         "test_windows": int(test_x.shape[0]),
         "validation": val_metrics,
         "test": test_metrics,
+        "train_by_trace": _per_trace_metrics(
+            torch, model, train_paths, args, device
+        ),
         "validation_by_trace": _per_trace_metrics(
             torch, model, val_paths, args, device
         ),
