@@ -138,6 +138,12 @@ class LearnedInertialOdometry:
 
     _CURRENT_DIM = 15
     _CLONE_DIM = 6
+    _LEARNED_KALMAN_GAIN_MODES = (
+        "full",
+        "freeze_attitude_bias",
+        "freeze_position",
+        "freeze_position_attitude_bias",
+    )
 
     def __init__(
         self,
@@ -148,15 +154,24 @@ class LearnedInertialOdometry:
         accel_bias_rw_sigma=0.001,
         gyro_bias_rw_sigma=0.0001,
         max_position_clones: int = 11,
+        learned_kalman_gain_mode: str = "full",
     ) -> None:
         if int(max_position_clones) < 1:
             raise ValueError("max_position_clones must be at least 1")
+        learned_kalman_gain_mode = str(learned_kalman_gain_mode)
+        if learned_kalman_gain_mode not in self._LEARNED_KALMAN_GAIN_MODES:
+            raise ValueError(
+                "unsupported learned_kalman_gain_mode "
+                f"{learned_kalman_gain_mode!r}; expected one of "
+                f"{self._LEARNED_KALMAN_GAIN_MODES}"
+            )
         self.gravity_w = np.asarray(gravity_w, dtype=np.float64).reshape(3)
         self.accel_noise_sigma = float(accel_noise_sigma)
         self.gyro_noise_sigma = float(gyro_noise_sigma)
         self.accel_bias_rw_sigma = float(accel_bias_rw_sigma)
         self.gyro_bias_rw_sigma = float(gyro_bias_rw_sigma)
         self.max_position_clones = int(max_position_clones)
+        self.learned_kalman_gain_mode = learned_kalman_gain_mode
         self.reset()
 
     def reset(
@@ -616,13 +631,95 @@ class LearnedInertialOdometry:
                 self._clone_position_slice(clone_index)
             ]
 
-    def _kalman_update(self, residual: np.ndarray, H: np.ndarray, Rm: np.ndarray) -> None:
+    def _constrain_kalman_gain(
+        self,
+        K: np.ndarray,
+        gain_mode: str,
+    ) -> np.ndarray:
+        """Apply diagnostic learned-update gain constraints.
+
+        These modes are intentionally restricted to learned relative-motion
+        updates. Absolute gate/pose measurements continue to use the full
+        Kalman gain. Row-zeroing is applied to the gain itself so the same
+        effective gain is used for both state injection and Joseph covariance
+        update.
+        """
+        mode = str(gain_mode)
+        if mode not in self._LEARNED_KALMAN_GAIN_MODES:
+            raise ValueError(
+                f"unsupported Kalman gain mode {mode!r}; expected one of "
+                f"{self._LEARNED_KALMAN_GAIN_MODES}"
+            )
+
+        K_eff = np.asarray(K, dtype=np.float64).copy()
+        if mode in ("freeze_attitude_bias", "freeze_position_attitude_bias"):
+            K_eff[0:3, :] = 0.0
+            K_eff[9:12, :] = 0.0
+            K_eff[12:15, :] = 0.0
+
+        if mode in ("freeze_position", "freeze_position_attitude_bias"):
+            K_eff[6:9, :] = 0.0
+            for clone_index in range(self.clone_count):
+                K_eff[self._clone_position_slice(clone_index), :] = 0.0
+
+        return K_eff
+
+    def _kalman_update(
+        self,
+        residual: np.ndarray,
+        H: np.ndarray,
+        Rm: np.ndarray,
+        *,
+        gain_mode: str = "full",
+    ) -> None:
         residual = np.asarray(residual, dtype=np.float64).reshape(-1)
         Rm = np.asarray(Rm, dtype=np.float64)
         S = H @ self.P @ H.T + Rm
         PHt = self.P @ H.T
-        K = np.linalg.solve(S.T, PHt.T).T
+        K_raw = np.linalg.solve(S.T, PHt.T).T
+        K = self._constrain_kalman_gain(K_raw, gain_mode)
         dx = K @ residual
+
+        clone_velocity_gain = (
+            np.vstack(
+                [
+                    K[self._clone_velocity_slice(i), :]
+                    for i in range(self.clone_count)
+                ]
+            )
+            if self.clone_count
+            else np.empty((0, K.shape[1]), dtype=np.float64)
+        )
+        clone_position_gain = (
+            np.vstack(
+                [
+                    K[self._clone_position_slice(i), :]
+                    for i in range(self.clone_count)
+                ]
+            )
+            if self.clone_count
+            else np.empty((0, K.shape[1]), dtype=np.float64)
+        )
+        dx_clone_velocity = (
+            np.concatenate(
+                [
+                    dx[self._clone_velocity_slice(i)]
+                    for i in range(self.clone_count)
+                ]
+            )
+            if self.clone_count
+            else np.empty((0,), dtype=np.float64)
+        )
+        dx_clone_position = (
+            np.concatenate(
+                [
+                    dx[self._clone_position_slice(i)]
+                    for i in range(self.clone_count)
+                ]
+            )
+            if self.clone_count
+            else np.empty((0,), dtype=np.float64)
+        )
 
         try:
             nis = float(residual.T @ np.linalg.solve(S, residual))
@@ -631,13 +728,30 @@ class LearnedInertialOdometry:
         self.last_update_diagnostics = {
             "innovation": residual.copy(),
             "nis": nis,
+            "kalman_gain_mode": str(gain_mode),
             "dx_theta": dx[0:3].copy(),
             "dx_velocity": dx[3:6].copy(),
             "dx_position": dx[6:9].copy(),
             "dx_accel_bias": dx[9:12].copy(),
             "dx_gyro_bias": dx[12:15].copy(),
+            "dx_clone_velocity_norm": float(np.linalg.norm(dx_clone_velocity)),
+            "dx_clone_position_norm": float(np.linalg.norm(dx_clone_position)),
+            "kalman_gain_raw_current_norm": float(
+                np.linalg.norm(K_raw[: self._CURRENT_DIM, :])
+            ),
             "kalman_gain_current_norm": float(
                 np.linalg.norm(K[: self._CURRENT_DIM, :])
+            ),
+            "kalman_gain_theta_norm": float(np.linalg.norm(K[0:3, :])),
+            "kalman_gain_velocity_norm": float(np.linalg.norm(K[3:6, :])),
+            "kalman_gain_position_norm": float(np.linalg.norm(K[6:9, :])),
+            "kalman_gain_accel_bias_norm": float(np.linalg.norm(K[9:12, :])),
+            "kalman_gain_gyro_bias_norm": float(np.linalg.norm(K[12:15, :])),
+            "kalman_gain_clone_velocity_norm": float(
+                np.linalg.norm(clone_velocity_gain)
+            ),
+            "kalman_gain_clone_position_norm": float(
+                np.linalg.norm(clone_position_gain)
             ),
             "innovation_covariance_diag": np.diag(S).copy(),
         }
@@ -688,7 +802,12 @@ class LearnedInertialOdometry:
             start_timestamp_s=self._clone_timestamps_s[clone_index],
             clone_tolerance_s=clone_tolerance_s,
         )
-        self._kalman_update(residual, H, Rm)
+        self._kalman_update(
+            residual,
+            H,
+            Rm,
+            gain_mode=self.learned_kalman_gain_mode,
+        )
 
         if marginalize_used_clone:
             self.marginalize_clone(clone_index)
@@ -731,7 +850,12 @@ class LearnedInertialOdometry:
             start_timestamp_s=clone_timestamp,
             clone_tolerance_s=clone_tolerance_s,
         )
-        self._kalman_update(innovation, H, Rm)
+        self._kalman_update(
+            innovation,
+            H,
+            Rm,
+            gain_mode=self.learned_kalman_gain_mode,
+        )
 
         if marginalize_used_clone:
             self.marginalize_clone(clone_index)
@@ -776,7 +900,12 @@ class LearnedInertialOdometry:
             start_timestamp_s=clone_timestamp,
             clone_tolerance_s=clone_tolerance_s,
         )
-        self._kalman_update(innovation, H, Rm)
+        self._kalman_update(
+            innovation,
+            H,
+            Rm,
+            gain_mode=self.learned_kalman_gain_mode,
+        )
 
         if marginalize_used_clone:
             self.marginalize_clone(clone_index)
@@ -821,7 +950,12 @@ class LearnedInertialOdometry:
             start_timestamp_s=clone_timestamp,
             clone_tolerance_s=clone_tolerance_s,
         )
-        self._kalman_update(innovation, H, Rm)
+        self._kalman_update(
+            innovation,
+            H,
+            Rm,
+            gain_mode=self.learned_kalman_gain_mode,
+        )
 
         if marginalize_used_clone:
             self.marginalize_clone(clone_index)
