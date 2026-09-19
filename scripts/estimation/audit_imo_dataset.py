@@ -44,15 +44,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-def _metrics(path: Path) -> dict:
-    windows = load_trace_windows(
-        path,
-        window_time_s=args.window_time_s,
-        sample_rate_hz=args.sample_rate_hz,
-        stride_time_s=args.stride_time_s,
-        target_mode=args.target_mode,
-    )
-    target = windows.targets.astype(np.float64)
+def _metrics_from_target(path: Path, target: np.ndarray) -> dict:
+    target = np.asarray(target, dtype=np.float64)
     norm = np.linalg.norm(target, axis=1)
     return {
         "path": str(path),
@@ -67,23 +60,13 @@ def _metrics(path: Path) -> dict:
     }
 
 
-def _aggregate(items: list[dict], paths: list[Path]) -> dict:
-    targets = []
-    for path in paths:
-        windows = load_trace_windows(
-            path,
-            window_time_s=args.window_time_s,
-            sample_rate_hz=args.sample_rate_hz,
-            stride_time_s=args.stride_time_s,
-            target_mode=args.target_mode,
-        )
-        targets.append(windows.targets.astype(np.float64))
+def _aggregate_targets(targets: list[np.ndarray], trace_count: int) -> dict:
     if not targets:
         return {"traces": 0, "windows": 0}
     target = np.concatenate(targets, axis=0)
     norm = np.linalg.norm(target, axis=1)
     return {
-        "traces": len(paths),
+        "traces": int(trace_count),
         "windows": int(len(target)),
         "axis_mean_m": np.mean(target, axis=0).tolist(),
         "axis_std_m": np.std(target, axis=0).tolist(),
@@ -121,21 +104,45 @@ def main() -> None:
         "splits": {},
     }
 
+    total_traces = sum(len(paths) for paths in split_paths.values())
+    completed = 0
     for split, paths in split_paths.items():
-        per_trace = [_metrics(path) for path in paths]
+        print(
+            f"[IMO audit] starting {split} split ({len(paths)} traces)",
+            flush=True,
+        )
+        per_trace = []
+        target_parts = []
+        for split_index, path in enumerate(paths, start=1):
+            completed += 1
+            print(
+                f"[IMO audit] [{completed:02d}/{total_traces:02d}] "
+                f"{split} {split_index:02d}/{len(paths):02d} "
+                f"{path.name}",
+                flush=True,
+            )
+            windows = load_trace_windows(
+                path,
+                window_time_s=args.window_time_s,
+                sample_rate_hz=args.sample_rate_hz,
+                stride_time_s=args.stride_time_s,
+                target_mode=args.target_mode,
+            )
+            target = windows.targets.astype(np.float64)
+            target_parts.append(target)
+            per_trace.append(_metrics_from_target(path, target))
+
+        aggregate = _aggregate_targets(target_parts, len(paths))
         report["splits"][split] = {
-            "aggregate": _aggregate(per_trace, paths),
+            "aggregate": aggregate,
             "traces": per_trace,
         }
-
-    for split in ("train", "val", "test"):
-        agg = report["splits"][split]["aggregate"]
         print(
-            f"[IMO audit] {split:5s} traces={agg['traces']:2d} "
-            f"windows={agg['windows']:6d} "
-            f"abs_p95_xyz={agg.get('axis_abs_p95_m')} "
-            f"abs_max_xyz={agg.get('axis_abs_max_m')} "
-            f"norm_p95={agg.get('norm_p95_m')}",
+            f"[IMO audit] {split:5s} traces={aggregate['traces']:2d} "
+            f"windows={aggregate['windows']:6d} "
+            f"abs_p95_xyz={aggregate.get('axis_abs_p95_m')} "
+            f"abs_max_xyz={aggregate.get('axis_abs_max_m')} "
+            f"norm_p95={aggregate.get('norm_p95_m')}",
             flush=True,
         )
 
