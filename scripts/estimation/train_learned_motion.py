@@ -77,11 +77,24 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _stack_paths(paths, args, *, return_counts: bool = False):
+def _stack_paths(
+    paths,
+    args,
+    *,
+    return_counts: bool = False,
+    progress_label: str | None = None,
+):
     feature_parts = []
     target_parts = []
     counts = []
-    for path in paths:
+    paths = list(paths)
+    for index, path in enumerate(paths, start=1):
+        if progress_label is not None:
+            print(
+                f"[learned-motion] preprocessing {progress_label} "
+                f"{index:02d}/{len(paths):02d} {Path(path).name}",
+                flush=True,
+            )
         windows = load_trace_windows(
             path,
             window_time_s=args.window_time_s,
@@ -227,13 +240,33 @@ def main() -> None:
     missing = [str(path) for path in all_paths if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing trace files: {missing}")
+    print(
+        "[learned-motion] building fixed windows before training "
+        f"(window={args.window_time_s:.3f}s, stride={args.stride_time_s:.3f}s)",
+        flush=True,
+    )
     train_x, train_y, train_trace_counts = _stack_paths(
         train_paths,
         args,
         return_counts=True,
+        progress_label="train",
     )
-    val_x, val_y = _stack_paths(val_paths, args)
-    test_x, test_y = _stack_paths(test_paths, args)
+    val_x, val_y = _stack_paths(
+        val_paths,
+        args,
+        progress_label="val",
+    )
+    test_x, test_y = _stack_paths(
+        test_paths,
+        args,
+        progress_label="test",
+    )
+    print(
+        "[learned-motion] preprocessing complete "
+        f"train={train_x.shape[0]} val={val_x.shape[0]} "
+        f"test={test_x.shape[0]} windows",
+        flush=True,
+    )
     if train_x.shape[0] == 0:
         raise ValueError("No training windows were produced")
 
