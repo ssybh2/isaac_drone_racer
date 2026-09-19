@@ -398,15 +398,25 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             return
 
         # The control loop is 100 Hz and learned updates are 20 Hz by default.
+        # Record whether an endpoint clone is due, but defer the actual clone
+        # augmentation until after any learned update at this same timestamp.
+        #
+        # This ordering matters for constrained/Schmidt-style gain modes that
+        # freeze clone rows while correcting the current velocity/position. If
+        # the endpoint were cloned before the update, the clone would retain
+        # the pre-update nominal state and feed the previous correction back as
+        # a spurious innovation when it becomes a future window start.
+        clone_due_now = False
         if now + 1.0e-9 >= self._next_clone_s:
-            if abs(now - self._next_clone_s) <= timing_tolerance_s:
-                self._lio.clone_current_position()
-            else:
+            clone_due_now = abs(now - self._next_clone_s) <= timing_tolerance_s
+            if not clone_due_now:
                 # Never label a current state with a historical clone timestamp.
                 self._learned_update_skip_count += 1
             self._next_clone_s += update_period_s
 
         if now + 1.0e-9 < self._next_learned_update_s:
+            if clone_due_now:
+                self._lio.clone_current_position()
             return
 
         scheduled_end_s = float(self._next_learned_update_s)
@@ -419,6 +429,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
             self._motion_buffer.discard_before(start_s)
+            if clone_due_now:
+                self._lio.clone_current_position()
             return
 
         try:
@@ -427,6 +439,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
             self._motion_buffer.discard_before(start_s)
+            if clone_due_now:
+                self._lio.clone_current_position()
             return
 
         prediction = self._motion_predictor.predict(window)
@@ -592,7 +606,16 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
             self._motion_buffer.discard_before(start_s)
+            if clone_due_now:
+                self._lio.clone_current_position()
             return
+
+        # Clone the endpoint only after the learned update has finished. This
+        # captures the corrected current nominal state and augments covariance
+        # from the corrected P, preventing a frozen pre-update endpoint clone
+        # from echoing this correction into the next relative-motion window.
+        if clone_due_now:
+            self._lio.clone_current_position()
 
         self._learned_update_count += 1
         self._last_learned_innovation_w = np.asarray(innovation, dtype=np.float64).copy()
