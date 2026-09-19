@@ -106,6 +106,19 @@ def _stack_paths(paths, args, *, return_counts: bool = False):
     return features, targets
 
 
+def trace_balanced_sample_weights(trace_counts) -> np.ndarray:
+    """Return per-window weights with equal total probability mass per trace."""
+    counts = np.asarray(trace_counts, dtype=np.int64).reshape(-1)
+    if counts.size == 0 or np.any(counts <= 0):
+        raise ValueError("trace_counts must contain positive window counts")
+    return np.concatenate(
+        [
+            np.full(int(count), 1.0 / float(count), dtype=np.float64)
+            for count in counts
+        ]
+    )
+
+
 def _gaussian_displacement_nll(torch, output, target):
     mean = output[:, :3]
     log_var = torch.clamp(output[:, 3:], min=-12.0, max=6.0)
@@ -250,12 +263,7 @@ def main() -> None:
                     "trace-balanced sampling requires per-trace counts matching "
                     "the concatenated training dataset"
                 )
-            sample_weights = np.concatenate(
-                [
-                    np.full(count, 1.0 / max(count, 1), dtype=np.float64)
-                    for count in trace_counts
-                ]
-            )
+            sample_weights = trace_balanced_sample_weights(trace_counts)
             sampler = torch.utils.data.WeightedRandomSampler(
                 weights=torch.from_numpy(sample_weights).double(),
                 num_samples=len(dataset),
