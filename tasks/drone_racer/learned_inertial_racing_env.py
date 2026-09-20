@@ -1037,6 +1037,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             ),
             "stress_corner_drop_count": 0,
             "stress_latency_s": float(self.cfg.gate_stress_latency_s),
+            "latency_compensation_enabled": bool(
+                self.cfg.gate_reprojection_compensate_latency
+            ),
+            "latency_compensation_used": False,
+            "capture_clone_timestamp_s": None,
         }
 
         try:
@@ -1140,6 +1145,24 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     timestamp_s=now,
                     source=f"{observation.source}+v6.5_stress",
                 )
+
+                latency_s = float(self.cfg.gate_stress_latency_s)
+                if (
+                    latency_s > 0.0
+                    and bool(self.cfg.gate_reprojection_compensate_latency)
+                ):
+                    timestamps = self._lio.clone_timestamps_s
+                    tolerance = float(
+                        self.cfg.gate_reprojection_latency_clone_tolerance_s
+                    )
+                    if (
+                        not timestamps
+                        or abs(float(timestamps[-1]) - now) > tolerance
+                    ):
+                        self._lio.clone_current_position()
+                    capture_diagnostic["latency_compensation_used"] = True
+                    capture_diagnostic["capture_clone_timestamp_s"] = now
+
                 self._gate_observation_queue.append(
                     (now, stressed_observation, capture_diagnostic)
                 )
@@ -1184,16 +1207,33 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             )
             points_w = np.asarray(all_points_w, dtype=np.float64)[visible_indices]
             try:
-                predicted_uv, _ = self._lio.predict_gate_corner_reprojection(
-                    points_w,
-                    K,
-                    R_bc,
-                    t_bc,
-                    min_depth_m=float(
-                        self.cfg.gate_reprojection_min_depth_m
-                    ),
-                )
-            except ValueError:
+                if bool(diagnostic.get("latency_compensation_used", False)):
+                    predicted_uv, _ = (
+                        self._lio.predict_gate_corner_reprojection_at_clone(
+                            points_w,
+                            K,
+                            R_bc,
+                            t_bc,
+                            clone_timestamp_s=float(capture_time_s),
+                            clone_tolerance_s=float(
+                                self.cfg.gate_reprojection_latency_clone_tolerance_s
+                            ),
+                            min_depth_m=float(
+                                self.cfg.gate_reprojection_min_depth_m
+                            ),
+                        )
+                    )
+                else:
+                    predicted_uv, _ = self._lio.predict_gate_corner_reprojection(
+                        points_w,
+                        K,
+                        R_bc,
+                        t_bc,
+                        min_depth_m=float(
+                            self.cfg.gate_reprojection_min_depth_m
+                        ),
+                    )
+            except (KeyError, ValueError, RuntimeError):
                 continue
             residual = observed_uv - predicted_uv
             score = float(
@@ -1274,8 +1314,16 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         self.cfg.gate_reprojection_max_normalized_nis
                     )
                 ),
+                clone_timestamp_s=(
+                    float(capture_time_s)
+                    if bool(diagnostic.get("latency_compensation_used", False))
+                    else None
+                ),
+                clone_tolerance_s=float(
+                    self.cfg.gate_reprojection_latency_clone_tolerance_s
+                ),
             )
-        except ValueError as exc:
+        except (KeyError, ValueError, RuntimeError) as exc:
             self._gate_reject_count += 1
             message = str(exc)
             diagnostic["reject_stage"] = "reprojection_update"
