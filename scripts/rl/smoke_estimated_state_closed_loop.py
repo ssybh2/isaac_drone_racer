@@ -250,15 +250,16 @@ def main() -> None:
 
         total_steps = int(np.ceil(float(args_cli.duration_s) / raw_env.step_dt))
 
+        last_nonreset_target_gate_index = int(command.next_gate_idx[0].item())
+        last_pre_step_truth_diag = None
+
         for step in range(total_steps):
-            with torch.inference_mode():
-                action, last_control = _controller_action(raw_env)
-                _, _, terminated, truncated, _ = env.step(action)
-
-            mission_passes += int(command.mission_gate_passed[0].item())
-            truth_passes += int(command.gate_passed[0].item())
-
+            # Capture estimator-vs-truth diagnostics before env.step(). IsaacLab
+            # auto-resets terminated environments inside step(), so reading GT
+            # afterwards would compare a reset state and can manufacture a huge
+            # false estimation error.
             truth_diag = _diagnostic_truth_error(raw_env)
+            last_pre_step_truth_diag = truth_diag
             maximum_position_error = max(
                 maximum_position_error,
                 truth_diag["position_error_m"],
@@ -268,21 +269,39 @@ def main() -> None:
                 truth_diag["velocity_error_mps"],
             )
 
-            if step == 0 or (step + 1) % int(args_cli.progress_every) == 0:
-                print(
-                    "[estimated-state-smoke] "
-                    f"step={step + 1}/{total_steps} "
-                    f"gate={int(command.next_gate_idx[0].item())} "
-                    f"mission_passes={mission_passes} "
-                    f"truth_passes={truth_passes} "
-                    f"p_err={truth_diag['position_error_m']:.3f}m "
-                    f"v_err={truth_diag['velocity_error_mps']:.3f}m/s",
-                    flush=True,
+            with torch.inference_mode():
+                action, last_control = _controller_action(raw_env)
+                last_nonreset_target_gate_index = int(
+                    last_control["target_gate_index"]
                 )
+                _, _, terminated, truncated, _ = env.step(action)
 
             done = bool(terminated.reshape(-1)[0].item()) or bool(
                 truncated.reshape(-1)[0].item()
             )
+
+            # The command flags are valid after ordinary steps. On a terminating
+            # step they may already have been reset by the environment, so do
+            # not interpret reset values as one more mission update.
+            if not done:
+                mission_passes += int(command.mission_gate_passed[0].item())
+                truth_passes += int(command.gate_passed[0].item())
+
+            if step == 0 or (step + 1) % int(args_cli.progress_every) == 0:
+                print(
+                    "[estimated-state-smoke] "
+                    f"step={step + 1}/{total_steps} "
+                    f"gate={last_nonreset_target_gate_index} "
+                    f"mission_passes={mission_passes} "
+                    f"truth_passes={truth_passes} "
+                    f"p_err={truth_diag['position_error_m']:.3f}m "
+                    f"v_err={truth_diag['velocity_error_mps']:.3f}m/s "
+                    f"gate_updates={int(raw_env._gate_update_count)} "
+                    f"gate_rejects={int(raw_env._gate_reject_count)} "
+                    f"learned_fusions={int(raw_env._learned_fusion_count)}",
+                    flush=True,
+                )
+
             if done:
                 terminated_early = True
                 termination_step = step + 1
@@ -297,10 +316,14 @@ def main() -> None:
             "step_dt_s": float(raw_env.step_dt),
             "mission_gate_passes": int(mission_passes),
             "truth_gate_passes": int(truth_passes),
-            "final_target_gate_index": int(command.next_gate_idx[0].item()),
+            "final_target_gate_index": int(last_nonreset_target_gate_index),
             "maximum_position_error_m": float(maximum_position_error),
             "maximum_velocity_error_mps": float(maximum_velocity_error),
+            "last_pre_step_truth_diagnostic": last_pre_step_truth_diag,
             "terminated_early": bool(terminated_early),
+            "gate_updates_current_episode": int(raw_env._gate_update_count),
+            "gate_rejects_current_episode": int(raw_env._gate_reject_count),
+            "learned_fusions_current_episode": int(raw_env._learned_fusion_count),
             "last_control": last_control,
             "controller_uses_simulator_root_state": False,
             "mission_progression_uses_simulator_root_state": False,
