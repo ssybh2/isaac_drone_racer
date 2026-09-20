@@ -640,6 +640,59 @@ class LearnedInertialOdometry:
         H[:, self._clone_position_slice(end_index)] = np.eye(3)
         return H
 
+    def predicted_clone_relative_displacement_body_end(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Return full relative displacement expressed in the endpoint body frame.
+
+        h(x) = R_j^T (p_j - p_i)
+
+        Unlike the V6.1 kinematic-residual target, this factor contains no
+        start-velocity subtraction. It preserves the body-frame/gauge-invariant
+        representation while retaining the UZH two-position stochastic-clone
+        structure.
+        """
+        start_index, end_index, _ = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        displacement_w = (
+            self._clone_positions[end_index]
+            - self._clone_positions[start_index]
+        )
+        return self._clone_orientations[end_index].T @ displacement_w
+
+    def clone_relative_displacement_body_end_jacobian(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, _ = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        R_end = self._clone_orientations[end_index]
+        displacement_w = (
+            self._clone_positions[end_index]
+            - self._clone_positions[start_index]
+        )
+        predicted_b = R_end.T @ displacement_w
+        Rt = R_end.T
+
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, self._clone_orientation_slice(end_index)] = _skew(predicted_b)
+        H[:, self._clone_position_slice(start_index)] = -Rt
+        H[:, self._clone_position_slice(end_index)] = Rt
+        return H
+
     def predicted_clone_kinematic_residual(
         self,
         *,
@@ -1406,6 +1459,37 @@ class LearnedInertialOdometry:
             clone_tolerance_s=clone_tolerance_s,
             marginalize_start_clone=marginalize_start_clone,
             covariance_label="learned clone displacement",
+        )
+
+    def update_learned_clone_displacement_body_end(
+        self,
+        displacement_b_end,
+        covariance_b_end,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_start_clone: bool = True,
+    ) -> np.ndarray:
+        predicted = self.predicted_clone_relative_displacement_body_end(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = self.clone_relative_displacement_body_end_jacobian(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return self._apply_two_clone_update(
+            displacement_b_end,
+            covariance_b_end,
+            predicted=predicted,
+            H=H,
+            start_timestamp_s=start_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+            marginalize_start_clone=marginalize_start_clone,
+            covariance_label="learned clone endpoint-body displacement",
         )
 
     def update_learned_clone_kinematic_residual(
