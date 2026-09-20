@@ -51,10 +51,10 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     learned_motion_device: str = "cuda"
     learned_window_time_s: float = 0.5
     learned_sample_rate_hz: float = 100.0
-    # Overlapping learned-motion updates: a 0.5 s history window is evaluated
-    # every 0.05 s. The fixed-lag bank now clones both velocity and position so
-    # residual checkpoints can fuse (p_t-p_s)-v_s*dt without treating the EKF
-    # start velocity as an independent external measurement.
+    # Overlapping learned-motion predictions: a 0.5 s history window is
+    # evaluated every 0.05 s. V6.2 stores UZH-style stochastic [R, v, p]
+    # clones. Each learned factor is formed between a historical start clone
+    # and a cloned endpoint; the full Kalman gain updates the correlated state.
     learned_update_rate_hz: float = 20.0
     # Optional lower EKF fusion rate while keeping the TCN evaluated at
     # learned_update_rate_hz. For a 0.5 s window, 2 Hz gives non-overlapping
@@ -80,9 +80,12 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # Diagnostic-only learned relative-motion Kalman-gain constraint. "full"
     # preserves the production path. The freeze modes zero selected gain rows
     # before both state injection and Joseph covariance update, allowing us to
-    # isolate gauge/cross-covariance driven instability without changing the
-    # learned measurement itself. Absolute gate pose updates always use full.
+    # isolate legacy current-vs-clone gain behavior. V6.2's UZH-style
+    # two-clone learned factor deliberately bypasses these masks and always
+    # uses the full covariance-consistent Kalman gain. Absolute gate pose
+    # updates also use the full gain.
     learned_kalman_gain_mode: str = "full"
+    learned_filter_structure: str = "uzh_two_clone_full"
     # Evaluation/debug switch: still run the 20 Hz network and clone schedule
     # but do not inject its displacement into the EKF. This enables shadow-mode
     # measurement diagnostics without changing the deployed input contract.
