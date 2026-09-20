@@ -474,9 +474,17 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             return
 
         prediction = self._motion_predictor.predict(window)
+        target_mode = str(
+            getattr(self._motion_predictor, "target_mode", "displacement")
+        )
+        sigma_floor = (
+            self.cfg.learned_delta_velocity_sigma_floor_xyz_mps
+            if target_mode == "delta_velocity_gravity_compensated"
+            else self.cfg.learned_sigma_floor_xyz_m
+        )
         protected_covariance = protected_displacement_covariance(
             prediction.covariance_w,
-            sigma_floor_xyz_m=self.cfg.learned_sigma_floor_xyz_m,
+            sigma_floor_xyz_m=sigma_floor,
             covariance_scale=self.cfg.learned_covariance_scale,
         )
         covariance_multiplier = float(
@@ -494,9 +502,6 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     "learned_debug_oracle_delta_velocity_sigma_mps must be positive and finite"
                 )
             protected_covariance = np.eye(3, dtype=np.float64) * sigma_v * sigma_v
-        target_mode = str(
-            getattr(self._motion_predictor, "target_mode", "displacement")
-        )
         if bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion):
             fusion_target_mode = "displacement"
         elif bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion):
@@ -574,16 +579,20 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             measurement_w = np.asarray(
                 prediction.displacement_w, dtype=np.float64
             ).copy()
-            network_bias_m = np.asarray(
-                self.cfg.learned_network_bias_m,
+            network_bias = np.asarray(
+                (
+                    self.cfg.learned_delta_velocity_network_bias_mps
+                    if target_mode == "delta_velocity_gravity_compensated"
+                    else self.cfg.learned_network_bias_m
+                ),
                 dtype=np.float64,
             ).reshape(3)
-            if not np.all(np.isfinite(network_bias_m)):
-                raise ValueError("learned_network_bias_m must be finite")
-            measurement_w = measurement_w - network_bias_m
+            if not np.all(np.isfinite(network_bias)):
+                raise ValueError("learned network bias must be finite")
+            measurement_w = measurement_w - network_bias
             measurement_source = (
                 "network_bias_calibrated"
-                if np.any(np.abs(network_bias_m) > 0.0)
+                if np.any(np.abs(network_bias) > 0.0)
                 else "network"
             )
             if bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion):
