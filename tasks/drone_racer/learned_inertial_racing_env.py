@@ -155,11 +155,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             bool(cfg.learned_debug_oracle_residual_fusion),
             bool(cfg.learned_debug_oracle_uzh_displacement_fusion),
             bool(cfg.learned_debug_oracle_body_end_displacement_fusion),
+            bool(cfg.learned_debug_oracle_second_difference_fusion),
         )
         if sum(int(v) for v in oracle_modes) > 1:
             raise ValueError(
                 "choose only one Oracle fusion mode: kinematic residual, "
-                "exact UZH relative displacement, or endpoint-body displacement"
+                "exact UZH relative displacement, endpoint-body displacement, "
+                "or three-clone second difference"
             )
 
         self._lio = LearnedInertialOdometry(
@@ -398,6 +400,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             bool(self.cfg.learned_debug_oracle_residual_fusion)
             or bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion)
             or bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion)
+            or bool(self.cfg.learned_debug_oracle_second_difference_fusion)
         ):
             robot = self.scene["robot"]
             key = round(float(timestamp_s), 9)
@@ -489,6 +492,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             fusion_target_mode = "displacement"
         elif bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion):
             fusion_target_mode = "displacement_body_end"
+        elif bool(self.cfg.learned_debug_oracle_second_difference_fusion):
+            fusion_target_mode = "second_difference_gravity_compensated"
         else:
             fusion_target_mode = target_mode
         try:
@@ -528,6 +533,16 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 predicted_rel = (
                     self._lio.predicted_clone_relative_displacement_body_end(
                         start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                    )
+                )
+            elif fusion_target_mode == "second_difference_gravity_compensated":
+                middle_s = 0.5 * (start_s + scheduled_end_s)
+                predicted_rel = (
+                    self._lio.predicted_clone_second_difference_gravity_compensated(
+                        start_timestamp_s=start_s,
+                        middle_timestamp_s=middle_s,
                         end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
                     )
@@ -585,6 +600,31 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 )
                 measurement_w = R_end_gt.T @ (p_end_gt - p_start_gt)
                 measurement_source = "oracle_body_end_relative_displacement"
+
+            if bool(self.cfg.learned_debug_oracle_second_difference_fusion):
+                start_key = round(float(start_s), 9)
+                middle_s = 0.5 * (start_s + scheduled_end_s)
+                middle_key = round(float(middle_s), 9)
+                end_key = round(float(scheduled_end_s), 9)
+                if (
+                    start_key not in self._debug_truth_motion_history
+                    or middle_key not in self._debug_truth_motion_history
+                    or end_key not in self._debug_truth_motion_history
+                ):
+                    raise RuntimeError(
+                        "second-difference Oracle is missing GT history for window"
+                    )
+                p_start_gt, _ = self._debug_truth_motion_history[start_key]
+                p_middle_gt, _ = self._debug_truth_motion_history[middle_key]
+                p_end_gt, _ = self._debug_truth_motion_history[end_key]
+                half_dt = float(scheduled_end_s - middle_s)
+                measurement_w = (
+                    p_end_gt
+                    - 2.0 * p_middle_gt
+                    + p_start_gt
+                    - self._lio.gravity_w * half_dt * half_dt
+                )
+                measurement_source = "oracle_second_difference_gravity_compensated"
 
             if bool(self.cfg.learned_debug_oracle_residual_fusion):
                 if target_mode not in (
@@ -676,6 +716,17 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                        marginalize_start_clone=True,
+                    )
+                elif fusion_target_mode == "second_difference_gravity_compensated":
+                    middle_s = 0.5 * (start_s + scheduled_end_s)
+                    self._lio.update_learned_clone_second_difference_gravity_compensated(
+                        measurement_w,
+                        protected_covariance,
+                        start_timestamp_s=start_s,
+                        middle_timestamp_s=middle_s,
                         end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_start_clone=True,
