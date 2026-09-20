@@ -122,6 +122,15 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--oracle-uzh-displacement-fusion",
+    action="store_true",
+    help=(
+        "Diagnostic only: keep running the checkpoint for shadow metrics, but "
+        "fuse exact GT p_end-p_start through the pure UZH two-clone relative "
+        "position factor H=[-I,+I]."
+    ),
+)
+parser.add_argument(
     "--truth-orientation-for-tcn-features",
     action="store_true",
     help=(
@@ -378,6 +387,17 @@ def _prepare_cfg():
     cfg.learned_debug_oracle_residual_fusion = bool(
         args_cli.oracle_learned_residual_fusion
     )
+    cfg.learned_debug_oracle_uzh_displacement_fusion = bool(
+        args_cli.oracle_uzh_displacement_fusion
+    )
+    if (
+        cfg.learned_debug_oracle_residual_fusion
+        and cfg.learned_debug_oracle_uzh_displacement_fusion
+    ):
+        raise ValueError(
+            "--oracle-learned-residual-fusion and "
+            "--oracle-uzh-displacement-fusion are mutually exclusive"
+        )
     cfg.learned_debug_truth_orientation_for_features = bool(
         args_cli.truth_orientation_for_tcn_features
     )
@@ -1080,6 +1100,9 @@ def main() -> None:
             ),
             "oracle_learned_residual_fusion": bool(
                 cfg.learned_debug_oracle_residual_fusion
+            ),
+            "oracle_uzh_displacement_fusion": bool(
+                cfg.learned_debug_oracle_uzh_displacement_fusion
             ),
             "last_learned_measurement_source": (
                 raw_env._last_learned_measurement_source
