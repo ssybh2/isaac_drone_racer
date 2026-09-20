@@ -31,6 +31,7 @@ jobs:
           python -m py_compile scripts/estimation/evaluate_learned_inertial_mode.py
           python -m py_compile scripts/rl/smoke_estimated_state_closed_loop.py
           python -m py_compile scripts/rl/train.py
+          python -m py_compile scripts/rl/play.py
           python -m py_compile scripts/estimation/diagnose_learned_inertial.py
           python -m py_compile scripts/estimation/sweep_learned_update_rate.py
           python -m py_compile scripts/estimation/sweep_learned_covariance_multiplier.py
