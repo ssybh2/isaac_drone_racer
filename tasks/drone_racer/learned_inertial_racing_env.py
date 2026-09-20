@@ -931,7 +931,273 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         now = self._timestamp_s()
         return now - self._last_camera_timestamp_s >= (1.0 / 30.0) - 1.0e-9
 
+    def _maybe_gate_reprojection_update(self) -> None:
+        """Fuse 2-D gate corners directly against the known 3-D gate map.
+
+        V6.4 deliberately does not call IPPE/PnP on this path. Gate identity is
+        selected by projecting every mapped gate through the current inertial
+        state and choosing the smallest semantic-corner pixel residual.
+        """
+        if (
+            self.swift_detector is None
+            or self._gate_geometry is None
+            or self._gate_camera_calibration is None
+            or self._gate_T_bc is None
+            or self._gate_track_layout is None
+            or not self._camera_due()
+        ):
+            return
+
+        self._last_camera_timestamp_s = self._timestamp_s()
+        self._gate_attempt_count += 1
+        diagnostic: dict[str, object] = {
+            "attempt_index": int(self._gate_attempt_count),
+            "timestamp_s": float(self._timestamp_s()),
+            "measurement_model": "direct_reprojection",
+            "accepted": False,
+            "reject_stage": None,
+            "reject_reason": None,
+            "expected_active_gate_index": None,
+            "selected_gate_index": None,
+            "association_matches_active_gate": None,
+            "visible_corner_count": 0,
+            "visible_corner_indices": None,
+            "association_pixel_rmse_px": None,
+            "association_second_best_rmse_px": None,
+            "pixel_residual_rmse_px": None,
+            "pixel_residual_radial_rmse_px": None,
+            "pixel_sigma_px": float(self.cfg.gate_reprojection_sigma_px),
+            "huber_weights": None,
+            "corner_normalized_innovation": None,
+            "normalized_nis": None,
+            "pre_update_position_error_norm_m": None,
+            "post_update_position_error_norm_m": None,
+            "pre_update_orientation_error_deg": None,
+            "post_update_orientation_error_deg": None,
+            "exception_type": None,
+            "exception_message": None,
+        }
+
+        try:
+            from perception.swift_isaac_adapter import active_gate_index_from_isaac
+
+            diagnostic["expected_active_gate_index"] = int(
+                active_gate_index_from_isaac(self, env_id=0)
+            )
+        except (AttributeError, KeyError, RuntimeError, ValueError):
+            pass
+
+        camera = self.scene["tiled_camera"]
+        rgb = _np(camera.data.output["rgb"][0])[..., :3]
+        if rgb.dtype != np.uint8:
+            scale = (
+                255.0
+                if np.issubdtype(rgb.dtype, np.floating)
+                and float(np.nanmax(rgb)) <= 1.0 + 1e-6
+                else 1.0
+            )
+            rgb = np.clip(rgb * scale, 0.0, 255.0).astype(np.uint8)
+
+        try:
+            observation = self.swift_detector.detect(
+                np.ascontiguousarray(rgb),
+                timestamp_s=self._timestamp_s(),
+            )
+        except (ValueError, RuntimeError) as exc:
+            self._gate_reject_count += 1
+            diagnostic["reject_stage"] = "detector"
+            diagnostic["reject_reason"] = "detector_exception"
+            diagnostic["exception_type"] = type(exc).__name__
+            diagnostic["exception_message"] = str(exc)
+            self._gate_diagnostics.append(diagnostic)
+            return
+
+        visible_indices = np.flatnonzero(
+            np.asarray(observation.visible, dtype=bool).reshape(4)
+        )
+        diagnostic["visible_corner_count"] = int(len(visible_indices))
+        diagnostic["visible_corner_indices"] = visible_indices.tolist()
+        min_visible = int(self.cfg.gate_reprojection_min_visible_corners)
+        if len(visible_indices) < min_visible:
+            self._gate_reject_count += 1
+            diagnostic["reject_stage"] = "visibility"
+            diagnostic["reject_reason"] = "insufficient_visible_corners"
+            self._gate_diagnostics.append(diagnostic)
+            return
+
+        observed_uv = np.asarray(
+            observation.corners_uv, dtype=np.float64
+        )[visible_indices]
+        K = np.asarray(
+            self._gate_camera_calibration.K, dtype=np.float64
+        ).reshape(3, 3)
+        R_bc = np.asarray(self._gate_T_bc.R, dtype=np.float64).reshape(3, 3)
+        t_bc = np.asarray(self._gate_T_bc.t, dtype=np.float64).reshape(3)
+
+        candidates: list[tuple[float, int, np.ndarray]] = []
+        for gate_index in range(self._gate_track_layout.num_gates):
+            T_wg = self._gate_track_layout.gate_pose(gate_index)
+            all_points_w = T_wg.transform_points(
+                self._gate_geometry.object_points_g
+            )
+            points_w = np.asarray(all_points_w, dtype=np.float64)[visible_indices]
+            try:
+                predicted_uv, _ = self._lio.predict_gate_corner_reprojection(
+                    points_w,
+                    K,
+                    R_bc,
+                    t_bc,
+                    min_depth_m=float(
+                        self.cfg.gate_reprojection_min_depth_m
+                    ),
+                )
+            except ValueError:
+                continue
+            residual = observed_uv - predicted_uv
+            score = float(
+                np.sqrt(
+                    np.mean(np.sum(residual * residual, axis=1))
+                )
+            )
+            if np.isfinite(score):
+                candidates.append((score, gate_index, points_w))
+
+        if not candidates:
+            self._gate_reject_count += 1
+            diagnostic["reject_stage"] = "association"
+            diagnostic["reject_reason"] = "no_projectable_mapped_gate"
+            self._gate_diagnostics.append(diagnostic)
+            return
+
+        candidates.sort(key=lambda item: item[0])
+        association_rmse, gate_index, points_w = candidates[0]
+        diagnostic["association_pixel_rmse_px"] = association_rmse
+        diagnostic["association_second_best_rmse_px"] = (
+            None if len(candidates) < 2 else float(candidates[1][0])
+        )
+        diagnostic["selected_gate_index"] = int(gate_index)
+        expected_gate = diagnostic["expected_active_gate_index"]
+        if expected_gate is not None:
+            diagnostic["association_matches_active_gate"] = bool(
+                int(gate_index) == int(expected_gate)
+            )
+
+        if association_rmse > float(
+            self.cfg.gate_reprojection_association_max_rmse_px
+        ):
+            self._gate_reject_count += 1
+            diagnostic["reject_stage"] = "association"
+            diagnostic["reject_reason"] = "pixel_association_gate"
+            self._gate_diagnostics.append(diagnostic)
+            return
+
+        gt_position = None
+        gt_R = None
+        if bool(self.cfg.gate_debug_gt_diagnostics):
+            robot = self.scene["robot"]
+            gt_position = _np(robot.data.root_pos_w[0]).astype(np.float64).copy()
+            gt_quat = _np(robot.data.root_quat_w[0]).astype(np.float64).copy()
+            gt_R = quat_wxyz_to_rotmat(gt_quat)
+            diagnostic["pre_update_position_error_norm_m"] = float(
+                np.linalg.norm(self._lio.p - gt_position)
+            )
+            relative_R = self._lio.R @ gt_R.T
+            cosine = float(
+                np.clip((np.trace(relative_R) - 1.0) * 0.5, -1.0, 1.0)
+            )
+            diagnostic["pre_update_orientation_error_deg"] = float(
+                np.degrees(np.arccos(cosine))
+            )
+
+        try:
+            residual_matrix = self._lio.update_gate_corner_reprojection(
+                observed_uv,
+                points_w,
+                K,
+                R_bc,
+                t_bc,
+                pixel_sigma_px=float(
+                    self.cfg.gate_reprojection_sigma_px
+                ),
+                huber_delta_sigma=float(
+                    self.cfg.gate_reprojection_huber_delta_sigma
+                ),
+                min_depth_m=float(
+                    self.cfg.gate_reprojection_min_depth_m
+                ),
+                max_normalized_nis=(
+                    None
+                    if self.cfg.gate_reprojection_max_normalized_nis is None
+                    else float(
+                        self.cfg.gate_reprojection_max_normalized_nis
+                    )
+                ),
+            )
+        except ValueError as exc:
+            self._gate_reject_count += 1
+            message = str(exc)
+            diagnostic["reject_stage"] = "reprojection_update"
+            diagnostic["reject_reason"] = (
+                "reprojection_nis_gate"
+                if "normalized NIS" in message
+                else "reprojection_update_failure"
+            )
+            diagnostic["exception_type"] = type(exc).__name__
+            diagnostic["exception_message"] = message
+            self._gate_diagnostics.append(diagnostic)
+            return
+
+        update_diag = self._lio.last_update_diagnostics or {}
+        diagnostic["pixel_residual_rmse_px"] = float(
+            np.sqrt(np.mean(residual_matrix * residual_matrix))
+        )
+        diagnostic["pixel_residual_radial_rmse_px"] = float(
+            np.sqrt(
+                np.mean(
+                    np.sum(
+                        residual_matrix * residual_matrix,
+                        axis=1,
+                    )
+                )
+            )
+        )
+        weights = update_diag.get("huber_weights")
+        if weights is not None:
+            diagnostic["huber_weights"] = np.asarray(
+                weights, dtype=np.float64
+            ).tolist()
+        normalized_corner = update_diag.get("corner_normalized_innovation")
+        if normalized_corner is not None:
+            diagnostic["corner_normalized_innovation"] = np.asarray(
+                normalized_corner, dtype=np.float64
+            ).tolist()
+        if update_diag.get("preupdate_normalized_nis") is not None:
+            diagnostic["normalized_nis"] = float(
+                update_diag["preupdate_normalized_nis"]
+            )
+
+        self._gate_update_count += 1
+        self.learned_inertial_state = self._lio.state()
+        diagnostic["accepted"] = True
+
+        if gt_position is not None and gt_R is not None:
+            diagnostic["post_update_position_error_norm_m"] = float(
+                np.linalg.norm(self._lio.p - gt_position)
+            )
+            relative_R = self._lio.R @ gt_R.T
+            cosine = float(
+                np.clip((np.trace(relative_R) - 1.0) * 0.5, -1.0, 1.0)
+            )
+            diagnostic["post_update_orientation_error_deg"] = float(
+                np.degrees(np.arccos(cosine))
+            )
+
+        self._gate_diagnostics.append(diagnostic)
+
     def _maybe_gate_update(self) -> None:
+        if str(getattr(self.cfg, "gate_measurement_model", "pnp_pose")) == "direct_reprojection":
+            self._maybe_gate_reprojection_update()
+            return
         if self.swift_detector is None or self._gate_builder is None or not self._camera_due():
             return
         self._last_camera_timestamp_s = self._timestamp_s()
