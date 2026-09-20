@@ -255,6 +255,12 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
         self._gt_next_gate_idx = torch.zeros(
             self.num_envs, dtype=torch.int32, device=self.device
         )
+        self._mission_gate_pass_count = torch.zeros(
+            self.num_envs, dtype=torch.int32, device=self.device
+        )
+        self._gt_gate_pass_count = torch.zeros(
+            self.num_envs, dtype=torch.int32, device=self.device
+        )
         self._prev_estimated_pos_w = self._known_start_position_w()
         self.prev_robot_pos_w = self.robot.data.root_pos_w.clone()
 
@@ -281,6 +287,16 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
     def gt_next_gate_idx(self) -> torch.Tensor:
         """Truth-only gate index for reward/evaluation diagnostics."""
         return self._gt_next_gate_idx
+
+    @property
+    def mission_gate_pass_count(self) -> torch.Tensor:
+        """Per-episode estimator-driven gate-pass count for diagnostics."""
+        return self._mission_gate_pass_count
+
+    @property
+    def gt_gate_pass_count(self) -> torch.Tensor:
+        """Per-episode truth gate-pass count for diagnostics."""
+        return self._gt_gate_pass_count
 
     def _known_start_position_w(self) -> torch.Tensor:
         """Return the task-defined initial position without reading runtime GT."""
@@ -342,6 +358,8 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
         self._gt_gate_passed[env_ids] = False
         self._gt_gate_missed[env_ids] = False
         self._gt_next_gate_idx[env_ids] = self.next_gate_idx[env_ids]
+        self._mission_gate_pass_count[env_ids] = 0
+        self._gt_gate_pass_count[env_ids] = 0
         known_start = self._known_start_position_w()
         self._prev_estimated_pos_w[env_ids] = known_start[env_ids]
         # This truth buffer is never exposed to the actor.  It exists only so
@@ -394,6 +412,9 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
             gt_active_gate_w,
             self.gate_size,
         )
+
+        self._mission_gate_pass_count += self._mission_gate_passed.to(torch.int32)
+        self._gt_gate_pass_count += self._gt_gate_passed.to(torch.int32)
 
         self.next_gate_idx[self._mission_gate_passed] += 1
         self.next_gate_idx %= self.num_gates
