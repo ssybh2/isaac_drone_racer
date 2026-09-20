@@ -869,6 +869,42 @@ def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
                 "post_update_orientation_error_deg", accepted
             ),
         },
+        "oracle_corner_decomposition": {
+            "oracle_complete_attempts": int(sum(
+                1 for record in records
+                if record.get("oracle_corner_complete") is True
+            )),
+            "detector_corner_error_px_rmse_per_frame": scalar_summary(
+                "detector_corner_error_px_rmse"
+            ),
+            "detector_corner_error_px_mean_per_frame": scalar_summary(
+                "detector_corner_error_px_mean"
+            ),
+            "detector_corner_error_px_max_per_frame": scalar_summary(
+                "detector_corner_error_px_max"
+            ),
+            "oracle_pnp_reprojection_rmse_px": scalar_summary(
+                "oracle_pnp_reprojection_rmse_px"
+            ),
+            "oracle_pnp_gate_translation_error_m": scalar_summary(
+                "oracle_pnp_gate_translation_error_m"
+            ),
+            "oracle_pnp_gate_rotation_error_deg": scalar_summary(
+                "oracle_pnp_gate_rotation_error_deg"
+            ),
+            "oracle_pnp_body_translation_error_m": scalar_summary(
+                "oracle_pnp_body_translation_error_m"
+            ),
+            "oracle_pnp_body_rotation_error_deg": scalar_summary(
+                "oracle_pnp_body_rotation_error_deg"
+            ),
+            "oracle_extrinsic_translation_error_m": scalar_summary(
+                "oracle_extrinsic_translation_error_m"
+            ),
+            "oracle_extrinsic_rotation_error_deg": scalar_summary(
+                "oracle_extrinsic_rotation_error_deg"
+            ),
+        },
     }
 
 
@@ -1796,6 +1832,14 @@ def main() -> None:
                 f"pnp_pos_rmse={pnp_pos['rmse']}m "
                 f"pnp_ori_mean={pnp_ori['mean']}deg "
                 f"nees_p95={nees['p95']}",
+                flush=True,
+            )
+            oracle = gate_audit_summary["oracle_corner_decomposition"]
+            print(
+                f"[gate-pnp-audit:{args_cli.mode}] "
+                f"corner_rmse_px={oracle['detector_corner_error_px_rmse_per_frame']['rmse']} "
+                f"oracle_pnp_body_rmse_m={oracle['oracle_pnp_body_translation_error_m']['rmse']} "
+                f"oracle_pnp_body_ori_rmse_deg={oracle['oracle_pnp_body_rotation_error_deg']['rmse']}",
                 flush=True,
             )
             print(
