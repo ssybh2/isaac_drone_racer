@@ -134,9 +134,13 @@ def load_trace_windows(
 
     target_mode="delta_velocity_gravity_compensated" produces
         dv_specific_w = (v1 - v0) - g * window_time_s
-    in world coordinates. Unlike full displacement, this target is independent
-    of unknown initial translational velocity and is directly related to the
-    non-gravitational acceleration accumulated over the window.
+    in world coordinates.
+
+    target_mode="delta_velocity_body_end_gyro_aligned" produces
+        dv_specific_b1 = R_wb(t1)^T * [(v1-v0) - g*window_time_s]
+    and uses gyro-only endpoint-body-aligned body gyro/thrust features. It is
+    independent of global yaw and does not require GT/EKF global attitude as a
+    network input.
     """
     path = Path(path)
     if window_time_s <= 0.0 or sample_rate_hz <= 0.0 or stride_time_s <= 0.0:
@@ -153,6 +157,7 @@ def load_trace_windows(
         "kinematic_residual_body_end_gravity_compensated",
         "displacement_body_end_gyro_aligned",
         "delta_velocity_gravity_compensated",
+        "delta_velocity_body_end_gyro_aligned",
     )
     if target_mode not in valid_target_modes:
         raise ValueError(
@@ -173,6 +178,7 @@ def load_trace_windows(
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
             "displacement_body_end_gyro_aligned",
+            "delta_velocity_body_end_gyro_aligned",
         )
         else features_w
     )
@@ -182,6 +188,7 @@ def load_trace_windows(
         "kinematic_residual_body_end_gyro_aligned",
         "kinematic_residual_body_end_gravity_compensated",
         "delta_velocity_gravity_compensated",
+        "delta_velocity_body_end_gyro_aligned",
     ) and velocities is None:
         raise ValueError(
             f"trace {path} needs truth_vx/truth_vy/truth_vz for "
@@ -205,6 +212,7 @@ def load_trace_windows(
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
             "displacement_body_end_gyro_aligned",
+            "delta_velocity_body_end_gyro_aligned",
         )
         else None
     )
@@ -218,6 +226,7 @@ def load_trace_windows(
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
             "displacement_body_end_gyro_aligned",
+            "delta_velocity_body_end_gyro_aligned",
         ):
             features[window_index, :, :] = endpoint_body_gyro_aligned_features(
                 features[window_index, :, :],
@@ -248,7 +257,10 @@ def load_trace_windows(
             )
             target = target - v_start * float(window_time_s)
 
-        if target_mode == "delta_velocity_gravity_compensated":
+        if target_mode in (
+            "delta_velocity_gravity_compensated",
+            "delta_velocity_body_end_gyro_aligned",
+        ):
             v_start = np.array(
                 [
                     np.interp(start, timestamps, velocities[:, axis])
@@ -275,6 +287,7 @@ def load_trace_windows(
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
             "displacement_body_end_gyro_aligned",
+            "delta_velocity_body_end_gyro_aligned",
         ):
             # Interpolate the endpoint attitude and project the matrix back to
             # SO(3). The target is expressed in the endpoint body frame.
