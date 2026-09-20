@@ -7,7 +7,7 @@ of Cioffi et al. (RAL 2023):
 * Learned 0.5 s relative displacements are injected as Kalman measurements.
 * Timestamped rotation+velocity+position clones retain the cross-covariances
   required for fixed-lag relative-motion updates.
-* Optional mapped-gate PnP measurements provide absolute pose anchors.
+* Optional mapped-gate pixel-reprojection measurements provide tightly-coupled absolute landmark constraints without an intermediate PnP pose.
 
 The current error state is [dtheta, dv, dp, dba, dbg] (15 states). Each
 historical kinematic clone appends [dtheta_clone, dv_clone, dp_clone]
@@ -1886,6 +1886,229 @@ class LearnedInertialOdometry:
             marginalize_start_clone=marginalize_start_clone,
             covariance_label="learned clone gravity-compensated body residual",
         )
+
+    def predict_gate_corner_reprojection(
+        self,
+        gate_points_w,
+        camera_K,
+        R_bc,
+        t_bc,
+        *,
+        min_depth_m: float = 0.05,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Predict mapped gate-corner pixels and their current-state Jacobian.
+
+        Geometry follows the repository transform convention. R maps body
+        coordinates into world coordinates, while T_bc=(R_bc,t_bc) maps
+        camera coordinates into body coordinates:
+
+            p_b = R_bc @ p_c + t_bc
+
+        For a known world landmark P_w the camera-frame point is therefore:
+
+            q_b = R_wb.T @ (P_w - p_wb)
+            p_c = R_bc.T @ (q_b - t_bc)
+
+        The filter uses a right/local attitude error
+        R_true = R_nominal @ Exp(dtheta). Hence
+
+            d q_b / d dtheta = [q_b]_x
+
+        and the pixel Jacobian is formed directly with respect to current
+        attitude and position. Velocity/bias/clone columns remain zero, while
+        their correlated covariance can still update through P H^T.
+        """
+        points_w = np.asarray(gate_points_w, dtype=np.float64).reshape(-1, 3)
+        if len(points_w) < 1:
+            raise ValueError("at least one mapped gate corner is required")
+        K = np.asarray(camera_K, dtype=np.float64).reshape(3, 3)
+        R_bc = np.asarray(R_bc, dtype=np.float64).reshape(3, 3)
+        t_bc = np.asarray(t_bc, dtype=np.float64).reshape(3)
+        min_depth = float(min_depth_m)
+        if min_depth <= 0.0 or not np.isfinite(min_depth):
+            raise ValueError("min_depth_m must be positive and finite")
+        if not (
+            np.all(np.isfinite(points_w))
+            and np.all(np.isfinite(K))
+            and np.all(np.isfinite(R_bc))
+            and np.all(np.isfinite(t_bc))
+        ):
+            raise ValueError("gate reprojection inputs must be finite")
+
+        R_cb = R_bc.T
+        R_bw = self.R.T
+        predicted = np.empty((len(points_w), 2), dtype=np.float64)
+        H = np.zeros((2 * len(points_w), self.P.shape[0]), dtype=np.float64)
+
+        for corner_index, point_w in enumerate(points_w):
+            q_b = R_bw @ (point_w - self.p)
+            point_c = R_cb @ (q_b - t_bc)
+            if float(point_c[2]) <= min_depth:
+                raise ValueError(
+                    "mapped gate corner projects behind/too close to the camera"
+                )
+
+            homogeneous = K @ point_c
+            denominator = float(homogeneous[2])
+            if abs(denominator) <= 1.0e-12:
+                raise ValueError("gate corner has singular pinhole projection")
+            uv = homogeneous[:2] / denominator
+            predicted[corner_index] = uv
+
+            J_proj = np.vstack(
+                [
+                    (
+                        K[0, :] * denominator
+                        - homogeneous[0] * K[2, :]
+                    )
+                    / (denominator * denominator),
+                    (
+                        K[1, :] * denominator
+                        - homogeneous[1] * K[2, :]
+                    )
+                    / (denominator * denominator),
+                ]
+            )
+            J_pc_theta = R_cb @ _skew(q_b)
+            J_pc_position = -R_cb @ R_bw
+
+            rows = slice(2 * corner_index, 2 * corner_index + 2)
+            H[rows, 0:3] = J_proj @ J_pc_theta
+            H[rows, 6:9] = J_proj @ J_pc_position
+
+        return predicted, H
+
+    def update_gate_corner_reprojection(
+        self,
+        observed_corners_uv,
+        gate_points_w,
+        camera_K,
+        R_bc,
+        t_bc,
+        *,
+        pixel_sigma_px: float = 1.0,
+        huber_delta_sigma: float = 2.5,
+        min_depth_m: float = 0.05,
+        max_normalized_nis: float | None = 25.0,
+    ) -> np.ndarray:
+        """Fuse mapped gate corners directly in the image plane.
+
+        This is the V6.4 tightly-coupled gate factor. It deliberately bypasses
+        planar PnP pose recovery. The measurement is the stacked pixel vector
+        z=[u0,v0,...] and h(x) is the projection of known world gate corners
+        through the current inertial pose and calibrated T_bc.
+
+        A per-corner Huber weight is computed from the innovation normalized by
+        its local innovation covariance H_i P H_i^T + sigma_px^2 I. Thus a
+        large residual caused by legitimate state uncertainty is not treated the
+        same way as a similarly large residual from an overconfident outlier.
+        """
+        observed = np.asarray(observed_corners_uv, dtype=np.float64).reshape(-1, 2)
+        points_w = np.asarray(gate_points_w, dtype=np.float64).reshape(-1, 3)
+        if observed.shape[0] != points_w.shape[0]:
+            raise ValueError("gate pixel/world-corner counts must match")
+        if len(observed) < 1:
+            raise ValueError("at least one gate corner is required")
+        if not np.all(np.isfinite(observed)):
+            raise ValueError("observed gate corners must be finite")
+
+        sigma = float(pixel_sigma_px)
+        huber_delta = float(huber_delta_sigma)
+        if sigma <= 0.0 or not np.isfinite(sigma):
+            raise ValueError("pixel_sigma_px must be positive and finite")
+        if huber_delta <= 0.0 or not np.isfinite(huber_delta):
+            raise ValueError("huber_delta_sigma must be positive and finite")
+        if max_normalized_nis is not None:
+            max_normalized_nis = float(max_normalized_nis)
+            if max_normalized_nis <= 0.0 or not np.isfinite(max_normalized_nis):
+                raise ValueError("max_normalized_nis must be positive when set")
+
+        predicted, H = self.predict_gate_corner_reprojection(
+            points_w,
+            camera_K,
+            R_bc,
+            t_bc,
+            min_depth_m=min_depth_m,
+        )
+        residual_matrix = observed - predicted
+        residual = residual_matrix.reshape(-1)
+
+        huber_weights = []
+        normalized_corner_innovations = []
+        Rm = np.zeros((2 * len(observed), 2 * len(observed)), dtype=np.float64)
+        base_corner_cov = np.eye(2, dtype=np.float64) * sigma * sigma
+        for corner_index in range(len(observed)):
+            rows = slice(2 * corner_index, 2 * corner_index + 2)
+            H_i = H[rows, :]
+            r_i = residual_matrix[corner_index]
+            S_i = H_i @ self.P @ H_i.T + base_corner_cov
+            try:
+                normalized = float(
+                    np.sqrt(max(0.0, r_i.T @ np.linalg.solve(S_i, r_i)))
+                )
+            except np.linalg.LinAlgError as exc:
+                raise ValueError(
+                    "gate reprojection corner innovation covariance is singular"
+                ) from exc
+            weight = (
+                1.0
+                if normalized <= huber_delta
+                else huber_delta / max(normalized, 1.0e-12)
+            )
+            weight = float(np.clip(weight, 0.05, 1.0))
+            huber_weights.append(weight)
+            normalized_corner_innovations.append(normalized)
+            Rm[rows, rows] = base_corner_cov / weight
+
+        measurement_state_covariance = H @ self.P @ H.T
+        S = measurement_state_covariance + Rm
+        try:
+            joint_nis = float(residual.T @ np.linalg.solve(S, residual))
+        except np.linalg.LinAlgError as exc:
+            raise ValueError(
+                "gate reprojection innovation covariance is singular"
+            ) from exc
+        normalized_nis = joint_nis / float(residual.size)
+        if (
+            max_normalized_nis is not None
+            and normalized_nis > max_normalized_nis
+        ):
+            raise ValueError(
+                "gate reprojection normalized NIS exceeds configured limit: "
+                f"{normalized_nis:.3f} > {max_normalized_nis:.3f}"
+            )
+
+        self._kalman_update(residual, H, Rm, gain_mode="full")
+        assert self.last_update_diagnostics is not None
+        self.last_update_diagnostics.update(
+            {
+                "measurement_type": "gate_corner_reprojection",
+                "gate_corner_count": int(len(observed)),
+                "pixel_rmse_before_update": float(
+                    np.sqrt(np.mean(residual_matrix * residual_matrix))
+                ),
+                "pixel_radial_rmse_before_update": float(
+                    np.sqrt(
+                        np.mean(
+                            np.sum(
+                                residual_matrix * residual_matrix,
+                                axis=1,
+                            )
+                        )
+                    )
+                ),
+                "pixel_sigma_px": sigma,
+                "huber_weights": np.asarray(
+                    huber_weights, dtype=np.float64
+                ),
+                "corner_normalized_innovation": np.asarray(
+                    normalized_corner_innovations, dtype=np.float64
+                ),
+                "preupdate_joint_nis": joint_nis,
+                "preupdate_normalized_nis": normalized_nis,
+            }
+        )
+        return residual_matrix
 
     def update_absolute_position(self, position_w_b, covariance_w) -> np.ndarray:
         z = np.asarray(position_w_b, dtype=np.float64).reshape(3)
