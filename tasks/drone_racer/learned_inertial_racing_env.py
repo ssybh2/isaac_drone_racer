@@ -482,7 +482,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         )
         sigma_floor = (
             self.cfg.learned_delta_velocity_sigma_floor_xyz_mps
-            if target_mode == "delta_velocity_gravity_compensated"
+            if target_mode in (
+                "delta_velocity_gravity_compensated",
+                "delta_velocity_body_end_gyro_aligned",
+            )
             else self.cfg.learned_sigma_floor_xyz_m
         )
         protected_covariance = protected_displacement_covariance(
