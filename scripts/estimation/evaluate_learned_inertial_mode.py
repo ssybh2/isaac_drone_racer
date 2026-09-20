@@ -131,6 +131,14 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--oracle-body-end-displacement-fusion",
+    action="store_true",
+    help=(
+        "Diagnostic only: fuse exact GT R_end^T(p_end-p_start) through a "
+        "gauge-invariant two-clone endpoint-body displacement factor."
+    ),
+)
+parser.add_argument(
     "--truth-orientation-for-tcn-features",
     action="store_true",
     help=(
@@ -390,13 +398,17 @@ def _prepare_cfg():
     cfg.learned_debug_oracle_uzh_displacement_fusion = bool(
         args_cli.oracle_uzh_displacement_fusion
     )
-    if (
-        cfg.learned_debug_oracle_residual_fusion
-        and cfg.learned_debug_oracle_uzh_displacement_fusion
-    ):
+    cfg.learned_debug_oracle_body_end_displacement_fusion = bool(
+        args_cli.oracle_body_end_displacement_fusion
+    )
+    oracle_modes = (
+        cfg.learned_debug_oracle_residual_fusion,
+        cfg.learned_debug_oracle_uzh_displacement_fusion,
+        cfg.learned_debug_oracle_body_end_displacement_fusion,
+    )
+    if sum(int(v) for v in oracle_modes) > 1:
         raise ValueError(
-            "--oracle-learned-residual-fusion and "
-            "--oracle-uzh-displacement-fusion are mutually exclusive"
+            "Oracle fusion modes are mutually exclusive"
         )
     cfg.learned_debug_truth_orientation_for_features = bool(
         args_cli.truth_orientation_for_tcn_features
@@ -1148,6 +1160,9 @@ def main() -> None:
             ),
             "oracle_uzh_displacement_fusion": bool(
                 cfg.learned_debug_oracle_uzh_displacement_fusion
+            ),
+            "oracle_body_end_displacement_fusion": bool(
+                cfg.learned_debug_oracle_body_end_displacement_fusion
             ),
             "last_learned_measurement_source": (
                 raw_env._last_learned_measurement_source
