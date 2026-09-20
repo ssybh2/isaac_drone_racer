@@ -215,6 +215,185 @@ class GateTargetingCommand(CommandTerm):
         self.drone_visualizer.visualize(self.robot.data.root_pos_w, self.robot.data.root_quat_w)
 
 
+
+class EstimatedStateGateTargetingCommand(GateTargetingCommand):
+    """Gate mission state advanced only from the learned-inertial estimate.
+
+    The actor-visible target index must not be advanced from Isaac root-state
+    truth.  Simulator truth is retained in separate buffers exclusively for
+    reward/evaluation bookkeeping.
+
+    This command assumes the mapped gate frame +X axis is the gate-plane
+    normal, matching the existing track/yaw convention.
+    """
+
+    cfg: EstimatedStateGateTargetingCommandCfg
+
+    def __init__(
+        self,
+        cfg: EstimatedStateGateTargetingCommandCfg,
+        env: ManagerBasedEnv,
+    ):
+        super().__init__(cfg, env)
+        self._mission_gate_passed = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._mission_gate_missed = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._gt_gate_passed = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._gt_gate_missed = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._prev_estimated_pos_w = self._known_start_position_w()
+        self.prev_robot_pos_w = self.robot.data.root_pos_w.clone()
+
+    @property
+    def gate_passed(self) -> torch.Tensor:
+        """Ground-truth pass flag for reward/evaluation only."""
+        return self._gt_gate_passed
+
+    @property
+    def gate_missed(self) -> torch.Tensor:
+        """Ground-truth miss flag for reward/evaluation only."""
+        return self._gt_gate_missed
+
+    @property
+    def mission_gate_passed(self) -> torch.Tensor:
+        """Estimator-derived gate-pass flag that advances actor mission state."""
+        return self._mission_gate_passed
+
+    @property
+    def mission_gate_missed(self) -> torch.Tensor:
+        return self._mission_gate_missed
+
+    def _known_start_position_w(self) -> torch.Tensor:
+        """Return the task-defined initial position without reading runtime GT."""
+        init_pos = torch.tensor(
+            self._env.cfg.scene.robot.init_state.pos,
+            dtype=torch.float32,
+            device=self.device,
+        ).view(1, 3)
+        return init_pos.expand(self.num_envs, 3) + self._env.scene.env_origins
+
+    def _estimated_position_w(self) -> torch.Tensor:
+        state = getattr(self._env, "learned_inertial_state", None)
+        if state is None:
+            return self._known_start_position_w()
+        position = torch.as_tensor(
+            state.position_w_b,
+            dtype=torch.float32,
+            device=self.device,
+        ).view(1, 3)
+        if self.num_envs != 1:
+            raise RuntimeError(
+                "EstimatedStateGateTargetingCommand currently requires num_envs=1"
+            )
+        return position
+
+    @staticmethod
+    def _gate_crossing(
+        previous_pos_w: torch.Tensor,
+        current_pos_w: torch.Tensor,
+        gate_pose_w: torch.Tensor,
+        gate_size: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        gate_pos_w = gate_pose_w[:, :3]
+        gate_quat_w = gate_pose_w[:, 3:7]
+        gate_quat_inv = math_utils.quat_inv(gate_quat_w)
+
+        previous_g = math_utils.quat_apply(
+            gate_quat_inv, previous_pos_w - gate_pos_w
+        )
+        current_g = math_utils.quat_apply(
+            gate_quat_inv, current_pos_w - gate_pos_w
+        )
+
+        crossed_plane = (previous_g[:, 0] < 0.0) & (current_g[:, 0] >= 0.0)
+        half_size = 0.5 * float(gate_size)
+        inside_opening = (
+            (torch.abs(current_g[:, 1]) < half_size)
+            & (torch.abs(current_g[:, 2]) < half_size)
+        )
+        return (
+            crossed_plane & inside_opening,
+            crossed_plane & ~inside_opening,
+        )
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        super()._resample_command(env_ids)
+        self._mission_gate_passed[env_ids] = False
+        self._mission_gate_missed[env_ids] = False
+        self._gt_gate_passed[env_ids] = False
+        self._gt_gate_missed[env_ids] = False
+        known_start = self._known_start_position_w()
+        self._prev_estimated_pos_w[env_ids] = known_start[env_ids]
+        # This truth buffer is never exposed to the actor.  It exists only so
+        # training reward/evaluation can compare actual gate passage.
+        self.prev_robot_pos_w[env_ids] = self.robot.data.root_pos_w[env_ids]
+
+    def _update_command(self):
+        if self.cfg.record_fpv:
+            image = self.sensor.data.output["rgb"][0].cpu().numpy()
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            self.out.write(image)
+
+        gate_indices = self.next_gate_idx.to(dtype=torch.long)
+        gate_positions = self.track.data.object_com_pos_w[
+            self.env_ids, gate_indices
+        ]
+        gate_orientations = self.track.data.object_quat_w[
+            self.env_ids, gate_indices
+        ]
+        active_gate_w = torch.cat((gate_positions, gate_orientations), dim=1)
+
+        estimated_pos_w = self._estimated_position_w()
+        self._mission_gate_passed, self._mission_gate_missed = (
+            self._gate_crossing(
+                self._prev_estimated_pos_w,
+                estimated_pos_w,
+                active_gate_w,
+                self.gate_size,
+            )
+        )
+
+        # Ground truth is deliberately kept on a separate reward/evaluation
+        # path and never controls next_gate_idx.
+        current_gt_pos_w = self.robot.data.root_pos_w
+        self._gt_gate_passed, self._gt_gate_missed = self._gate_crossing(
+            self.prev_robot_pos_w,
+            current_gt_pos_w,
+            active_gate_w,
+            self.gate_size,
+        )
+
+        self.next_gate_idx[self._mission_gate_passed] += 1
+        self.next_gate_idx %= self.num_gates
+
+        # Publish the actor-visible target from the estimator-driven mission
+        # index immediately after any transition.
+        gate_indices = self.next_gate_idx.to(dtype=torch.long)
+        gate_positions = self.track.data.object_com_pos_w[
+            self.env_ids, gate_indices
+        ]
+        gate_orientations = self.track.data.object_quat_w[
+            self.env_ids, gate_indices
+        ]
+        self.next_gate_w = torch.cat((gate_positions, gate_orientations), dim=1)
+
+        self._prev_estimated_pos_w = estimated_pos_w.clone()
+        self.prev_robot_pos_w = current_gt_pos_w.clone()
+
+
+@configclass
+class EstimatedStateGateTargetingCommandCfg(GateTargetingCommandCfg):
+    """Deployment-faithful gate mission state for learned-inertial RL."""
+
+    class_type: type = EstimatedStateGateTargetingCommand
+
+
 @configclass
 class GateTargetingCommandCfg(CommandTermCfg):
     """Configuration for gate targeting command generator."""
