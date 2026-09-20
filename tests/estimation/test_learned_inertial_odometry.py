@@ -399,6 +399,89 @@ def test_uzh_two_clone_relative_jacobian_uses_both_cloned_endpoints():
     np.testing.assert_allclose(H @ N[:, 1:4], 0.0, atol=1e-12)
 
 
+def test_body_end_delta_velocity_factor_matches_finite_difference_and_gauge():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    q0 = lio.rotmat_to_quat_wxyz(
+        lio._exp_so3(np.array([0.09, -0.05, 0.22]))
+    )
+    est.reset(
+        position_w_b=(0.3, -0.2, 1.0),
+        linear_velocity_w_b=(1.0, -0.3, 0.15),
+        orientation_w_b_wxyz=q0,
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.025, -0.015, 0.07),
+            accel_b=(0.35, -0.12, 9.78),
+            timestamp_s=k * 0.01,
+        )
+    est.clone_current_position()
+
+    start_index = est._find_clone_index(0.0, tolerance_s=1e-9)
+    end_index = est._find_clone_index(0.5, tolerance_s=1e-9)
+
+    base = est.predicted_clone_delta_velocity_body_end_gravity_compensated(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+    H = est.clone_delta_velocity_body_end_gravity_compensated_jacobian(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+
+    columns = []
+    for sl in (
+        est._clone_orientation_slice(end_index),
+        est._clone_velocity_slice(start_index),
+        est._clone_velocity_slice(end_index),
+    ):
+        columns.extend(range(sl.start, sl.stop))
+
+    eps = 1.0e-7
+    for col in columns:
+        perturbed = copy.deepcopy(est)
+        dx = np.zeros(perturbed.P.shape[0], dtype=np.float64)
+        dx[col] = eps
+        perturbed._inject_error(dx)
+        value = (
+            perturbed.predicted_clone_delta_velocity_body_end_gravity_compensated(
+                start_timestamp_s=0.0,
+                end_timestamp_s=0.5,
+                clone_tolerance_s=1e-9,
+            )
+        )
+        numerical = (value - base) / eps
+        np.testing.assert_allclose(
+            numerical,
+            H[:, col],
+            rtol=3e-5,
+            atol=3e-6,
+        )
+
+    N_inst = est._instantaneous_unobservable_basis()
+    np.testing.assert_allclose(H @ N_inst[:, 1:4], 0.0, atol=1e-11)
+    np.testing.assert_allclose(H @ N_inst[:, 0], 0.0, atol=1e-8)
+
+    measurement = base + np.array([0.01, -0.005, 0.002])
+    innovation = (
+        est.update_learned_clone_delta_velocity_body_end_gravity_compensated(
+            measurement,
+            np.eye(3) * 0.05**2,
+            start_timestamp_s=0.0,
+            end_timestamp_s=0.5,
+            clone_tolerance_s=1e-9,
+            marginalize_start_clone=True,
+        )
+    )
+    np.testing.assert_allclose(innovation, [0.01, -0.005, 0.002], atol=1e-12)
+    assert est.clone_count == 1
+    np.testing.assert_allclose(est._clone_timestamps_s, [0.5], atol=1e-12)
+
+
 def test_two_clone_delta_velocity_factor_is_velocity_only_and_finite_difference_correct():
     est = lio.LearnedInertialOdometry(max_position_clones=11)
     q0 = lio.rotmat_to_quat_wxyz(
