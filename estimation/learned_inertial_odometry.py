@@ -5,12 +5,15 @@ of Cioffi et al. (RAL 2023):
 
 * IMU propagation estimates attitude, velocity, position and IMU biases.
 * Learned 0.5 s relative displacements are injected as Kalman measurements.
-* Timestamped velocity+position clones retain the cross-covariances required
-  for overlapping fixed-lag relative-motion updates.
+* Timestamped rotation+velocity+position clones retain the cross-covariances
+  required for fixed-lag relative-motion updates.
 * Optional mapped-gate PnP measurements provide absolute pose anchors.
 
 The current error state is [dtheta, dv, dp, dba, dbg] (15 states). Each
-historical kinematic clone appends [dv_clone, dp_clone] (6 states).
+historical kinematic clone appends [dtheta_clone, dv_clone, dp_clone]
+(9 states). V6.2 follows the UZH IMO/TLIO stochastic-cloning structure:
+learned relative-motion updates are formed between two timestamped clones and
+use the full covariance-consistent Kalman gain.
 """
 
 from __future__ import annotations
@@ -137,7 +140,7 @@ class LearnedInertialOdometry:
     """Fixed-lag error-state EKF with timestamped velocity+position clones."""
 
     _CURRENT_DIM = 15
-    _CLONE_DIM = 6
+    _CLONE_DIM = 9
     _LEARNED_KALMAN_GAIN_MODES = (
         "full",
         "freeze_attitude_bias",
@@ -201,6 +204,7 @@ class LearnedInertialOdometry:
             .reshape(self._CURRENT_DIM, self._CURRENT_DIM)
             .copy()
         )
+        self._clone_orientations: list[np.ndarray] = []
         self._clone_velocities: list[np.ndarray] = []
         self._clone_positions: list[np.ndarray] = []
         self._clone_timestamps_s: list[float] = []
@@ -213,6 +217,10 @@ class LearnedInertialOdometry:
     @property
     def clone_timestamps_s(self) -> tuple[float, ...]:
         return tuple(self._clone_timestamps_s)
+
+    @property
+    def clone_orientations_w_b(self) -> tuple[np.ndarray, ...]:
+        return tuple(rotation.copy() for rotation in self._clone_orientations)
 
     @property
     def clone_velocities_w_b(self) -> tuple[np.ndarray, ...]:
@@ -241,13 +249,17 @@ class LearnedInertialOdometry:
         start = self._CURRENT_DIM + self._CLONE_DIM * int(clone_index)
         return slice(start, start + self._CLONE_DIM)
 
-    def _clone_velocity_slice(self, clone_index: int) -> slice:
+    def _clone_orientation_slice(self, clone_index: int) -> slice:
         sl = self._clone_slice(clone_index)
         return slice(sl.start, sl.start + 3)
 
-    def _clone_position_slice(self, clone_index: int) -> slice:
+    def _clone_velocity_slice(self, clone_index: int) -> slice:
         sl = self._clone_slice(clone_index)
         return slice(sl.start + 3, sl.start + 6)
+
+    def _clone_position_slice(self, clone_index: int) -> slice:
+        sl = self._clone_slice(clone_index)
+        return slice(sl.start + 6, sl.start + 9)
 
     def _find_clone_index(self, timestamp_s: float, *, tolerance_s: float = 1.0e-6) -> int:
         if not self._clone_timestamps_s:
@@ -267,13 +279,12 @@ class LearnedInertialOdometry:
         return index
 
     def clone_current_position(self) -> float:
-        """Append current velocity+position with full cross-covariance.
+        """Append the current [R, v, p] state with full cross-covariance.
 
         The historical public method name is preserved for compatibility with
-        the existing fixed-lag scheduler. Each clone is now [v, p], enabling a
-        statistically consistent measurement of
-
-            dp_residual = (p_t - p_s) - v_s * dt.
+        the fixed-lag scheduler. V6.2 uses a 9-state stochastic clone
+        [dtheta, dv, dp], matching the UZH IMO implementation's cloned
+        rotation/velocity/position structure.
         """
         timestamp = float(self.timestamp_s)
         if self._clone_timestamps_s and timestamp <= self._clone_timestamps_s[-1] + 1.0e-12:
@@ -290,14 +301,16 @@ class LearnedInertialOdometry:
         P_aug[:old_dim, :old_dim] = self.P
 
         J = np.zeros((self._CLONE_DIM, old_dim), dtype=np.float64)
-        J[0:3, 3:6] = np.eye(3)
-        J[3:6, 6:9] = np.eye(3)
+        J[0:3, 0:3] = np.eye(3)
+        J[3:6, 3:6] = np.eye(3)
+        J[6:9, 6:9] = np.eye(3)
         cross = J @ self.P
         P_aug[old_dim:, :old_dim] = cross
         P_aug[:old_dim, old_dim:] = cross.T
         P_aug[old_dim:, old_dim:] = J @ self.P @ J.T
 
         self.P = 0.5 * (P_aug + P_aug.T)
+        self._clone_orientations.append(self.R.copy())
         self._clone_velocities.append(self.v.copy())
         self._clone_positions.append(self.p.copy())
         self._clone_timestamps_s.append(timestamp)
@@ -318,6 +331,7 @@ class LearnedInertialOdometry:
         keep = np.ones(self.P.shape[0], dtype=bool)
         keep[sl] = False
         self.P = self.P[np.ix_(keep, keep)].copy()
+        del self._clone_orientations[index]
         del self._clone_velocities[index]
         del self._clone_positions[index]
         del self._clone_timestamps_s[index]
@@ -564,6 +578,232 @@ class LearnedInertialOdometry:
         H[:, self._clone_position_slice(clone_index)] = -Rt
         return H
 
+    def _clone_pair_indices(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> tuple[int, int, float]:
+        """Resolve a strictly ordered pair of stochastic clones."""
+        start_index = self._find_clone_index(
+            start_timestamp_s,
+            tolerance_s=clone_tolerance_s,
+        )
+        end_index = self._find_clone_index(
+            end_timestamp_s,
+            tolerance_s=clone_tolerance_s,
+        )
+        if start_index >= end_index:
+            raise ValueError("clone-pair measurement requires start clone before end clone")
+        dt = float(
+            self._clone_timestamps_s[end_index]
+            - self._clone_timestamps_s[start_index]
+        )
+        if dt <= 0.0 or not np.isfinite(dt):
+            raise ValueError("clone-pair window duration must be positive")
+        return start_index, end_index, dt
+
+    def predicted_clone_relative_displacement(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, _ = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return self._clone_positions[end_index] - self._clone_positions[start_index]
+
+    def clone_relative_displacement_jacobian(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, _ = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, self._clone_position_slice(start_index)] = -np.eye(3)
+        H[:, self._clone_position_slice(end_index)] = np.eye(3)
+        return H
+
+    def predicted_clone_kinematic_residual(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return (
+            self._clone_positions[end_index]
+            - self._clone_positions[start_index]
+            - self._clone_velocities[start_index] * dt
+        )
+
+    def clone_kinematic_residual_jacobian(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, self._clone_velocity_slice(start_index)] = -dt * np.eye(3)
+        H[:, self._clone_position_slice(start_index)] = -np.eye(3)
+        H[:, self._clone_position_slice(end_index)] = np.eye(3)
+        return H
+
+    def predicted_clone_kinematic_residual_body_end(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        residual_w = (
+            self._clone_positions[end_index]
+            - self._clone_positions[start_index]
+            - self._clone_velocities[start_index] * dt
+        )
+        return self._clone_orientations[end_index].T @ residual_w
+
+    def clone_kinematic_residual_body_end_jacobian(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        R_end = self._clone_orientations[end_index]
+        residual_w = (
+            self._clone_positions[end_index]
+            - self._clone_positions[start_index]
+            - self._clone_velocities[start_index] * dt
+        )
+        predicted_b = R_end.T @ residual_w
+        Rt = R_end.T
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, self._clone_orientation_slice(end_index)] = _skew(predicted_b)
+        H[:, self._clone_velocity_slice(start_index)] = -dt * Rt
+        H[:, self._clone_position_slice(start_index)] = -Rt
+        H[:, self._clone_position_slice(end_index)] = Rt
+        return H
+
+    def predicted_clone_kinematic_residual_body_end_gravity_compensated(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        residual_w = (
+            self._clone_positions[end_index]
+            - self._clone_positions[start_index]
+            - self._clone_velocities[start_index] * dt
+            - 0.5 * self.gravity_w * dt * dt
+        )
+        return self._clone_orientations[end_index].T @ residual_w
+
+    def clone_kinematic_residual_body_end_gravity_compensated_jacobian(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        R_end = self._clone_orientations[end_index]
+        residual_w = (
+            self._clone_positions[end_index]
+            - self._clone_positions[start_index]
+            - self._clone_velocities[start_index] * dt
+            - 0.5 * self.gravity_w * dt * dt
+        )
+        predicted_b = R_end.T @ residual_w
+        Rt = R_end.T
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, self._clone_orientation_slice(end_index)] = _skew(predicted_b)
+        H[:, self._clone_velocity_slice(start_index)] = -dt * Rt
+        H[:, self._clone_position_slice(start_index)] = -Rt
+        H[:, self._clone_position_slice(end_index)] = Rt
+        return H
+
+    def unobservable_basis(self) -> np.ndarray:
+        """Return local-error gauge directions: global yaw + XYZ translation."""
+        N = np.zeros((self.P.shape[0], 4), dtype=np.float64)
+        gravity_axis_w = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+        N[0:3, 0] = self.R.T @ gravity_axis_w
+        N[3:6, 0] = -_skew(self.v) @ gravity_axis_w
+        N[6:9, 0] = -_skew(self.p) @ gravity_axis_w
+        N[6:9, 1:4] = np.eye(3)
+
+        for clone_index in range(self.clone_count):
+            R_clone = self._clone_orientations[clone_index]
+            v_clone = self._clone_velocities[clone_index]
+            p_clone = self._clone_positions[clone_index]
+            N[self._clone_orientation_slice(clone_index), 0] = (
+                R_clone.T @ gravity_axis_w
+            )
+            N[self._clone_velocity_slice(clone_index), 0] = (
+                -_skew(v_clone) @ gravity_axis_w
+            )
+            N[self._clone_position_slice(clone_index), 0] = (
+                -_skew(p_clone) @ gravity_axis_w
+            )
+            N[self._clone_position_slice(clone_index), 1:4] = np.eye(3)
+        return N
+
+    def unobservable_information(
+        self,
+        basis: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Return diag(N^T pinv(P) N), matching the UZH consistency audit."""
+        N = self.unobservable_basis() if basis is None else np.asarray(
+            basis,
+            dtype=np.float64,
+        )
+        if N.shape != (self.P.shape[0], 4):
+            raise ValueError("unobservable basis has incompatible shape")
+        return np.diag(N.T @ np.linalg.pinv(self.P) @ N)
+
     def propagate(self, *, gyro_b, accel_b, timestamp_s: float) -> None:
         t = float(timestamp_s)
         dt = t - self.timestamp_s
@@ -627,6 +867,10 @@ class LearnedInertialOdometry:
         self.ba += dx[9:12]
         self.bg += dx[12:15]
         for clone_index in range(self.clone_count):
+            self._clone_orientations[clone_index] = (
+                self._clone_orientations[clone_index]
+                @ _exp_so3(dx[self._clone_orientation_slice(clone_index)])
+            )
             self._clone_velocities[clone_index] += dx[
                 self._clone_velocity_slice(clone_index)
             ]
@@ -686,8 +930,7 @@ class LearnedInertialOdometry:
 
         for clone_index in range(self.clone_count):
             if freeze_all_clones:
-                K_eff[self._clone_velocity_slice(clone_index), :] = 0.0
-                K_eff[self._clone_position_slice(clone_index), :] = 0.0
+                K_eff[self._clone_slice(clone_index), :] = 0.0
             elif freeze_position:
                 K_eff[self._clone_position_slice(clone_index), :] = 0.0
 
@@ -709,6 +952,20 @@ class LearnedInertialOdometry:
         K = self._constrain_kalman_gain(K_raw, gain_mode)
         dx = K @ residual
 
+        gauge_basis = self.unobservable_basis()
+        gauge_projection = H @ gauge_basis
+        gauge_information = self.unobservable_information(gauge_basis)
+
+        clone_orientation_gain = (
+            np.vstack(
+                [
+                    K[self._clone_orientation_slice(i), :]
+                    for i in range(self.clone_count)
+                ]
+            )
+            if self.clone_count
+            else np.empty((0, K.shape[1]), dtype=np.float64)
+        )
         clone_velocity_gain = (
             np.vstack(
                 [
@@ -728,6 +985,16 @@ class LearnedInertialOdometry:
             )
             if self.clone_count
             else np.empty((0, K.shape[1]), dtype=np.float64)
+        )
+        dx_clone_orientation = (
+            np.concatenate(
+                [
+                    dx[self._clone_orientation_slice(i)]
+                    for i in range(self.clone_count)
+                ]
+            )
+            if self.clone_count
+            else np.empty((0,), dtype=np.float64)
         )
         dx_clone_velocity = (
             np.concatenate(
@@ -763,6 +1030,7 @@ class LearnedInertialOdometry:
             "dx_position": dx[6:9].copy(),
             "dx_accel_bias": dx[9:12].copy(),
             "dx_gyro_bias": dx[12:15].copy(),
+            "dx_clone_orientation_norm": float(np.linalg.norm(dx_clone_orientation)),
             "dx_clone_velocity_norm": float(np.linalg.norm(dx_clone_velocity)),
             "dx_clone_position_norm": float(np.linalg.norm(dx_clone_position)),
             "kalman_gain_raw_current_norm": float(
@@ -776,6 +1044,9 @@ class LearnedInertialOdometry:
             "kalman_gain_position_norm": float(np.linalg.norm(K[6:9, :])),
             "kalman_gain_accel_bias_norm": float(np.linalg.norm(K[9:12, :])),
             "kalman_gain_gyro_bias_norm": float(np.linalg.norm(K[12:15, :])),
+            "kalman_gain_clone_orientation_norm": float(
+                np.linalg.norm(clone_orientation_gain)
+            ),
             "kalman_gain_clone_velocity_norm": float(
                 np.linalg.norm(clone_velocity_gain)
             ),
@@ -783,6 +1054,13 @@ class LearnedInertialOdometry:
                 np.linalg.norm(clone_position_gain)
             ),
             "innovation_covariance_diag": np.diag(S).copy(),
+            "measurement_unobservable_projection_norm": float(
+                np.linalg.norm(gauge_projection)
+            ),
+            "measurement_translation_nullspace_norm": float(
+                np.linalg.norm(gauge_projection[:, 1:4])
+            ),
+            "unobservable_information_diag": gauge_information.copy(),
         }
 
         self._inject_error(dx)
@@ -989,6 +1267,179 @@ class LearnedInertialOdometry:
         if marginalize_used_clone:
             self.marginalize_clone(clone_index)
         return innovation
+
+    @staticmethod
+    def _validated_clone_measurement_covariance(
+        covariance,
+        *,
+        label: str,
+    ) -> np.ndarray:
+        Rm = np.asarray(covariance, dtype=np.float64).reshape(3, 3)
+        if not np.all(np.isfinite(Rm)):
+            raise ValueError(f"{label} covariance must be finite")
+        Rm = 0.5 * (Rm + Rm.T)
+        if np.linalg.eigvalsh(Rm)[0] <= 0.0:
+            raise ValueError(f"{label} covariance must be positive definite")
+        return Rm
+
+    def _apply_two_clone_update(
+        self,
+        measurement,
+        covariance,
+        *,
+        predicted: np.ndarray,
+        H: np.ndarray,
+        start_timestamp_s: float,
+        clone_tolerance_s: float,
+        marginalize_start_clone: bool,
+        covariance_label: str,
+    ) -> np.ndarray:
+        """Apply a UZH-style two-clone relative factor with the full gain."""
+        start_index = self._find_clone_index(
+            start_timestamp_s,
+            tolerance_s=clone_tolerance_s,
+        )
+        z = np.asarray(measurement, dtype=np.float64).reshape(3)
+        Rm = self._validated_clone_measurement_covariance(
+            covariance,
+            label=covariance_label,
+        )
+        innovation = z - np.asarray(predicted, dtype=np.float64).reshape(3)
+
+        # Deliberately bypass the legacy learned-gain masks. The UZH/TLIO
+        # stochastic-cloning update applies one full Kalman gain to the
+        # correlated endpoint clones and evolving state.
+        self._kalman_update(innovation, H, Rm, gain_mode="full")
+
+        if marginalize_start_clone:
+            self.marginalize_clone(start_index)
+        return innovation
+
+    def update_learned_clone_displacement(
+        self,
+        displacement_w,
+        covariance_w,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_start_clone: bool = True,
+    ) -> np.ndarray:
+        predicted = self.predicted_clone_relative_displacement(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = self.clone_relative_displacement_jacobian(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return self._apply_two_clone_update(
+            displacement_w,
+            covariance_w,
+            predicted=predicted,
+            H=H,
+            start_timestamp_s=start_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+            marginalize_start_clone=marginalize_start_clone,
+            covariance_label="learned clone displacement",
+        )
+
+    def update_learned_clone_kinematic_residual(
+        self,
+        residual_displacement_w,
+        covariance_w,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_start_clone: bool = True,
+    ) -> np.ndarray:
+        predicted = self.predicted_clone_kinematic_residual(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = self.clone_kinematic_residual_jacobian(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return self._apply_two_clone_update(
+            residual_displacement_w,
+            covariance_w,
+            predicted=predicted,
+            H=H,
+            start_timestamp_s=start_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+            marginalize_start_clone=marginalize_start_clone,
+            covariance_label="learned clone kinematic residual",
+        )
+
+    def update_learned_clone_kinematic_residual_body_end(
+        self,
+        residual_displacement_b_end,
+        covariance_b_end,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_start_clone: bool = True,
+    ) -> np.ndarray:
+        predicted = self.predicted_clone_kinematic_residual_body_end(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = self.clone_kinematic_residual_body_end_jacobian(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return self._apply_two_clone_update(
+            residual_displacement_b_end,
+            covariance_b_end,
+            predicted=predicted,
+            H=H,
+            start_timestamp_s=start_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+            marginalize_start_clone=marginalize_start_clone,
+            covariance_label="learned clone body residual",
+        )
+
+    def update_learned_clone_kinematic_residual_body_end_gravity_compensated(
+        self,
+        residual_displacement_b_end,
+        covariance_b_end,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_start_clone: bool = True,
+    ) -> np.ndarray:
+        predicted = (
+            self.predicted_clone_kinematic_residual_body_end_gravity_compensated(
+                start_timestamp_s=start_timestamp_s,
+                end_timestamp_s=end_timestamp_s,
+                clone_tolerance_s=clone_tolerance_s,
+            )
+        )
+        H = self.clone_kinematic_residual_body_end_gravity_compensated_jacobian(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return self._apply_two_clone_update(
+            residual_displacement_b_end,
+            covariance_b_end,
+            predicted=predicted,
+            H=H,
+            start_timestamp_s=start_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+            marginalize_start_clone=marginalize_start_clone,
+            covariance_label="learned clone gravity-compensated body residual",
+        )
 
     def update_absolute_position(self, position_w_b, covariance_w) -> np.ndarray:
         z = np.asarray(position_w_b, dtype=np.float64).reshape(3)
