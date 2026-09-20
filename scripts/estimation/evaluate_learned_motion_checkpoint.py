@@ -214,6 +214,12 @@ def main() -> None:
         "checkpoint_selection_metric": checkpoint.get("selection_metric"),
         "checkpoint_selection_value": checkpoint.get("selection_value"),
         "target_mode": str(metadata.get("target_mode", "displacement")),
+        "target_unit": (
+            "m/s"
+            if str(metadata.get("target_mode", "displacement"))
+            == "delta_velocity_gravity_compensated"
+            else "m"
+        ),
         "manifest": str(manifest_path),
         "splits": {},
     }
@@ -237,10 +243,11 @@ def main() -> None:
         }
 
         agg = report["splits"][split]["aggregate"]
+        target_unit = report["target_unit"]
         print(
             f"[learned-motion-eval] {split} "
-            f"coord_rmse={agg['coordinate_rmse_m']:.4f}m "
-            f"norm_rmse={agg['norm_rmse_m']:.4f}m "
+            f"coord_rmse={agg['coordinate_rmse_m']:.4f}{target_unit} "
+            f"norm_rmse={agg['norm_rmse_m']:.4f}{target_unit} "
             f"axis_rmse={np.round(agg['axis_rmse_m'], 4).tolist()} "
             f"nll={agg['nll']:.4f}",
             flush=True,
@@ -257,7 +264,7 @@ def main() -> None:
         for item in items:
             print(
                 f"  {Path(item['path']).name:42s} "
-                f"norm_rmse={item['norm_rmse_m']:.4f}m "
+                f"norm_rmse={item['norm_rmse_m']:.4f}{target_unit} "
                 f"bias={np.round(item['axis_bias_m'], 4).tolist()} "
                 f"NSE={item['normalized_squared_error_norm_mean']:.2f}",
                 flush=True,
