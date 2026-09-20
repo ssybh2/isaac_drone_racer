@@ -131,6 +131,12 @@ def load_trace_windows(
     displacement while using the same gyro-only endpoint-body aligned features
     as V6.1. Unlike the kinematic-residual targets, it does not subtract
     v_start*dt or gravity motion.
+
+    target_mode="delta_velocity_gravity_compensated" produces
+        dv_specific_w = (v1 - v0) - g * window_time_s
+    in world coordinates. Unlike full displacement, this target is independent
+    of unknown initial translational velocity and is directly related to the
+    non-gravitational acceleration accumulated over the window.
     """
     path = Path(path)
     if window_time_s <= 0.0 or sample_rate_hz <= 0.0 or stride_time_s <= 0.0:
@@ -146,6 +152,7 @@ def load_trace_windows(
         "kinematic_residual_body_end_gyro_aligned",
         "kinematic_residual_body_end_gravity_compensated",
         "displacement_body_end_gyro_aligned",
+        "delta_velocity_gravity_compensated",
     )
     if target_mode not in valid_target_modes:
         raise ValueError(
@@ -174,10 +181,11 @@ def load_trace_windows(
         "kinematic_residual_body_end",
         "kinematic_residual_body_end_gyro_aligned",
         "kinematic_residual_body_end_gravity_compensated",
+        "delta_velocity_gravity_compensated",
     ) and velocities is None:
         raise ValueError(
             f"trace {path} needs truth_vx/truth_vy/truth_vz for "
-            "kinematic_residual targets"
+            "velocity-dependent targets"
         )
     first = float(timestamps[0])
     last_start = float(timestamps[-1] - window_time_s)
@@ -239,6 +247,24 @@ def load_trace_windows(
                 dtype=np.float64,
             )
             target = target - v_start * float(window_time_s)
+
+        if target_mode == "delta_velocity_gravity_compensated":
+            v_start = np.array(
+                [
+                    np.interp(start, timestamps, velocities[:, axis])
+                    for axis in range(3)
+                ],
+                dtype=np.float64,
+            )
+            v_end = np.array(
+                [
+                    np.interp(end, timestamps, velocities[:, axis])
+                    for axis in range(3)
+                ],
+                dtype=np.float64,
+            )
+            gravity_w = np.array([0.0, 0.0, -9.81], dtype=np.float64)
+            target = v_end - v_start - gravity_w * float(window_time_s)
 
         if target_mode == "kinematic_residual_body_end_gravity_compensated":
             gravity_w = np.array([0.0, 0.0, -9.81], dtype=np.float64)
