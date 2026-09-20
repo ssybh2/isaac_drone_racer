@@ -592,7 +592,14 @@ def main() -> None:
     update_k_clone_position_norm: list[float] = []
     update_measurement_unobservable_projection_norm: list[float] = []
     update_translation_nullspace_norm: list[float] = []
+    update_instantaneous_unobservable_projection_norm: list[float] = []
+    update_instantaneous_translation_nullspace_norm: list[float] = []
     update_unobservable_information: list[np.ndarray] = []
+    update_state_position_cov_diag: list[np.ndarray] = []
+    update_state_velocity_cov_diag: list[np.ndarray] = []
+    update_measurement_state_cov_diag: list[np.ndarray] = []
+    update_ph_t_current_position_norm: list[float] = []
+    update_ph_t_current_velocity_norm: list[float] = []
     update_innovation_cov_condition: list[float] = []
     update_innovation_cov_min_eig: list[float] = []
     update_innovation_cov_max_eig: list[float] = []
@@ -723,6 +730,20 @@ def main() -> None:
                     update_translation_nullspace_norm.append(
                         float(diag["measurement_translation_nullspace_norm"])
                     )
+                    update_instantaneous_unobservable_projection_norm.append(
+                        float(
+                            diag[
+                                "measurement_instantaneous_unobservable_projection_norm"
+                            ]
+                        )
+                    )
+                    update_instantaneous_translation_nullspace_norm.append(
+                        float(
+                            diag[
+                                "measurement_instantaneous_translation_nullspace_norm"
+                            ]
+                        )
+                    )
                     update_unobservable_information.append(
                         np.asarray(
                             diag["unobservable_information_diag"],
@@ -737,6 +758,30 @@ def main() -> None:
                     )
                     update_innovation_cov_max_eig.append(
                         float(diag["innovation_covariance_max_eigenvalue"])
+                    )
+                    update_state_position_cov_diag.append(
+                        np.asarray(
+                            diag["state_position_covariance_diag_before"],
+                            dtype=np.float64,
+                        ).reshape(3)
+                    )
+                    update_state_velocity_cov_diag.append(
+                        np.asarray(
+                            diag["state_velocity_covariance_diag_before"],
+                            dtype=np.float64,
+                        ).reshape(3)
+                    )
+                    update_measurement_state_cov_diag.append(
+                        np.asarray(
+                            diag["measurement_state_covariance_diag"],
+                            dtype=np.float64,
+                        ).reshape(3)
+                    )
+                    update_ph_t_current_position_norm.append(
+                        float(diag["ph_t_current_position_norm"])
+                    )
+                    update_ph_t_current_velocity_norm.append(
+                        float(diag["ph_t_current_velocity_norm"])
                     )
 
                 timestamp_key = round(float(raw_env._timestamp_s()), 6)
@@ -1234,12 +1279,26 @@ def main() -> None:
                 "measurement_unobservable_projection_norm_max": None if not update_measurement_unobservable_projection_norm else float(np.max(update_measurement_unobservable_projection_norm)),
                 "measurement_translation_nullspace_norm_mean": None if not update_translation_nullspace_norm else float(np.mean(update_translation_nullspace_norm)),
                 "measurement_translation_nullspace_norm_max": None if not update_translation_nullspace_norm else float(np.max(update_translation_nullspace_norm)),
+                "measurement_instantaneous_unobservable_projection_norm_mean": None if not update_instantaneous_unobservable_projection_norm else float(np.mean(update_instantaneous_unobservable_projection_norm)),
+                "measurement_instantaneous_unobservable_projection_norm_max": None if not update_instantaneous_unobservable_projection_norm else float(np.max(update_instantaneous_unobservable_projection_norm)),
+                "measurement_instantaneous_translation_nullspace_norm_mean": None if not update_instantaneous_translation_nullspace_norm else float(np.mean(update_instantaneous_translation_nullspace_norm)),
+                "measurement_instantaneous_translation_nullspace_norm_max": None if not update_instantaneous_translation_nullspace_norm else float(np.max(update_instantaneous_translation_nullspace_norm)),
                 "unobservable_information_diag_mean": None if not update_unobservable_information else np.mean(np.stack(update_unobservable_information), axis=0).tolist(),
                 "unobservable_information_diag_max": None if not update_unobservable_information else np.max(np.stack(update_unobservable_information), axis=0).tolist(),
                 "innovation_covariance_condition_number_mean": None if not update_innovation_cov_condition else float(np.mean(update_innovation_cov_condition)),
                 "innovation_covariance_condition_number_max": None if not update_innovation_cov_condition else float(np.max(update_innovation_cov_condition)),
                 "innovation_covariance_min_eigenvalue_min": None if not update_innovation_cov_min_eig else float(np.min(update_innovation_cov_min_eig)),
                 "innovation_covariance_max_eigenvalue_max": None if not update_innovation_cov_max_eig else float(np.max(update_innovation_cov_max_eig)),
+                "state_position_covariance_diag_mean": None if not update_state_position_cov_diag else np.mean(np.stack(update_state_position_cov_diag), axis=0).tolist(),
+                "state_position_covariance_diag_max": None if not update_state_position_cov_diag else np.max(np.stack(update_state_position_cov_diag), axis=0).tolist(),
+                "state_velocity_covariance_diag_mean": None if not update_state_velocity_cov_diag else np.mean(np.stack(update_state_velocity_cov_diag), axis=0).tolist(),
+                "state_velocity_covariance_diag_max": None if not update_state_velocity_cov_diag else np.max(np.stack(update_state_velocity_cov_diag), axis=0).tolist(),
+                "measurement_state_covariance_diag_mean": None if not update_measurement_state_cov_diag else np.mean(np.stack(update_measurement_state_cov_diag), axis=0).tolist(),
+                "measurement_state_covariance_diag_max": None if not update_measurement_state_cov_diag else np.max(np.stack(update_measurement_state_cov_diag), axis=0).tolist(),
+                "ph_t_current_position_norm_mean": None if not update_ph_t_current_position_norm else float(np.mean(update_ph_t_current_position_norm)),
+                "ph_t_current_position_norm_max": None if not update_ph_t_current_position_norm else float(np.max(update_ph_t_current_position_norm)),
+                "ph_t_current_velocity_norm_mean": None if not update_ph_t_current_velocity_norm else float(np.mean(update_ph_t_current_velocity_norm)),
+                "ph_t_current_velocity_norm_max": None if not update_ph_t_current_velocity_norm else float(np.max(update_ph_t_current_velocity_norm)),
             },
             "clone_count_mean": float(np.mean(clones)),
             "clone_count_max": int(np.max(clones)),
