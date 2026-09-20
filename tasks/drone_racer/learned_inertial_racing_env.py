@@ -521,7 +521,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     end_timestamp_s=scheduled_end_s,
                     clone_tolerance_s=timing_tolerance_s,
                 )
-            elif fusion_target_mode == "displacement_body_end":
+            elif fusion_target_mode in (
+                "displacement_body_end",
+                "displacement_body_end_gyro_aligned",
+            ):
                 predicted_rel = (
                     self._lio.predicted_clone_relative_displacement_body_end(
                         start_timestamp_s=start_s,
@@ -665,7 +668,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_start_clone=True,
                     )
-                elif fusion_target_mode == "displacement_body_end":
+                elif fusion_target_mode in (
+                    "displacement_body_end",
+                    "displacement_body_end_gyro_aligned",
+                ):
                     self._lio.update_learned_clone_displacement_body_end(
                         measurement_w,
                         protected_covariance,
