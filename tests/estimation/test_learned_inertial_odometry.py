@@ -1349,3 +1349,174 @@ def test_learned_update_uses_configured_gain_mode_but_absolute_update_stays_full
     )
     assert est.last_update_diagnostics["kalman_gain_mode"] == "full"
     assert est.last_update_diagnostics["kalman_gain_position_norm"] > 0.0
+
+
+def test_gate_corner_reprojection_jacobian_matches_finite_difference():
+    est = lio.LearnedInertialOdometry()
+    q = lio.rotmat_to_quat_wxyz(
+        lio._exp_so3(np.array([0.08, -0.06, 0.12]))
+    )
+    est.reset(
+        position_w_b=(0.4, -0.3, 1.2),
+        orientation_w_b_wxyz=q,
+        initial_covariance=np.eye(15) * 0.05,
+    )
+
+    K = np.array(
+        [[293.0, 0.0, 128.0], [0.0, 293.0, 128.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    # Camera optical +Z approximately aligned with body +X.
+    R_bc = np.array(
+        [[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]],
+        dtype=np.float64,
+    )
+    t_bc = np.array([0.08, 0.0, 0.02], dtype=np.float64)
+    gate_points_w = np.array(
+        [
+            [5.0, 0.8, 0.5],
+            [5.0, -0.8, 0.5],
+            [5.0, -0.8, 2.1],
+            [5.0, 0.8, 2.1],
+        ],
+        dtype=np.float64,
+    )
+
+    base, H = est.predict_gate_corner_reprojection(
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+    )
+    eps = 1.0e-7
+    for col in list(range(0, 3)) + list(range(6, 9)):
+        perturbed = copy.deepcopy(est)
+        dx = np.zeros(15, dtype=np.float64)
+        dx[col] = eps
+        perturbed._inject_error(dx)
+        value, _ = perturbed.predict_gate_corner_reprojection(
+            gate_points_w,
+            K,
+            R_bc,
+            t_bc,
+        )
+        numerical = ((value - base) / eps).reshape(-1)
+        np.testing.assert_allclose(
+            numerical,
+            H[:, col],
+            rtol=3e-5,
+            atol=3e-5,
+        )
+
+
+def test_gate_corner_reprojection_update_reduces_pixel_error_with_two_corners():
+    K = np.array(
+        [[293.0, 0.0, 128.0], [0.0, 293.0, 128.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    R_bc = np.array(
+        [[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]],
+        dtype=np.float64,
+    )
+    t_bc = np.array([0.08, 0.0, 0.02], dtype=np.float64)
+    gate_points_w = np.array(
+        [
+            [5.0, 0.8, 0.5],
+            [5.0, -0.8, 0.5],
+        ],
+        dtype=np.float64,
+    )
+
+    truth = lio.LearnedInertialOdometry()
+    truth.reset(
+        position_w_b=(0.0, 0.0, 1.3),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    observed, _ = truth.predict_gate_corner_reprojection(
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+    )
+
+    est = lio.LearnedInertialOdometry()
+    est.reset(
+        position_w_b=(0.12, -0.10, 1.36),
+        initial_covariance=np.eye(15) * 0.2,
+    )
+    predicted_before, _ = est.predict_gate_corner_reprojection(
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+    )
+    error_before = np.linalg.norm(observed - predicted_before)
+
+    residual = est.update_gate_corner_reprojection(
+        observed,
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+        pixel_sigma_px=1.0,
+        max_normalized_nis=100.0,
+    )
+    predicted_after, _ = est.predict_gate_corner_reprojection(
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+    )
+    error_after = np.linalg.norm(observed - predicted_after)
+
+    assert residual.shape == (2, 2)
+    assert error_after < error_before
+    assert est.last_update_diagnostics["measurement_type"] == "gate_corner_reprojection"
+    assert est.last_update_diagnostics["gate_corner_count"] == 2
+    assert np.linalg.eigvalsh(est.P).min() > -1.0e-10
+
+
+def test_gate_corner_reprojection_exact_measurement_has_unit_huber_weights():
+    est = lio.LearnedInertialOdometry()
+    est.reset(
+        position_w_b=(0.0, 0.0, 1.2),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    K = np.array(
+        [[293.0, 0.0, 128.0], [0.0, 293.0, 128.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    R_bc = np.array(
+        [[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]],
+        dtype=np.float64,
+    )
+    t_bc = np.array([0.08, 0.0, 0.02], dtype=np.float64)
+    gate_points_w = np.array(
+        [
+            [4.5, 0.7, 0.5],
+            [4.5, -0.7, 0.5],
+            [4.5, -0.7, 1.9],
+            [4.5, 0.7, 1.9],
+        ],
+        dtype=np.float64,
+    )
+    observed, _ = est.predict_gate_corner_reprojection(
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+    )
+    residual = est.update_gate_corner_reprojection(
+        observed,
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+        pixel_sigma_px=0.85,
+    )
+    assert np.allclose(residual, 0.0, atol=1.0e-12)
+    np.testing.assert_allclose(
+        est.last_update_diagnostics["huber_weights"],
+        np.ones(4),
+        atol=1.0e-12,
+    )
