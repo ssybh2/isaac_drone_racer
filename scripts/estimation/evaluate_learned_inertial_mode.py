@@ -139,6 +139,14 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--oracle-second-difference-fusion",
+    action="store_true",
+    help=(
+        "Diagnostic only: fuse exact GT p_end-2*p_mid+p_start-g*half_dt^2 "
+        "through a three-clone position-only factor."
+    ),
+)
+parser.add_argument(
     "--truth-orientation-for-tcn-features",
     action="store_true",
     help=(
@@ -401,10 +409,14 @@ def _prepare_cfg():
     cfg.learned_debug_oracle_body_end_displacement_fusion = bool(
         args_cli.oracle_body_end_displacement_fusion
     )
+    cfg.learned_debug_oracle_second_difference_fusion = bool(
+        args_cli.oracle_second_difference_fusion
+    )
     oracle_modes = (
         cfg.learned_debug_oracle_residual_fusion,
         cfg.learned_debug_oracle_uzh_displacement_fusion,
         cfg.learned_debug_oracle_body_end_displacement_fusion,
+        cfg.learned_debug_oracle_second_difference_fusion,
     )
     if sum(int(v) for v in oracle_modes) > 1:
         raise ValueError(
@@ -1164,6 +1176,9 @@ def main() -> None:
             ),
             "oracle_body_end_displacement_fusion": bool(
                 cfg.learned_debug_oracle_body_end_displacement_fusion
+            ),
+            "oracle_second_difference_fusion": bool(
+                cfg.learned_debug_oracle_second_difference_fusion
             ),
             "last_learned_measurement_source": (
                 raw_env._last_learned_measurement_source
