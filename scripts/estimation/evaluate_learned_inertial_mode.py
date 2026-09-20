@@ -869,6 +869,29 @@ def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
                 "post_update_orientation_error_deg", accepted
             ),
         },
+        "planar_pnp_sensitivity": {
+            "detector_pnp_gate_translation_error_m": scalar_summary(
+                "detector_pnp_gate_translation_error_m"
+            ),
+            "detector_pnp_gate_rotation_error_deg": scalar_summary(
+                "detector_pnp_gate_rotation_error_deg"
+            ),
+            "body_position_error_full_pnp_pose_m": scalar_summary(
+                "detector_pnp_body_position_error_full_pose_m"
+            ),
+            "body_position_error_using_gt_attitude_m": scalar_summary(
+                "detector_pnp_body_position_error_gt_attitude_m"
+            ),
+            "body_position_error_using_preupdate_ekf_attitude_m": scalar_summary(
+                "detector_pnp_body_position_error_ekf_attitude_m"
+            ),
+            "detector_gate_width_error_px": scalar_summary(
+                "detector_gate_width_error_px"
+            ),
+            "detector_gate_height_error_px": scalar_summary(
+                "detector_gate_height_error_px"
+            ),
+        },
         "oracle_corner_decomposition": {
             "oracle_complete_attempts": int(sum(
                 1 for record in records
@@ -882,6 +905,50 @@ def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
             ),
             "detector_corner_error_px_max_per_frame": scalar_summary(
                 "detector_corner_error_px_max"
+            ),
+            "detector_signed_corner_bias_xy_px": (
+                None
+                if not any(
+                    record.get("detector_corner_residual_xy_px") is not None
+                    and record.get("oracle_corner_complete") is True
+                    and record.get("selected_gate_index") is not None
+                    for record in records
+                )
+                else np.mean(
+                    np.stack([
+                        np.asarray(
+                            record["detector_corner_residual_xy_px"],
+                            dtype=np.float64,
+                        ).reshape(4, 2)
+                        for record in records
+                        if record.get("detector_corner_residual_xy_px") is not None
+                        and record.get("oracle_corner_complete") is True
+                        and record.get("selected_gate_index") is not None
+                    ]),
+                    axis=0,
+                ).tolist()
+            ),
+            "detector_signed_corner_median_xy_px": (
+                None
+                if not any(
+                    record.get("detector_corner_residual_xy_px") is not None
+                    and record.get("oracle_corner_complete") is True
+                    and record.get("selected_gate_index") is not None
+                    for record in records
+                )
+                else np.median(
+                    np.stack([
+                        np.asarray(
+                            record["detector_corner_residual_xy_px"],
+                            dtype=np.float64,
+                        ).reshape(4, 2)
+                        for record in records
+                        if record.get("detector_corner_residual_xy_px") is not None
+                        and record.get("oracle_corner_complete") is True
+                        and record.get("selected_gate_index") is not None
+                    ]),
+                    axis=0,
+                ).tolist()
             ),
             "oracle_pnp_reprojection_rmse_px": scalar_summary(
                 "oracle_pnp_reprojection_rmse_px"
@@ -1834,7 +1901,15 @@ def main() -> None:
                 f"nees_p95={nees['p95']}",
                 flush=True,
             )
+            sensitivity = gate_audit_summary["planar_pnp_sensitivity"]
             oracle = gate_audit_summary["oracle_corner_decomposition"]
+            print(
+                f"[gate-pnp-audit:{args_cli.mode}] "
+                f"full_pose_pos_rmse={sensitivity['body_position_error_full_pnp_pose_m']['rmse']}m "
+                f"gt_attitude_pos_rmse={sensitivity['body_position_error_using_gt_attitude_m']['rmse']}m "
+                f"ekf_attitude_pos_rmse={sensitivity['body_position_error_using_preupdate_ekf_attitude_m']['rmse']}m",
+                flush=True,
+            )
             print(
                 f"[gate-pnp-audit:{args_cli.mode}] "
                 f"corner_rmse_px={oracle['detector_corner_error_px_rmse_per_frame']['rmse']} "
