@@ -151,13 +151,15 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "V6.2 UZH-style two-clone fusion requires the full Kalman gain; "
                 "legacy freeze_* gain masks are not valid runtime configurations"
             )
-        if (
-            bool(cfg.learned_debug_oracle_residual_fusion)
-            and bool(cfg.learned_debug_oracle_uzh_displacement_fusion)
-        ):
+        oracle_modes = (
+            bool(cfg.learned_debug_oracle_residual_fusion),
+            bool(cfg.learned_debug_oracle_uzh_displacement_fusion),
+            bool(cfg.learned_debug_oracle_body_end_displacement_fusion),
+        )
+        if sum(int(v) for v in oracle_modes) > 1:
             raise ValueError(
-                "choose only one Oracle fusion mode: kinematic residual or "
-                "exact UZH relative displacement"
+                "choose only one Oracle fusion mode: kinematic residual, "
+                "exact UZH relative displacement, or endpoint-body displacement"
             )
 
         self._lio = LearnedInertialOdometry(
@@ -395,6 +397,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         if (
             bool(self.cfg.learned_debug_oracle_residual_fusion)
             or bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion)
+            or bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion)
         ):
             robot = self.scene["robot"]
             key = round(float(timestamp_s), 9)
@@ -482,11 +485,12 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         target_mode = str(
             getattr(self._motion_predictor, "target_mode", "displacement")
         )
-        fusion_target_mode = (
-            "displacement"
-            if bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion)
-            else target_mode
-        )
+        if bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion):
+            fusion_target_mode = "displacement"
+        elif bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion):
+            fusion_target_mode = "displacement_body_end"
+        else:
+            fusion_target_mode = target_mode
         try:
             if fusion_target_mode == "kinematic_residual":
                 predicted_rel = self._lio.predicted_clone_kinematic_residual(
@@ -516,6 +520,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     start_timestamp_s=start_s,
                     end_timestamp_s=scheduled_end_s,
                     clone_tolerance_s=timing_tolerance_s,
+                )
+            elif fusion_target_mode == "displacement_body_end":
+                predicted_rel = (
+                    self._lio.predicted_clone_relative_displacement_body_end(
+                        start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                    )
                 )
             else:
                 raise RuntimeError(
@@ -551,6 +563,25 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 p_end_gt, _ = self._debug_truth_motion_history[end_key]
                 measurement_w = p_end_gt - p_start_gt
                 measurement_source = "oracle_uzh_relative_displacement"
+
+            if bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion):
+                start_key = round(float(start_s), 9)
+                end_key = round(float(scheduled_end_s), 9)
+                if (
+                    start_key not in self._debug_truth_motion_history
+                    or end_key not in self._debug_truth_motion_history
+                ):
+                    raise RuntimeError(
+                        "endpoint-body displacement Oracle is missing GT history for window"
+                    )
+                p_start_gt, _ = self._debug_truth_motion_history[start_key]
+                p_end_gt, _ = self._debug_truth_motion_history[end_key]
+                robot = self.scene["robot"]
+                R_end_gt = quat_wxyz_to_rotmat(
+                    _np(robot.data.root_quat_w[0]).astype(np.float64)
+                )
+                measurement_w = R_end_gt.T @ (p_end_gt - p_start_gt)
+                measurement_source = "oracle_body_end_relative_displacement"
 
             if bool(self.cfg.learned_debug_oracle_residual_fusion):
                 if target_mode not in (
@@ -627,6 +658,15 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     )
                 elif fusion_target_mode == "kinematic_residual_body_end_gravity_compensated":
                     self._lio.update_learned_clone_kinematic_residual_body_end_gravity_compensated(
+                        measurement_w,
+                        protected_covariance,
+                        start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                        marginalize_start_clone=True,
+                    )
+                elif fusion_target_mode == "displacement_body_end":
+                    self._lio.update_learned_clone_displacement_body_end(
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
