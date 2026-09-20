@@ -1229,6 +1229,7 @@ def main() -> None:
             "learned_fusion_hz_total": float(learned_fusions / max(duration_s, 1.0e-12)),
             "learned_fusion_hz_after_warmup": float(learned_fusions / warm_duration_s),
             "learned_update_skips": int(raw_env._learned_update_skip_count),
+            "last_learned_skip_reason": raw_env._last_learned_skip_reason,
             "ekf_bias_diagnostics": {
                 "accel_bias_norm_final": float(accel_bias_norms[-1]),
                 "accel_bias_norm_max": float(np.max(accel_bias_norms)),
