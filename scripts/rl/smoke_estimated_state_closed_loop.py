@@ -488,6 +488,7 @@ def main() -> None:
             "mission_gate_passes": int(mission_passes),
             "truth_gate_passes": int(truth_passes),
             "final_target_gate_index": int(last_nonreset_target_gate_index),
+            "final_truth_gate_index": int(command.gt_next_gate_idx[0].item()),
             "maximum_position_error_m": float(maximum_position_error),
             "maximum_velocity_error_mps": float(maximum_velocity_error),
             "last_pre_step_truth_diagnostic": last_pre_step_truth_diag,
