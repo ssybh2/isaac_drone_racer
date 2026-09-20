@@ -95,6 +95,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_imu_accel_b_meas = None
         self._last_imu_gyro_b_meas = None
         self._debug_truth_motion_history = {}
+        self.last_episode_diagnostic: dict[str, object] | None = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
         if self.num_envs != 1:
             raise ValueError("LearnedInertialRacingEnv currently requires num_envs=1")
@@ -1842,6 +1843,54 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self.reset_terminated = self.termination_manager.terminated
         self.reset_time_outs = self.termination_manager.time_outs
         self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
+
+        # Snapshot terminal diagnostics before IsaacLab resets the environment.
+        # This is evaluation-only metadata and is never consumed by the actor
+        # or estimator.
+        if bool(self.reset_buf[0].item()):
+            command = self.command_manager.get_term("target")
+            robot = self.scene["robot"]
+            gt_p = _np(robot.data.root_pos_w[0]).astype(np.float64)
+            gt_v = _np(robot.data.root_lin_vel_w[0]).astype(np.float64)
+            est_p = np.asarray(self._lio.p, dtype=np.float64)
+            est_v = np.asarray(self._lio.v, dtype=np.float64)
+
+            def _term(name: str) -> bool:
+                try:
+                    return bool(
+                        self.termination_manager.get_term(name)[0].item()
+                    )
+                except (AttributeError, KeyError, RuntimeError, ValueError):
+                    return False
+
+            self.last_episode_diagnostic = {
+                "steps": int(self.episode_length_buf[0].item()),
+                "duration_s": float(self.episode_length_buf[0].item() * self.step_dt),
+                "time_out": bool(self.reset_time_outs[0].item()),
+                "collision": _term("collision"),
+                "flyaway": _term("flyaway"),
+                "mission_gates_passed": int(
+                    command.mission_gate_pass_count[0].item()
+                ),
+                "truth_gates_passed": int(
+                    command.gt_gate_pass_count[0].item()
+                ),
+                "mission_next_gate_index": int(
+                    command.next_gate_idx[0].item()
+                ),
+                "truth_next_gate_index": int(
+                    command.gt_next_gate_idx[0].item()
+                ),
+                "num_gates": int(command.num_gates),
+                "position_error_m": float(np.linalg.norm(est_p - gt_p)),
+                "velocity_error_mps": float(np.linalg.norm(est_v - gt_v)),
+                "gate_attempts": int(self._gate_attempt_count),
+                "gate_updates": int(self._gate_update_count),
+                "gate_rejects": int(self._gate_reject_count),
+                "learned_updates": int(self._learned_update_count),
+                "learned_fusions": int(self._learned_fusion_count),
+                "learned_update_skips": int(self._learned_update_skip_count),
+            }
 
         if len(self.recorder_manager.active_terms) > 0:
             self.obs_buf = self.observation_manager.compute()
