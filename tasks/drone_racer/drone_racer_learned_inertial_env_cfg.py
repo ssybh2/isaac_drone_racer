@@ -66,6 +66,15 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # (millimetre sigma with roughly 0.2 m error). Keep learned heteroscedastic
     # uncertainty, but prevent implausibly confident EKF measurements.
     learned_sigma_floor_xyz_m: tuple[float, float, float] = (0.10, 0.10, 0.01)
+    # Delta-velocity checkpoints predict m/s rather than metres and therefore
+    # require a unit-consistent covariance floor. Start conservatively at the
+    # Oracle sigma that produced stable full-gain updates; calibrate from heldout
+    # network errors before final deployment.
+    learned_delta_velocity_sigma_floor_xyz_mps: tuple[float, float, float] = (
+        0.05,
+        0.05,
+        0.05,
+    )
     learned_covariance_scale: float = 1.25
     # Extra diagnostic/runtime multiplier applied to the final learned
     # measurement covariance. This is separate from the per-axis sigma floor
@@ -77,6 +86,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # this vector before fusion. Keep zero unless estimated from an independent
     # train/validation split; never fit it on the evaluation replay.
     learned_network_bias_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    learned_delta_velocity_network_bias_mps: tuple[float, float, float] = (
+        0.0,
+        0.0,
+        0.0,
+    )
     # Diagnostic-only learned relative-motion Kalman-gain constraint. "full"
     # preserves the production path. The freeze modes zero selected gain rows
     # before both state injection and Joseph covariance update, allowing us to
