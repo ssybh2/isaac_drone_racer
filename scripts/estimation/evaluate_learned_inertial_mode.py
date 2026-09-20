@@ -114,6 +114,14 @@ parser.add_argument(
 )
 parser.add_argument("--disable-visibility", action="store_true")
 parser.add_argument(
+    "--gate-gt-diagnostics",
+    action="store_true",
+    help=(
+        "Evaluation only: record simulator-truth errors for every Gate-PnP "
+        "measurement and association decision. Truth is never fused into the EKF."
+    ),
+)
+parser.add_argument(
     "--oracle-learned-residual-fusion",
     action="store_true",
     help=(
@@ -484,6 +492,7 @@ def _prepare_cfg():
     cfg.learned_debug_truth_orientation_for_features = bool(
         args_cli.truth_orientation_for_tcn_features
     )
+    cfg.gate_debug_gt_diagnostics = bool(args_cli.gate_gt_diagnostics)
     cfg.terminations.collision = None
     cfg.terminations.flyaway = None
     cfg.commands.target.randomise_start = None
@@ -636,6 +645,211 @@ def _load_replay():
     )
 
 
+def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
+    """Summarize per-attempt Gate-PnP audit records without affecting filtering."""
+
+    def scalar_values(key: str, subset=None) -> np.ndarray:
+        source = records if subset is None else subset
+        values = [
+            float(record[key])
+            for record in source
+            if record.get(key) is not None and np.isfinite(float(record[key]))
+        ]
+        return np.asarray(values, dtype=np.float64)
+
+    def scalar_summary(key: str, subset=None) -> dict:
+        values = scalar_values(key, subset)
+        if not len(values):
+            return {"samples": 0, "mean": None, "median": None, "p95": None, "max": None}
+        return {
+            "samples": int(len(values)),
+            "mean": float(np.mean(values)),
+            "median": float(np.median(values)),
+            "p95": float(np.percentile(values, 95.0)),
+            "max": float(np.max(values)),
+        }
+
+    accepted = [record for record in records if bool(record.get("accepted", False))]
+    rejected = [record for record in records if not bool(record.get("accepted", False))]
+
+    rejected_by_stage: dict[str, int] = {}
+    rejected_by_reason: dict[str, int] = {}
+    for record in rejected:
+        stage = str(record.get("reject_stage") or "unknown")
+        reason = str(record.get("reject_reason") or "unknown")
+        rejected_by_stage[stage] = rejected_by_stage.get(stage, 0) + 1
+        rejected_by_reason[reason] = rejected_by_reason.get(reason, 0) + 1
+
+    comparable = [
+        record
+        for record in records
+        if record.get("association_matches_active_gate") is not None
+    ]
+    matches = [
+        record for record in comparable
+        if bool(record.get("association_matches_active_gate"))
+    ]
+    mismatches = [
+        record for record in comparable
+        if not bool(record.get("association_matches_active_gate"))
+    ]
+
+    selected_gate_counts: dict[str, int] = {}
+    expected_gate_counts: dict[str, int] = {}
+    for record in accepted:
+        selected = record.get("selected_gate_index")
+        expected = record.get("expected_active_gate_index")
+        if selected is not None:
+            key = str(int(selected))
+            selected_gate_counts[key] = selected_gate_counts.get(key, 0) + 1
+        if expected is not None:
+            key = str(int(expected))
+            expected_gate_counts[key] = expected_gate_counts.get(key, 0) + 1
+
+    position_error_vectors = [
+        np.asarray(record["pnp_position_error_w_m"], dtype=np.float64).reshape(3)
+        for record in accepted
+        if record.get("pnp_position_error_w_m") is not None
+    ]
+    if position_error_vectors:
+        position_error_array = np.stack(position_error_vectors)
+        position_axis_bias = np.mean(position_error_array, axis=0).tolist()
+        position_axis_rmse = np.sqrt(
+            np.mean(position_error_array**2, axis=0)
+        ).tolist()
+    else:
+        position_axis_bias = None
+        position_axis_rmse = None
+
+    position_nees = scalar_values("position_nees_vs_gt", accepted)
+    nees_consistency = {
+        "samples": int(len(position_nees)),
+        "fraction_le_chi2_95": (
+            None if not len(position_nees)
+            else float(np.mean(position_nees <= 7.814727903))
+        ),
+        "fraction_le_chi2_99": (
+            None if not len(position_nees)
+            else float(np.mean(position_nees <= 11.34486673))
+        ),
+        "fraction_le_chi2_99p9": (
+            None if not len(position_nees)
+            else float(np.mean(position_nees <= 16.2662362))
+        ),
+    }
+
+    return {
+        "attempts": int(len(records)),
+        "accepted": int(len(accepted)),
+        "rejected": int(len(rejected)),
+        "acceptance_rate": (
+            None if not records else float(len(accepted) / len(records))
+        ),
+        "rejected_by_stage": rejected_by_stage,
+        "rejected_by_reason": rejected_by_reason,
+        "association": {
+            "comparable_attempts": int(len(comparable)),
+            "matches_active_gate": int(len(matches)),
+            "mismatches_active_gate": int(len(mismatches)),
+            "match_rate": (
+                None if not comparable else float(len(matches) / len(comparable))
+            ),
+            "accepted_selected_gate_counts": selected_gate_counts,
+            "accepted_expected_active_gate_counts": expected_gate_counts,
+            "matched_pnp_position_error_norm_m": scalar_summary(
+                "pnp_position_error_norm_m", matches
+            ),
+            "mismatched_pnp_position_error_norm_m": scalar_summary(
+                "pnp_position_error_norm_m", mismatches
+            ),
+        },
+        "pnp_position_error": {
+            "axis_bias_m": position_axis_bias,
+            "axis_rmse_m": position_axis_rmse,
+            "norm_m": scalar_summary("pnp_position_error_norm_m", accepted),
+        },
+        "pnp_orientation_error_deg": scalar_summary(
+            "pnp_orientation_error_deg", accepted
+        ),
+        "reprojection_rmse_px": scalar_summary(
+            "reprojection_rmse_px", accepted
+        ),
+        "camera_to_gate_range_m": scalar_summary(
+            "camera_to_gate_range_m", accepted
+        ),
+        "position_sigma_x_m": {
+            "samples": int(sum(
+                1 for record in accepted
+                if record.get("position_sigma_xyz_m") is not None
+            )),
+            "mean": (
+                None if not any(
+                    record.get("position_sigma_xyz_m") is not None
+                    for record in accepted
+                )
+                else float(np.mean([
+                    float(record["position_sigma_xyz_m"][0])
+                    for record in accepted
+                    if record.get("position_sigma_xyz_m") is not None
+                ]))
+            ),
+        },
+        "position_sigma_y_m": {
+            "samples": int(sum(
+                1 for record in accepted
+                if record.get("position_sigma_xyz_m") is not None
+            )),
+            "mean": (
+                None if not any(
+                    record.get("position_sigma_xyz_m") is not None
+                    for record in accepted
+                )
+                else float(np.mean([
+                    float(record["position_sigma_xyz_m"][1])
+                    for record in accepted
+                    if record.get("position_sigma_xyz_m") is not None
+                ]))
+            ),
+        },
+        "position_sigma_z_m": {
+            "samples": int(sum(
+                1 for record in accepted
+                if record.get("position_sigma_xyz_m") is not None
+            )),
+            "mean": (
+                None if not any(
+                    record.get("position_sigma_xyz_m") is not None
+                    for record in accepted
+                )
+                else float(np.mean([
+                    float(record["position_sigma_xyz_m"][2])
+                    for record in accepted
+                    if record.get("position_sigma_xyz_m") is not None
+                ]))
+            ),
+        },
+        "position_nees_vs_gt": scalar_summary(
+            "position_nees_vs_gt", accepted
+        ),
+        "position_nees_consistency": nees_consistency,
+        "innovation_mahalanobis2": scalar_summary("mahalanobis2"),
+        "filter_error_at_accepted_updates": {
+            "pre_position_norm_m": scalar_summary(
+                "pre_update_position_error_norm_m", accepted
+            ),
+            "post_position_norm_m": scalar_summary(
+                "post_update_position_error_norm_m", accepted
+            ),
+            "pre_orientation_deg": scalar_summary(
+                "pre_update_orientation_error_deg", accepted
+            ),
+            "post_orientation_deg": scalar_summary(
+                "post_update_orientation_error_deg", accepted
+            ),
+        },
+    }
+
+
 def main() -> None:
     _validate_inputs()
     cfg = _prepare_cfg()
@@ -643,6 +857,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     trace_path = output_dir / f"mode_{args_cli.mode}_trace.csv"
     summary_path = output_dir / f"mode_{args_cli.mode}_summary.json"
+    gate_audit_path = output_dir / f"mode_{args_cli.mode}_gate_pnp_diagnostics.jsonl"
 
     replay_actions, reference_truth_positions = _load_replay()
     env = gym.make(args_cli.task, cfg=cfg)
@@ -1284,6 +1499,13 @@ def main() -> None:
         gate_attempts = int(raw_env._gate_attempt_count)
         gate_accepted = int(raw_env._gate_update_count)
         gate_rejected = int(raw_env._gate_reject_count)
+        gate_records = list(getattr(raw_env, "_gate_diagnostics", []))
+        gate_audit_summary = _summarize_gate_pnp_diagnostics(gate_records)
+        if gate_records:
+            gate_audit_path.write_text(
+                "".join(json.dumps(record, sort_keys=True) + "\n" for record in gate_records),
+                encoding="utf-8",
+            )
 
         tail_count = max(1, int(round(0.2 * len(pos))))
         pos_norm = np.linalg.norm(pos, axis=1)
@@ -1511,6 +1733,11 @@ def main() -> None:
             "gate_acceptance_rate": (
                 None if gate_attempts == 0 else float(gate_accepted / gate_attempts)
             ),
+            "gate_gt_diagnostics_enabled": bool(cfg.gate_debug_gt_diagnostics),
+            "gate_pnp_diagnostics": gate_audit_summary,
+            "gate_pnp_diagnostics_path": (
+                str(gate_audit_path) if gate_records else None
+            ),
             "replay_truth_position_rmse_vs_A_m": replay_position_rmse_m,
             "replay_truth_position_max_diff_vs_A_m": replay_position_max_diff_m,
         }
@@ -1535,6 +1762,24 @@ def main() -> None:
         )
         print(f"[estimator-ab:{args_cli.mode}] trace={trace_path}", flush=True)
         print(f"[estimator-ab:{args_cli.mode}] summary={summary_path}", flush=True)
+        if gate_records:
+            pnp_pos = gate_audit_summary["pnp_position_error"]["norm_m"]
+            pnp_ori = gate_audit_summary["pnp_orientation_error_deg"]
+            association = gate_audit_summary["association"]
+            nees = gate_audit_summary["position_nees_vs_gt"]
+            print(
+                f"[gate-pnp-audit:{args_cli.mode}] "
+                f"accepted={gate_audit_summary['accepted']}/{gate_audit_summary['attempts']} "
+                f"assoc_match={association['match_rate']} "
+                f"pnp_pos_rmse={pnp_pos['mean']}m(mean) "
+                f"pnp_ori_mean={pnp_ori['mean']}deg "
+                f"nees_p95={nees['p95']}",
+                flush=True,
+            )
+            print(
+                f"[gate-pnp-audit:{args_cli.mode}] raw={gate_audit_path}",
+                flush=True,
+            )
     finally:
         env.close()
 
