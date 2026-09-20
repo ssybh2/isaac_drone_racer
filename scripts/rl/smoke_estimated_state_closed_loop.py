@@ -404,6 +404,20 @@ def main() -> None:
                 truth_passes += int(command.gate_passed[0].item())
 
             if step == 0 or (step + 1) % int(args_cli.progress_every) == 0:
+                last_gate_age = (
+                    None
+                    if gate_diag_state["last_accepted_timestamp_s"] is None
+                    else round(
+                        float(raw_env._timestamp_s())
+                        - gate_diag_state["last_accepted_timestamp_s"],
+                        3,
+                    )
+                )
+                top_reject = (
+                    gate_diag_state["reject_reasons"].most_common(1)[0]
+                    if gate_diag_state["reject_reasons"]
+                    else None
+                )
                 print(
                     "[estimated-state-smoke] "
                     f"step={step + 1}/{total_steps} "
@@ -415,20 +429,8 @@ def main() -> None:
                     f"gate_updates={int(raw_env._gate_update_count)} "
                     f"gate_rejects={int(raw_env._gate_reject_count)} "
                     f"learned_fusions={int(raw_env._learned_fusion_count)} "
-                    f"last_gate_age={(
-                        None
-                        if gate_diag_state['last_accepted_timestamp_s'] is None
-                        else round(
-                            float(raw_env._timestamp_s())
-                            - gate_diag_state['last_accepted_timestamp_s'],
-                            3,
-                        )
-                    )} "
-                    f"top_reject={(
-                        gate_diag_state['reject_reasons'].most_common(1)[0]
-                        if gate_diag_state['reject_reasons']
-                        else None
-                    )}",
+                    f"last_gate_age={last_gate_age} "
+                    f"top_reject={top_reject}",
                     flush=True,
                 )
 
