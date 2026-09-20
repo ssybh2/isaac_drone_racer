@@ -931,7 +931,10 @@ class LearnedInertialOdometry:
         for clone_index in range(self.clone_count):
             if freeze_all_clones:
                 K_eff[self._clone_slice(clone_index), :] = 0.0
-            elif freeze_position:
+                continue
+            if freeze_attitude_bias:
+                K_eff[self._clone_orientation_slice(clone_index), :] = 0.0
+            if freeze_position:
                 K_eff[self._clone_position_slice(clone_index), :] = 0.0
 
         return K_eff
@@ -1073,6 +1076,12 @@ class LearnedInertialOdometry:
         # I - 0.5*[dtheta]_x on the attitude block.
         reset = np.eye(self.P.shape[0], dtype=np.float64)
         reset[0:3, 0:3] = np.eye(3) - 0.5 * _skew(dx[0:3])
+        for clone_index in range(self.clone_count):
+            clone_theta = dx[self._clone_orientation_slice(clone_index)]
+            reset[
+                self._clone_orientation_slice(clone_index),
+                self._clone_orientation_slice(clone_index),
+            ] = np.eye(3) - 0.5 * _skew(clone_theta)
         self.P = reset @ self.P @ reset.T
         self.P = 0.5 * (self.P + self.P.T)
 
