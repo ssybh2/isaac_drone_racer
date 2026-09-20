@@ -163,6 +163,10 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     gate_orientation_sigma_deg: float = 5.0
     gate_use_orientation_update: bool = True
     gate_position_mahalanobis2_max: float = 16.27  # chi2(3), ~99.9%
+    # Evaluation-only audit switch. When enabled, the runtime records simulator
+    # truth alongside Gate-PnP measurements so detector/PnP/association quality
+    # can be diagnosed. Truth is never fed into the estimator update itself.
+    gate_debug_gt_diagnostics: bool = False
 
     # Deployment rule: simulator GT is used only once at reset to provide the
     # known fixed initial pose. It is never read by policy observations or
