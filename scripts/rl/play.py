@@ -59,6 +59,17 @@ parser.add_argument("--log", type=int, default=None, help="Log the observations 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+
+# The learned-inertial deployment task always needs its onboard camera, even
+# for headless/log-only evaluation.
+if args_cli.task == "Isaac-Drone-Racer-Learned-Inertial-RL-v0":
+    args_cli.enable_cameras = True
+    if args_cli.num_envs not in (None, 1):
+        parser.error(
+            "Isaac-Drone-Racer-Learned-Inertial-RL-v0 currently requires "
+            "--num_envs 1 (validated detector/estimator runtime is single-stream)"
+        )
+
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
