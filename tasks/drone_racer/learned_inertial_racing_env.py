@@ -939,9 +939,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "exception_message": None,
             "oracle_corner_complete": None,
             "detector_corner_error_px_by_corner": None,
+            "detector_corner_residual_xy_px": None,
             "detector_corner_error_px_rmse": None,
             "detector_corner_error_px_mean": None,
             "detector_corner_error_px_max": None,
+            "detector_gate_width_error_px": None,
+            "detector_gate_height_error_px": None,
+            "detector_gate_centroid_error_xy_px": None,
             "oracle_pnp_reprojection_rmse_px": None,
             "oracle_pnp_gate_translation_error_m": None,
             "oracle_pnp_gate_rotation_error_deg": None,
@@ -949,6 +953,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "oracle_pnp_body_rotation_error_deg": None,
             "oracle_extrinsic_translation_error_m": None,
             "oracle_extrinsic_rotation_error_deg": None,
+            "detector_pnp_gate_translation_error_m": None,
+            "detector_pnp_gate_rotation_error_deg": None,
+            "detector_pnp_body_position_error_full_pose_m": None,
+            "detector_pnp_body_position_error_gt_attitude_m": None,
+            "detector_pnp_body_position_error_ekf_attitude_m": None,
         }
 
         try:
@@ -987,6 +996,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._gate_diagnostics.append(diagnostic)
             return
 
+        audit_snapshot = None
+        audit_T_cg_truth = None
         if bool(self.cfg.gate_debug_gt_diagnostics):
             # Decisive Stage2 decomposition on the exact live frame:
             # simulator truth -> perfect projected pixels -> the same PnP stack.
@@ -1000,26 +1011,57 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     env_id=0,
                     timestamp_s=self._timestamp_s(),
                 )
+                audit_snapshot = snapshot
                 oracle_pipeline = Stage2APerceptionPipeline(
                     self._gate_builder.geometry,
                     snapshot.camera,
                     self._gate_builder.T_bc,
                 )
                 T_cg_truth = snapshot.truth.T_wc.inverse() @ snapshot.truth.T_wg
+                audit_T_cg_truth = T_cg_truth
                 oracle_corners = oracle_pipeline.project_perfect_corners(
                     T_cg_truth,
                     timestamp_s=self._timestamp_s(),
                 )
                 diagnostic["oracle_corner_complete"] = bool(oracle_corners.complete)
 
-                corner_errors_px = np.linalg.norm(
-                    np.asarray(observation.corners_uv, dtype=np.float64)
-                    - np.asarray(oracle_corners.corners_uv, dtype=np.float64),
-                    axis=1,
+                detector_corners = np.asarray(
+                    observation.corners_uv, dtype=np.float64
                 )
+                oracle_corner_uv = np.asarray(
+                    oracle_corners.corners_uv, dtype=np.float64
+                )
+                corner_residual_xy = detector_corners - oracle_corner_uv
+                corner_errors_px = np.linalg.norm(corner_residual_xy, axis=1)
                 diagnostic["detector_corner_error_px_by_corner"] = (
                     corner_errors_px.tolist()
                 )
+                diagnostic["detector_corner_residual_xy_px"] = (
+                    corner_residual_xy.tolist()
+                )
+
+                def _quad_width_height_centroid(corners):
+                    width = 0.5 * (
+                        np.linalg.norm(corners[1] - corners[0])
+                        + np.linalg.norm(corners[2] - corners[3])
+                    )
+                    height = 0.5 * (
+                        np.linalg.norm(corners[3] - corners[0])
+                        + np.linalg.norm(corners[2] - corners[1])
+                    )
+                    return float(width), float(height), np.mean(corners, axis=0)
+
+                det_w, det_h, det_center = _quad_width_height_centroid(
+                    detector_corners
+                )
+                ora_w, ora_h, ora_center = _quad_width_height_centroid(
+                    oracle_corner_uv
+                )
+                diagnostic["detector_gate_width_error_px"] = float(det_w - ora_w)
+                diagnostic["detector_gate_height_error_px"] = float(det_h - ora_h)
+                diagnostic["detector_gate_centroid_error_xy_px"] = (
+                    det_center - ora_center
+                ).tolist()
                 diagnostic["detector_corner_error_px_rmse"] = float(
                     np.sqrt(np.mean(corner_errors_px**2))
                 )
@@ -1092,6 +1134,59 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             return
 
         diagnostic["selected_gate_index"] = int(measurement.gate_index)
+
+        if audit_snapshot is not None and audit_T_cg_truth is not None:
+            gate_translation_error = (
+                np.asarray(measurement.T_cg.t, dtype=np.float64)
+                - np.asarray(audit_T_cg_truth.t, dtype=np.float64)
+            )
+            diagnostic["detector_pnp_gate_translation_error_m"] = float(
+                np.linalg.norm(gate_translation_error)
+            )
+            gate_relative_R = measurement.T_cg.R @ audit_T_cg_truth.R.T
+            gate_cosine = float(
+                np.clip((np.trace(gate_relative_R) - 1.0) * 0.5, -1.0, 1.0)
+            )
+            diagnostic["detector_pnp_gate_rotation_error_deg"] = float(
+                np.degrees(np.arccos(gate_cosine))
+            )
+
+            gt_body_position = np.asarray(
+                audit_snapshot.truth.T_wb.t, dtype=np.float64
+            )
+            diagnostic["detector_pnp_body_position_error_full_pose_m"] = float(
+                np.linalg.norm(
+                    np.asarray(measurement.position_w_b, dtype=np.float64)
+                    - gt_body_position
+                )
+            )
+
+            # Position reconstruction using only PnP translation t_cg, with
+            # either GT attitude (diagnostic lower bound) or the pre-update EKF
+            # attitude (deployable formulation). This isolates the range-lever
+            # amplification caused by noisy planar-PnP orientation.
+            p_wg = np.asarray(audit_snapshot.truth.T_wg.t, dtype=np.float64)
+            t_cg = np.asarray(measurement.T_cg.t, dtype=np.float64)
+            R_bc = np.asarray(self._gate_builder.T_bc.R, dtype=np.float64)
+            t_bc = np.asarray(self._gate_builder.T_bc.t, dtype=np.float64)
+
+            def _body_position_from_attitude(R_wb):
+                R_wb = np.asarray(R_wb, dtype=np.float64).reshape(3, 3)
+                R_wc = R_wb @ R_bc
+                p_wc = p_wg - R_wc @ t_cg
+                return p_wc - R_wb @ t_bc
+
+            p_wb_gt_attitude = _body_position_from_attitude(
+                audit_snapshot.truth.T_wb.R
+            )
+            p_wb_ekf_attitude = _body_position_from_attitude(self._lio.R)
+            diagnostic["detector_pnp_body_position_error_gt_attitude_m"] = float(
+                np.linalg.norm(p_wb_gt_attitude - gt_body_position)
+            )
+            diagnostic["detector_pnp_body_position_error_ekf_attitude_m"] = float(
+                np.linalg.norm(p_wb_ekf_attitude - gt_body_position)
+            )
+
         expected_gate = diagnostic["expected_active_gate_index"]
         if expected_gate is not None:
             diagnostic["association_matches_active_gate"] = bool(
