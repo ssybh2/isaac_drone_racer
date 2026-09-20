@@ -557,6 +557,7 @@ def main() -> None:
     update_dx_position_norm: list[float] = []
     update_dx_accel_bias_norm: list[float] = []
     update_dx_gyro_bias_norm: list[float] = []
+    update_dx_clone_orientation_norm: list[float] = []
     update_dx_clone_velocity_norm: list[float] = []
     update_dx_clone_position_norm: list[float] = []
     update_k_raw_current_norm: list[float] = []
@@ -566,8 +567,15 @@ def main() -> None:
     update_k_position_norm: list[float] = []
     update_k_accel_bias_norm: list[float] = []
     update_k_gyro_bias_norm: list[float] = []
+    update_k_clone_orientation_norm: list[float] = []
     update_k_clone_velocity_norm: list[float] = []
     update_k_clone_position_norm: list[float] = []
+    update_measurement_unobservable_projection_norm: list[float] = []
+    update_translation_nullspace_norm: list[float] = []
+    update_unobservable_information: list[np.ndarray] = []
+    update_innovation_cov_condition: list[float] = []
+    update_innovation_cov_min_eig: list[float] = []
+    update_innovation_cov_max_eig: list[float] = []
 
     try:
         env.reset(seed=int(args_cli.seed))
@@ -650,6 +658,9 @@ def main() -> None:
                     update_dx_position_norm.append(float(np.linalg.norm(diag["dx_position"])))
                     update_dx_accel_bias_norm.append(float(np.linalg.norm(diag["dx_accel_bias"])))
                     update_dx_gyro_bias_norm.append(float(np.linalg.norm(diag["dx_gyro_bias"])))
+                    update_dx_clone_orientation_norm.append(
+                        float(diag["dx_clone_orientation_norm"])
+                    )
                     update_dx_clone_velocity_norm.append(
                         float(diag["dx_clone_velocity_norm"])
                     )
@@ -677,11 +688,35 @@ def main() -> None:
                     update_k_gyro_bias_norm.append(
                         float(diag["kalman_gain_gyro_bias_norm"])
                     )
+                    update_k_clone_orientation_norm.append(
+                        float(diag["kalman_gain_clone_orientation_norm"])
+                    )
                     update_k_clone_velocity_norm.append(
                         float(diag["kalman_gain_clone_velocity_norm"])
                     )
                     update_k_clone_position_norm.append(
                         float(diag["kalman_gain_clone_position_norm"])
+                    )
+                    update_measurement_unobservable_projection_norm.append(
+                        float(diag["measurement_unobservable_projection_norm"])
+                    )
+                    update_translation_nullspace_norm.append(
+                        float(diag["measurement_translation_nullspace_norm"])
+                    )
+                    update_unobservable_information.append(
+                        np.asarray(
+                            diag["unobservable_information_diag"],
+                            dtype=np.float64,
+                        ).reshape(4)
+                    )
+                    update_innovation_cov_condition.append(
+                        float(diag["innovation_covariance_condition_number"])
+                    )
+                    update_innovation_cov_min_eig.append(
+                        float(diag["innovation_covariance_min_eigenvalue"])
+                    )
+                    update_innovation_cov_max_eig.append(
+                        float(diag["innovation_covariance_max_eigenvalue"])
                     )
 
                 timestamp_key = round(float(raw_env._timestamp_s()), 6)
@@ -1146,6 +1181,8 @@ def main() -> None:
                 "dx_accel_bias_norm_max_mps2": None if not update_dx_accel_bias_norm else float(np.max(update_dx_accel_bias_norm)),
                 "dx_gyro_bias_norm_mean_radps": None if not update_dx_gyro_bias_norm else float(np.mean(update_dx_gyro_bias_norm)),
                 "dx_gyro_bias_norm_max_radps": None if not update_dx_gyro_bias_norm else float(np.max(update_dx_gyro_bias_norm)),
+                "dx_clone_orientation_norm_mean_rad": None if not update_dx_clone_orientation_norm else float(np.mean(update_dx_clone_orientation_norm)),
+                "dx_clone_orientation_norm_max_rad": None if not update_dx_clone_orientation_norm else float(np.max(update_dx_clone_orientation_norm)),
                 "dx_clone_velocity_norm_mean_mps": None if not update_dx_clone_velocity_norm else float(np.mean(update_dx_clone_velocity_norm)),
                 "dx_clone_velocity_norm_max_mps": None if not update_dx_clone_velocity_norm else float(np.max(update_dx_clone_velocity_norm)),
                 "dx_clone_position_norm_mean_m": None if not update_dx_clone_position_norm else float(np.mean(update_dx_clone_position_norm)),
@@ -1164,10 +1201,22 @@ def main() -> None:
                 "kalman_gain_accel_bias_norm_max": None if not update_k_accel_bias_norm else float(np.max(update_k_accel_bias_norm)),
                 "kalman_gain_gyro_bias_norm_mean": None if not update_k_gyro_bias_norm else float(np.mean(update_k_gyro_bias_norm)),
                 "kalman_gain_gyro_bias_norm_max": None if not update_k_gyro_bias_norm else float(np.max(update_k_gyro_bias_norm)),
+                "kalman_gain_clone_orientation_norm_mean": None if not update_k_clone_orientation_norm else float(np.mean(update_k_clone_orientation_norm)),
+                "kalman_gain_clone_orientation_norm_max": None if not update_k_clone_orientation_norm else float(np.max(update_k_clone_orientation_norm)),
                 "kalman_gain_clone_velocity_norm_mean": None if not update_k_clone_velocity_norm else float(np.mean(update_k_clone_velocity_norm)),
                 "kalman_gain_clone_velocity_norm_max": None if not update_k_clone_velocity_norm else float(np.max(update_k_clone_velocity_norm)),
                 "kalman_gain_clone_position_norm_mean": None if not update_k_clone_position_norm else float(np.mean(update_k_clone_position_norm)),
                 "kalman_gain_clone_position_norm_max": None if not update_k_clone_position_norm else float(np.max(update_k_clone_position_norm)),
+                "measurement_unobservable_projection_norm_mean": None if not update_measurement_unobservable_projection_norm else float(np.mean(update_measurement_unobservable_projection_norm)),
+                "measurement_unobservable_projection_norm_max": None if not update_measurement_unobservable_projection_norm else float(np.max(update_measurement_unobservable_projection_norm)),
+                "measurement_translation_nullspace_norm_mean": None if not update_translation_nullspace_norm else float(np.mean(update_translation_nullspace_norm)),
+                "measurement_translation_nullspace_norm_max": None if not update_translation_nullspace_norm else float(np.max(update_translation_nullspace_norm)),
+                "unobservable_information_diag_mean": None if not update_unobservable_information else np.mean(np.stack(update_unobservable_information), axis=0).tolist(),
+                "unobservable_information_diag_max": None if not update_unobservable_information else np.max(np.stack(update_unobservable_information), axis=0).tolist(),
+                "innovation_covariance_condition_number_mean": None if not update_innovation_cov_condition else float(np.mean(update_innovation_cov_condition)),
+                "innovation_covariance_condition_number_max": None if not update_innovation_cov_condition else float(np.max(update_innovation_cov_condition)),
+                "innovation_covariance_min_eigenvalue_min": None if not update_innovation_cov_min_eig else float(np.min(update_innovation_cov_min_eig)),
+                "innovation_covariance_max_eigenvalue_max": None if not update_innovation_cov_max_eig else float(np.max(update_innovation_cov_max_eig)),
             },
             "clone_count_mean": float(np.mean(clones)),
             "clone_count_max": int(np.max(clones)),
