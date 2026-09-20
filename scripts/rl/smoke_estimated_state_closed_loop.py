@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -222,6 +223,91 @@ def _diagnostic_truth_error(raw_env) -> dict:
     }
 
 
+def _snapshot_truth_state(raw_env) -> dict:
+    robot = raw_env.scene["robot"]
+    return {
+        "timestamp_s": float(raw_env._timestamp_s()),
+        "position_w": (
+            robot.data.root_pos_w[0].detach().cpu().numpy().astype(np.float64)
+        ),
+        "velocity_w": (
+            robot.data.root_lin_vel_w[0].detach().cpu().numpy().astype(np.float64)
+        ),
+        "quat_wxyz": (
+            robot.data.root_quat_w[0].detach().cpu().numpy().astype(np.float64)
+        ),
+    }
+
+
+def _consume_gate_diagnostics(raw_env, state: dict) -> None:
+    diagnostics = raw_env._gate_diagnostics
+    # A reset clears the list. Restart indexing without mixing the new episode.
+    if len(diagnostics) < state["cursor"]:
+        state["cursor"] = 0
+
+    for item in diagnostics[state["cursor"]:]:
+        if bool(item.get("accepted", False)):
+            state["accepted"] += 1
+            if item.get("selected_gate_index") is not None:
+                state["accepted_gate_indices"][
+                    int(item["selected_gate_index"])
+                ] += 1
+            if item.get("timestamp_s") is not None:
+                state["last_accepted_timestamp_s"] = float(
+                    item["timestamp_s"]
+                )
+        else:
+            reason = item.get("reject_reason") or "unknown"
+            state["reject_reasons"][str(reason)] += 1
+
+        visible = item.get("visible_corner_count")
+        if visible is not None:
+            state["visible_corner_hist"][int(visible)] += 1
+
+        assoc = item.get("association_pixel_rmse_px")
+        if assoc is not None and np.isfinite(float(assoc)):
+            state["association_rmse_px"].append(float(assoc))
+
+    state["cursor"] = len(diagnostics)
+
+
+def _maybe_record_learned_truth_error(raw_env, truth_history: dict, state: dict) -> None:
+    update_timestamp = raw_env._last_learned_update_timestamp_s
+    if update_timestamp is None:
+        return
+    update_timestamp = float(update_timestamp)
+    if state["last_update_timestamp_s"] == update_timestamp:
+        return
+    state["last_update_timestamp_s"] = update_timestamp
+
+    start_s = raw_env._last_learned_window_start_s
+    end_s = raw_env._last_learned_window_end_s
+    measurement = raw_env._last_learned_measurement_w
+    if start_s is None or end_s is None or measurement is None:
+        return
+
+    start_key = round(float(start_s), 6)
+    end_key = round(float(end_s), 6)
+    if start_key not in truth_history or end_key not in truth_history:
+        return
+
+    start = truth_history[start_key]
+    end = truth_history[end_key]
+    dt = float(end_s) - float(start_s)
+    gravity_w = np.asarray(raw_env._lio.gravity_w, dtype=np.float64).reshape(3)
+    R_end = _rotation_from_quat_wxyz(end["quat_wxyz"])
+    truth_delta_v_b = R_end.T @ (
+        end["velocity_w"] - start["velocity_w"] - gravity_w * dt
+    )
+    measurement = np.asarray(measurement, dtype=np.float64).reshape(3)
+    error = measurement - truth_delta_v_b
+    state["errors"].append(error)
+    state["truth_targets"].append(truth_delta_v_b)
+    state["measurements"].append(measurement)
+    if bool(raw_env._last_learned_fused):
+        state["fused_error_norms"].append(float(np.linalg.norm(error)))
+
+
 def main() -> None:
     cfg = parse_env_cfg(
         args_cli.task,
@@ -248,12 +334,42 @@ def main() -> None:
         terminated_early = False
         termination_step = None
 
+        gate_diag_state = {
+            "cursor": 0,
+            "accepted": 0,
+            "reject_reasons": Counter(),
+            "accepted_gate_indices": Counter(),
+            "visible_corner_hist": Counter(),
+            "association_rmse_px": [],
+            "last_accepted_timestamp_s": None,
+        }
+        learned_truth_state = {
+            "last_update_timestamp_s": None,
+            "errors": [],
+            "truth_targets": [],
+            "measurements": [],
+            "fused_error_norms": [],
+        }
+        truth_history = {}
+
         total_steps = int(np.ceil(float(args_cli.duration_s) / raw_env.step_dt))
 
         last_nonreset_target_gate_index = int(command.next_gate_idx[0].item())
         last_pre_step_truth_diag = None
 
         for step in range(total_steps):
+            truth_state = _snapshot_truth_state(raw_env)
+            truth_history[round(truth_state["timestamp_s"], 6)] = truth_state
+            cutoff_s = truth_state["timestamp_s"] - 1.5
+            for key in list(truth_history):
+                if key < cutoff_s:
+                    del truth_history[key]
+
+            _consume_gate_diagnostics(raw_env, gate_diag_state)
+            _maybe_record_learned_truth_error(
+                raw_env, truth_history, learned_truth_state
+            )
+
             # Capture estimator-vs-truth diagnostics before env.step(). IsaacLab
             # auto-resets terminated environments inside step(), so reading GT
             # afterwards would compare a reset state and can manufacture a huge
@@ -298,7 +414,21 @@ def main() -> None:
                     f"v_err={truth_diag['velocity_error_mps']:.3f}m/s "
                     f"gate_updates={int(raw_env._gate_update_count)} "
                     f"gate_rejects={int(raw_env._gate_reject_count)} "
-                    f"learned_fusions={int(raw_env._learned_fusion_count)}",
+                    f"learned_fusions={int(raw_env._learned_fusion_count)} "
+                    f"last_gate_age={(
+                        None
+                        if gate_diag_state['last_accepted_timestamp_s'] is None
+                        else round(
+                            float(raw_env._timestamp_s())
+                            - gate_diag_state['last_accepted_timestamp_s'],
+                            3,
+                        )
+                    )} "
+                    f"top_reject={(
+                        gate_diag_state['reject_reasons'].most_common(1)[0]
+                        if gate_diag_state['reject_reasons']
+                        else None
+                    )}",
                     flush=True,
                 )
 
@@ -306,6 +436,23 @@ def main() -> None:
                 terminated_early = True
                 termination_step = step + 1
                 break
+
+        _consume_gate_diagnostics(raw_env, gate_diag_state)
+        _maybe_record_learned_truth_error(
+            raw_env, truth_history, learned_truth_state
+        )
+
+        learned_errors = (
+            np.asarray(learned_truth_state["errors"], dtype=np.float64)
+            if learned_truth_state["errors"]
+            else np.empty((0, 3), dtype=np.float64)
+        )
+        fused_error_norms = np.asarray(
+            learned_truth_state["fused_error_norms"], dtype=np.float64
+        )
+        association_rmse = np.asarray(
+            gate_diag_state["association_rmse_px"], dtype=np.float64
+        )
 
         summary = {
             "task": args_cli.task,
@@ -324,6 +471,58 @@ def main() -> None:
             "gate_updates_current_episode": int(raw_env._gate_update_count),
             "gate_rejects_current_episode": int(raw_env._gate_reject_count),
             "learned_fusions_current_episode": int(raw_env._learned_fusion_count),
+            "gate_diagnostics_pre_reset": {
+                "accepted": int(gate_diag_state["accepted"]),
+                "reject_reasons": dict(gate_diag_state["reject_reasons"]),
+                "accepted_gate_indices": {
+                    str(k): int(v)
+                    for k, v in gate_diag_state["accepted_gate_indices"].items()
+                },
+                "visible_corner_histogram": {
+                    str(k): int(v)
+                    for k, v in gate_diag_state["visible_corner_hist"].items()
+                },
+                "last_accepted_timestamp_s": gate_diag_state[
+                    "last_accepted_timestamp_s"
+                ],
+                "association_rmse_px": {
+                    "samples": int(association_rmse.size),
+                    "median": (
+                        None if not association_rmse.size
+                        else float(np.median(association_rmse))
+                    ),
+                    "p95": (
+                        None if not association_rmse.size
+                        else float(np.percentile(association_rmse, 95.0))
+                    ),
+                    "max": (
+                        None if not association_rmse.size
+                        else float(np.max(association_rmse))
+                    ),
+                },
+            },
+            "learned_body_delta_v_gt_audit": {
+                "samples": int(learned_errors.shape[0]),
+                "axis_rmse_mps": (
+                    None if not learned_errors.size
+                    else np.sqrt(np.mean(learned_errors**2, axis=0)).tolist()
+                ),
+                "norm_rmse_mps": (
+                    None if not learned_errors.size
+                    else float(
+                        np.sqrt(np.mean(np.sum(learned_errors**2, axis=1)))
+                    )
+                ),
+                "fused_samples": int(fused_error_norms.size),
+                "fused_norm_rmse_mps": (
+                    None if not fused_error_norms.size
+                    else float(np.sqrt(np.mean(fused_error_norms**2)))
+                ),
+                "fused_norm_max_mps": (
+                    None if not fused_error_norms.size
+                    else float(np.max(fused_error_norms))
+                ),
+            },
             "last_control": last_control,
             "controller_uses_simulator_root_state": False,
             "mission_progression_uses_simulator_root_state": False,
