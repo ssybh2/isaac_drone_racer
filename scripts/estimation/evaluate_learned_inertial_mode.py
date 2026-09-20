@@ -869,6 +869,7 @@ def main() -> None:
                                 "kinematic_residual_body_end",
                                 "kinematic_residual_body_end_gyro_aligned",
                                 "kinematic_residual_body_end_gravity_compensated",
+                                "displacement_body_end_gyro_aligned",
                             ):
                                 if end_key not in truth_orientation_by_time:
                                     raise RuntimeError(
