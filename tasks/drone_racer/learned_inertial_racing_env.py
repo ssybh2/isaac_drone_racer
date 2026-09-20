@@ -85,6 +85,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._gate_reject_count = 0
         self._last_gate_mahalanobis2 = None
         self._gate_diagnostics: list[dict[str, object]] = []
+        self._gate_stress_rng = None
+        self._gate_observation_queue: list[tuple[float, object, dict[str, object]]] = []
+        self._gate_stress_frame_drop_count = 0
+        self._gate_stress_corner_drop_count = 0
         self._imu_rng = None
         self._imu_accel_bias_b = np.zeros(3, dtype=np.float64)
         self._imu_gyro_bias_b = np.zeros(3, dtype=np.float64)
@@ -143,6 +147,29 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         )
         if any(float(value) < 0.0 or not np.isfinite(float(value)) for value in imu_sigmas):
             raise ValueError("IMU corruption and EKF noise sigmas must be finite and non-negative")
+
+        stress_probabilities = (
+            float(cfg.gate_stress_frame_drop_probability),
+            float(cfg.gate_stress_corner_drop_probability),
+        )
+        if any(
+            not np.isfinite(value) or value < 0.0 or value > 1.0
+            for value in stress_probabilities
+        ):
+            raise ValueError("gate stress probabilities must be finite and in [0, 1]")
+        stress_nonnegative = (
+            float(cfg.gate_stress_burst_start_s),
+            float(cfg.gate_stress_burst_duration_s),
+            float(cfg.gate_stress_pixel_noise_sigma_px),
+            float(cfg.gate_stress_latency_s),
+        )
+        if any(
+            not np.isfinite(value) or value < 0.0
+            for value in stress_nonnegative
+        ):
+            raise ValueError(
+                "gate stress start/duration/noise/latency must be finite and non-negative"
+            )
 
         filter_structure = str(
             getattr(cfg, "learned_filter_structure", "legacy_current_clone")
@@ -253,6 +280,12 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._gate_reject_count = 0
         self._last_gate_mahalanobis2 = None
         self._gate_diagnostics = []
+        self._gate_stress_rng = np.random.default_rng(
+            int(self.cfg.gate_stress_seed)
+        )
+        self._gate_observation_queue = []
+        self._gate_stress_frame_drop_count = 0
+        self._gate_stress_corner_drop_count = 0
         self.learned_inertial_state = self._lio.state()
 
     def _initialize_detector_and_gate_builder(self) -> None:
