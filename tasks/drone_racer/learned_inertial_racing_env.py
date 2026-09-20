@@ -397,26 +397,22 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._next_learned_update_s = now + window_s
             return
 
-        # The control loop is 100 Hz and learned updates are 20 Hz by default.
-        # Record whether an endpoint clone is due, but defer the actual clone
-        # augmentation until after any learned update at this same timestamp.
-        #
-        # This ordering matters for constrained/Schmidt-style gain modes that
-        # freeze clone rows while correcting the current velocity/position. If
-        # the endpoint were cloned before the update, the clone would retain
-        # the pre-update nominal state and feed the previous correction back as
-        # a spurious innovation when it becomes a future window start.
+        # V6.2 follows the UZH/TLIO stochastic-cloning ordering: create the
+        # endpoint clone first, then form the relative factor between the
+        # historical start clone and this endpoint clone. Unlike the legacy
+        # constrained-gain path, the endpoint clone participates in the same
+        # full Kalman update and therefore cannot remain stale.
         clone_due_now = False
         if now + 1.0e-9 >= self._next_clone_s:
             clone_due_now = abs(now - self._next_clone_s) <= timing_tolerance_s
-            if not clone_due_now:
+            if clone_due_now:
+                self._lio.clone_current_position()
+            else:
                 # Never label a current state with a historical clone timestamp.
                 self._learned_update_skip_count += 1
             self._next_clone_s += update_period_s
 
         if now + 1.0e-9 < self._next_learned_update_s:
-            if clone_due_now:
-                self._lio.clone_current_position()
             return
 
         scheduled_end_s = float(self._next_learned_update_s)
@@ -425,12 +421,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
 
         # A delayed endpoint would pair the TCN window with the wrong current
         # EKF state, so drop it instead of fusing time-misaligned information.
-        if abs(now - scheduled_end_s) > timing_tolerance_s:
+        if (
+            abs(now - scheduled_end_s) > timing_tolerance_s
+            or not clone_due_now
+        ):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
             self._motion_buffer.discard_before(start_s)
-            if clone_due_now:
-                self._lio.clone_current_position()
             return
 
         try:
@@ -439,8 +436,6 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
             self._motion_buffer.discard_before(start_s)
-            if clone_due_now:
-                self._lio.clone_current_position()
             return
 
         prediction = self._motion_predictor.predict(window)
@@ -462,28 +457,32 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         )
         try:
             if target_mode == "kinematic_residual":
-                predicted_rel = self._lio.predicted_kinematic_residual(
+                predicted_rel = self._lio.predicted_clone_kinematic_residual(
                     start_timestamp_s=start_s,
+                    end_timestamp_s=scheduled_end_s,
                     clone_tolerance_s=timing_tolerance_s,
                 )
             elif target_mode in (
                 "kinematic_residual_body_end",
                 "kinematic_residual_body_end_gyro_aligned",
             ):
-                predicted_rel = self._lio.predicted_kinematic_residual_body_end(
+                predicted_rel = self._lio.predicted_clone_kinematic_residual_body_end(
                     start_timestamp_s=start_s,
+                    end_timestamp_s=scheduled_end_s,
                     clone_tolerance_s=timing_tolerance_s,
                 )
             elif target_mode == "kinematic_residual_body_end_gravity_compensated":
                 predicted_rel = (
-                    self._lio.predicted_kinematic_residual_body_end_gravity_compensated(
+                    self._lio.predicted_clone_kinematic_residual_body_end_gravity_compensated(
                         start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
                     )
                 )
             elif target_mode == "displacement":
-                predicted_rel = self._lio.predicted_relative_displacement(
+                predicted_rel = self._lio.predicted_clone_relative_displacement(
                     start_timestamp_s=start_s,
+                    end_timestamp_s=scheduled_end_s,
                     clone_tolerance_s=timing_tolerance_s,
                 )
             else:
@@ -559,39 +558,43 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             )
             if should_fuse:
                 if target_mode == "kinematic_residual":
-                    self._lio.update_learned_kinematic_residual(
+                    self._lio.update_learned_clone_kinematic_residual(
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
-                        marginalize_used_clone=True,
+                        marginalize_start_clone=True,
                     )
                 elif target_mode in (
                     "kinematic_residual_body_end",
                     "kinematic_residual_body_end_gyro_aligned",
                 ):
-                    self._lio.update_learned_kinematic_residual_body_end(
+                    self._lio.update_learned_clone_kinematic_residual_body_end(
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
-                        marginalize_used_clone=True,
+                        marginalize_start_clone=True,
                     )
                 elif target_mode == "kinematic_residual_body_end_gravity_compensated":
-                    self._lio.update_learned_kinematic_residual_body_end_gravity_compensated(
+                    self._lio.update_learned_clone_kinematic_residual_body_end_gravity_compensated(
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
-                        marginalize_used_clone=True,
+                        marginalize_start_clone=True,
                     )
                 else:
-                    self._lio.update_learned_displacement(
+                    self._lio.update_learned_clone_displacement(
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
-                        marginalize_used_clone=True,
+                        marginalize_start_clone=True,
                     )
                 self._learned_fusion_count += 1
             else:
@@ -606,16 +609,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._learned_update_skip_count += 1
             self._lio.marginalize_clones_before(start_s, inclusive=True)
             self._motion_buffer.discard_before(start_s)
-            if clone_due_now:
-                self._lio.clone_current_position()
             return
-
-        # Clone the endpoint only after the learned update has finished. This
-        # captures the corrected current nominal state and augments covariance
-        # from the corrected P, preventing a frozen pre-update endpoint clone
-        # from echoing this correction into the next relative-motion window.
-        if clone_due_now:
-            self._lio.clone_current_position()
 
         self._learned_update_count += 1
         self._last_learned_innovation_w = np.asarray(innovation, dtype=np.float64).copy()
