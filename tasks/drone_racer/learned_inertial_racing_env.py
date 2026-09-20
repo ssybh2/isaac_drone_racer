@@ -79,6 +79,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._gate_update_count = 0
         self._gate_reject_count = 0
         self._last_gate_mahalanobis2 = None
+        self._gate_diagnostics: list[dict[str, object]] = []
         self._imu_rng = None
         self._imu_accel_bias_b = np.zeros(3, dtype=np.float64)
         self._imu_gyro_bias_b = np.zeros(3, dtype=np.float64)
@@ -251,7 +252,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         from perception.camera_model import CameraCalibration
         from perception.stage2_calibration import load_stage2_gate_geometry, stage2_camera_to_body
         from perception.swift_gate_measurement import CornerPerturbationConfig, GatePoseMeasurementBuilder
-        from perception.swift_isaac_adapter import track_layout_from_isaac
+        from perception.swift_isaac_adapter import active_gate_index_from_isaac, track_layout_from_isaac
         from perception.torchvision_keypoint_detector import TorchvisionGateCornerDetector
 
         checkpoint = Path(self.cfg.swift_detector_checkpoint).expanduser().resolve()
@@ -909,6 +910,46 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_camera_timestamp_s = self._timestamp_s()
         self._gate_attempt_count += 1
 
+        # Keep the deployed estimator GT-free by default. The optional GT fields
+        # below are evaluation-only diagnostics and never feed the EKF update.
+        diagnostic: dict[str, object] = {
+            "attempt_index": int(self._gate_attempt_count),
+            "timestamp_s": float(self._timestamp_s()),
+            "accepted": False,
+            "reject_stage": None,
+            "reject_reason": None,
+            "expected_active_gate_index": None,
+            "selected_gate_index": None,
+            "association_matches_active_gate": None,
+            "reprojection_rmse_px": None,
+            "camera_to_gate_range_m": None,
+            "position_covariance_diag_m2": None,
+            "position_sigma_xyz_m": None,
+            "position_covariance_eigenvalues_m2": None,
+            "position_nees_vs_gt": None,
+            "pnp_position_error_w_m": None,
+            "pnp_position_error_norm_m": None,
+            "pnp_orientation_error_deg": None,
+            "mahalanobis2": None,
+            "pre_update_position_error_norm_m": None,
+            "post_update_position_error_norm_m": None,
+            "pre_update_orientation_error_deg": None,
+            "post_update_orientation_error_deg": None,
+            "exception_type": None,
+            "exception_message": None,
+        }
+
+        try:
+            from perception.swift_isaac_adapter import active_gate_index_from_isaac
+
+            diagnostic["expected_active_gate_index"] = int(
+                active_gate_index_from_isaac(self, env_id=0)
+            )
+        except (AttributeError, KeyError, RuntimeError, ValueError):
+            # Active-gate identity is mission-state metadata, not required for
+            # perception or filtering. Keep the audit running if unavailable.
+            pass
+
         camera = self.scene["tiled_camera"]
         rgb = _np(camera.data.output["rgb"][0])[..., :3]
         if rgb.dtype != np.uint8:
@@ -925,27 +966,130 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 np.ascontiguousarray(rgb),
                 timestamp_s=self._timestamp_s(),
             )
+        except (ValueError, RuntimeError) as exc:
+            self._gate_reject_count += 1
+            diagnostic["reject_stage"] = "detector"
+            diagnostic["reject_reason"] = "detector_exception"
+            diagnostic["exception_type"] = type(exc).__name__
+            diagnostic["exception_message"] = str(exc)
+            self._gate_diagnostics.append(diagnostic)
+            return
+
+        try:
             measurement = self._gate_builder.build(
                 observation,
                 gate_index=None,
                 reference_position_w_b=self._lio.p,
             )
-        except (ValueError, RuntimeError):
+        except (ValueError, RuntimeError) as exc:
             self._gate_reject_count += 1
+            message = str(exc)
+            message_lower = message.lower()
+            if "reprojection" in message_lower:
+                reason = "reprojection_gate"
+            elif "all four visible corners" in message_lower:
+                reason = "incomplete_corners"
+            elif "confidence" in message_lower:
+                reason = "corner_confidence"
+            elif "perturbed ippe" in message_lower:
+                reason = "perturbation_support"
+            elif "ippe" in message_lower or "pnp" in message_lower:
+                reason = "pnp_failure"
+            else:
+                reason = "measurement_builder_exception"
+            diagnostic["reject_stage"] = "measurement_builder"
+            diagnostic["reject_reason"] = reason
+            diagnostic["exception_type"] = type(exc).__name__
+            diagnostic["exception_message"] = message
+            self._gate_diagnostics.append(diagnostic)
             return
+
+        diagnostic["selected_gate_index"] = int(measurement.gate_index)
+        expected_gate = diagnostic["expected_active_gate_index"]
+        if expected_gate is not None:
+            diagnostic["association_matches_active_gate"] = bool(
+                int(measurement.gate_index) == int(expected_gate)
+            )
+        diagnostic["reprojection_rmse_px"] = float(
+            measurement.nominal_pnp.reprojection_rmse_px
+        )
+        diagnostic["camera_to_gate_range_m"] = float(
+            np.linalg.norm(measurement.T_cg.t)
+        )
+        covariance_w = np.asarray(
+            measurement.position_covariance_w, dtype=np.float64
+        ).reshape(3, 3)
+        covariance_w = 0.5 * (covariance_w + covariance_w.T)
+        diagnostic["position_covariance_diag_m2"] = np.diag(covariance_w).tolist()
+        diagnostic["position_sigma_xyz_m"] = np.sqrt(
+            np.maximum(np.diag(covariance_w), 0.0)
+        ).tolist()
+        diagnostic["position_covariance_eigenvalues_m2"] = np.linalg.eigvalsh(
+            covariance_w
+        ).tolist()
+
+        gt_position = None
+        gt_R = None
+        if bool(self.cfg.gate_debug_gt_diagnostics):
+            robot = self.scene["robot"]
+            gt_position = _np(robot.data.root_pos_w[0]).astype(np.float64).copy()
+            gt_quat = _np(robot.data.root_quat_w[0]).astype(np.float64).copy()
+            gt_R = quat_wxyz_to_rotmat(gt_quat)
+
+            pnp_error_w = np.asarray(
+                measurement.position_w_b, dtype=np.float64
+            ) - gt_position
+            diagnostic["pnp_position_error_w_m"] = pnp_error_w.tolist()
+            diagnostic["pnp_position_error_norm_m"] = float(
+                np.linalg.norm(pnp_error_w)
+            )
+            try:
+                diagnostic["position_nees_vs_gt"] = float(
+                    pnp_error_w.T @ np.linalg.solve(covariance_w, pnp_error_w)
+                )
+            except np.linalg.LinAlgError:
+                diagnostic["position_nees_vs_gt"] = None
+
+            relative_R = measurement.T_wb_gate.R @ gt_R.T
+            cosine = float(
+                np.clip((np.trace(relative_R) - 1.0) * 0.5, -1.0, 1.0)
+            )
+            diagnostic["pnp_orientation_error_deg"] = float(
+                np.degrees(np.arccos(cosine))
+            )
+
+            diagnostic["pre_update_position_error_norm_m"] = float(
+                np.linalg.norm(self._lio.p - gt_position)
+            )
+            pre_relative_R = self._lio.R @ gt_R.T
+            pre_cosine = float(
+                np.clip((np.trace(pre_relative_R) - 1.0) * 0.5, -1.0, 1.0)
+            )
+            diagnostic["pre_update_orientation_error_deg"] = float(
+                np.degrees(np.arccos(pre_cosine))
+            )
 
         # Reject a visually plausible but globally inconsistent gate association.
         innovation_p = measurement.position_w_b - self._lio.p
         Ppp = self._lio.P[6:9, 6:9]
-        S = Ppp + measurement.position_covariance_w
+        S = Ppp + covariance_w
         try:
             d2 = float(innovation_p.T @ np.linalg.solve(S, innovation_p))
-        except np.linalg.LinAlgError:
+        except np.linalg.LinAlgError as exc:
             self._gate_reject_count += 1
+            diagnostic["reject_stage"] = "mahalanobis"
+            diagnostic["reject_reason"] = "innovation_covariance_singular"
+            diagnostic["exception_type"] = type(exc).__name__
+            diagnostic["exception_message"] = str(exc)
+            self._gate_diagnostics.append(diagnostic)
             return
         self._last_gate_mahalanobis2 = d2
+        diagnostic["mahalanobis2"] = d2
         if d2 > float(self.cfg.gate_position_mahalanobis2_max):
             self._gate_reject_count += 1
+            diagnostic["reject_stage"] = "mahalanobis"
+            diagnostic["reject_reason"] = "position_mahalanobis_gate"
+            self._gate_diagnostics.append(diagnostic)
             return
 
         # Gate PnP + mapped T_wg is an absolute body-pose observation.
@@ -953,7 +1097,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         sigma_rad = np.deg2rad(float(self.cfg.gate_orientation_sigma_deg))
         self._lio.update_gate_pose(
             position_w_b=measurement.position_w_b,
-            position_covariance_w=measurement.position_covariance_w,
+            position_covariance_w=covariance_w,
             orientation_w_b_wxyz=(
                 q_wb if bool(self.cfg.gate_use_orientation_update) else None
             ),
@@ -962,6 +1106,20 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_gate_measurement = measurement
         self._gate_update_count += 1
         self.learned_inertial_state = self._lio.state()
+
+        diagnostic["accepted"] = True
+        if gt_position is not None and gt_R is not None:
+            diagnostic["post_update_position_error_norm_m"] = float(
+                np.linalg.norm(self._lio.p - gt_position)
+            )
+            post_relative_R = self._lio.R @ gt_R.T
+            post_cosine = float(
+                np.clip((np.trace(post_relative_R) - 1.0) * 0.5, -1.0, 1.0)
+            )
+            diagnostic["post_update_orientation_error_deg"] = float(
+                np.degrees(np.arccos(post_cosine))
+            )
+        self._gate_diagnostics.append(diagnostic)
 
     def _update_log(self) -> None:
         log = self.extras.setdefault("log", {})
