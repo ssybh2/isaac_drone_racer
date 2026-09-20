@@ -31,6 +31,8 @@ def test_estimated_state_command_owns_actor_gate_progression():
 
     assert "self.next_gate_idx[self._mission_gate_passed] += 1" in block
     assert "self.next_gate_idx[self._gt_gate_passed]" not in block
+    assert "self._gt_next_gate_idx[self._gt_gate_passed] += 1" in block
+    assert "gt_gate_indices = self._gt_next_gate_idx.to(dtype=torch.long)" in block
     assert "Ground truth is deliberately kept on a separate reward/evaluation" in block
 
 
