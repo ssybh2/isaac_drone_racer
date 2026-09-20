@@ -1,6 +1,7 @@
 import copy
 
 import numpy as np
+import pytest
 
 import estimation.learned_inertial_odometry as lio
 
