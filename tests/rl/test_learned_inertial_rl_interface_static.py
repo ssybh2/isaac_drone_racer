@@ -58,3 +58,20 @@ def test_frozen_rl_task_is_registered():
     source = _text("tasks/drone_racer/__init__.py")
     assert "Isaac-Drone-Racer-Learned-Inertial-RL-v0" in source
     assert "DroneRacerLearnedInertialRLCfg" in source
+
+
+
+def test_scripted_controller_action_has_no_simulator_truth_access():
+    source = _text("scripts/rl/smoke_estimated_state_closed_loop.py")
+    start = source.index("def _controller_action")
+    end = source.index("def _diagnostic_truth_error", start)
+    block = source[start:end]
+
+    forbidden = (
+        "root_pos_w",
+        "root_quat_w",
+        "root_lin_vel_w",
+        "root_state_w",
+    )
+    for token in forbidden:
+        assert token not in block
