@@ -79,6 +79,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_update_timestamp_s = None
         self._last_learned_fused = False
         self._last_learned_skip_reason = None
+        self._last_learned_update_diagnostics = None
         self._gate_attempt_count = 0
         self._gate_update_count = 0
         self._gate_reject_count = 0
@@ -246,6 +247,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_update_timestamp_s = None
         self._last_learned_fused = False
         self._last_learned_skip_reason = None
+        self._last_learned_update_diagnostics = None
         self._gate_attempt_count = 0
         self._gate_update_count = 0
         self._gate_reject_count = 0
@@ -887,6 +889,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_start_clone=True,
                     )
+                # Preserve this learned-factor diagnostic before the
+                # subsequent visual update overwrites LIO.last_update_diagnostics.
+                self._last_learned_update_diagnostics = (
+                    None
+                    if self._lio.last_update_diagnostics is None
+                    else self._lio.last_update_diagnostics.copy()
+                )
                 self._learned_fusion_count += 1
             else:
                 # Keep 20 Hz predictions for diagnostics, but fuse only a
