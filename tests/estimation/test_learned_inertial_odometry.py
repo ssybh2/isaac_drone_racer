@@ -399,6 +399,100 @@ def test_uzh_two_clone_relative_jacobian_uses_both_cloned_endpoints():
     np.testing.assert_allclose(H @ N[:, 1:4], 0.0, atol=1e-12)
 
 
+def test_two_clone_delta_velocity_factor_is_velocity_only_and_finite_difference_correct():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    q0 = lio.rotmat_to_quat_wxyz(
+        lio._exp_so3(np.array([0.07, -0.03, 0.14]))
+    )
+    est.reset(
+        position_w_b=(0.2, -0.1, 1.0),
+        linear_velocity_w_b=(0.9, -0.2, 0.1),
+        orientation_w_b_wxyz=q0,
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.02, -0.01, 0.06),
+            accel_b=(0.30, -0.10, 9.76),
+            timestamp_s=k * 0.01,
+        )
+    est.clone_current_position()
+
+    start_index = est._find_clone_index(0.0, tolerance_s=1e-9)
+    end_index = est._find_clone_index(0.5, tolerance_s=1e-9)
+
+    predicted = est.predicted_clone_delta_velocity_gravity_compensated(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+    expected = (
+        est._clone_velocities[end_index]
+        - est._clone_velocities[start_index]
+        - est.gravity_w * 0.5
+    )
+    np.testing.assert_allclose(predicted, expected, atol=1e-12)
+
+    H = est.clone_delta_velocity_gravity_compensated_jacobian(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+    np.testing.assert_allclose(H[:, :15], 0.0, atol=0.0)
+    np.testing.assert_allclose(
+        H[:, est._clone_velocity_slice(start_index)], -np.eye(3)
+    )
+    np.testing.assert_allclose(
+        H[:, est._clone_velocity_slice(end_index)], np.eye(3)
+    )
+    assert np.count_nonzero(H) == 6
+
+    base = predicted.copy()
+    eps = 1.0e-7
+    columns = []
+    for clone_index in (start_index, end_index):
+        sl = est._clone_velocity_slice(clone_index)
+        columns.extend(range(sl.start, sl.stop))
+    for col in columns:
+        perturbed = copy.deepcopy(est)
+        dx = np.zeros(perturbed.P.shape[0], dtype=np.float64)
+        dx[col] = eps
+        perturbed._inject_error(dx)
+        value = perturbed.predicted_clone_delta_velocity_gravity_compensated(
+            start_timestamp_s=0.0,
+            end_timestamp_s=0.5,
+            clone_tolerance_s=1e-9,
+        )
+        numerical = (value - base) / eps
+        np.testing.assert_allclose(
+            numerical,
+            H[:, col],
+            rtol=3e-5,
+            atol=3e-6,
+        )
+
+    N_inst = est._instantaneous_unobservable_basis()
+    np.testing.assert_allclose(H @ N_inst[:, 1:4], 0.0, atol=1e-11)
+
+    measurement = predicted + np.array([0.01, -0.02, 0.005])
+    innovation = est.update_learned_clone_delta_velocity_gravity_compensated(
+        measurement,
+        np.eye(3) * 0.05**2,
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+        marginalize_start_clone=True,
+    )
+    np.testing.assert_allclose(
+        innovation,
+        [0.01, -0.02, 0.005],
+        atol=1e-12,
+    )
+    assert est.clone_count == 1
+    np.testing.assert_allclose(est._clone_timestamps_s, [0.5], atol=1e-12)
+
+
 def test_three_clone_second_difference_factor_is_position_only_and_translation_invariant():
     est = lio.LearnedInertialOdometry(max_position_clones=11)
     q0 = lio.rotmat_to_quat_wxyz(
