@@ -679,7 +679,7 @@ def _validate_inputs() -> None:
             raise ValueError("--oracle-anchor-position-sigma-m must be positive")
         if args_cli.oracle_anchor_orientation_sigma_deg <= 0.0:
             raise ValueError("--oracle-anchor-orientation-sigma-deg must be positive")
-    if args_cli.mode in ("S", "B", "P", "C") and not args_cli.learned_checkpoint.expanduser().exists():
+    if args_cli.mode in ("S", "B", "P", "C", "R") and not args_cli.learned_checkpoint.expanduser().exists():
         raise FileNotFoundError(f"learned checkpoint not found: {args_cli.learned_checkpoint}")
     if args_cli.mode in ("P", "C", "R") and not args_cli.gate_checkpoint.expanduser().exists():
         raise FileNotFoundError(f"gate checkpoint not found: {args_cli.gate_checkpoint}")
@@ -691,7 +691,7 @@ def _validate_inputs() -> None:
         raise FileNotFoundError(
             f"visibility checkpoint not found: {args_cli.visibility_checkpoint}"
         )
-    if args_cli.mode in ("S", "B", "P", "C") and not args_cli.replay_npz.expanduser().exists():
+    if args_cli.mode in ("S", "B", "P", "C", "R") and not args_cli.replay_npz.expanduser().exists():
         raise FileNotFoundError(f"replay file not found: {args_cli.replay_npz}")
 
 
