@@ -874,7 +874,28 @@ def main() -> None:
                                     "displacement",
                                 )
                             )
-                            if target_mode in (
+                            if target_mode == "delta_velocity_gravity_compensated":
+                                if (
+                                    start_key not in truth_velocity_by_time
+                                    or end_key not in truth_velocity_by_time
+                                ):
+                                    raise RuntimeError(
+                                        "missing truth endpoint velocity for delta-v diagnostic"
+                                    )
+                                window_dt = float(
+                                    raw_env._last_learned_window_end_s
+                                    - raw_env._last_learned_window_start_s
+                                )
+                                gravity_w = np.array(
+                                    [0.0, 0.0, -9.81],
+                                    dtype=np.float64,
+                                )
+                                tcn_gt_dp = (
+                                    truth_velocity_by_time[end_key]
+                                    - truth_velocity_by_time[start_key]
+                                    - gravity_w * window_dt
+                                )
+                            elif target_mode in (
                                 "kinematic_residual",
                                 "kinematic_residual_body_end",
                                 "kinematic_residual_body_end_gyro_aligned",
