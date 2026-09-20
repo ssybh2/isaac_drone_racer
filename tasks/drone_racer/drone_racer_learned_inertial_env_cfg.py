@@ -205,6 +205,13 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # robustness to uncompensated perception latency.
     gate_stress_latency_s: float = 0.0
 
+    # V6.6 delayed-vision handling. When enabled, camera-time [R,v,p] clones
+    # are kept and delayed pixel residuals are evaluated at the capture-time
+    # clone. The full stochastic-clone covariance then corrects the current
+    # state through cross-correlation.
+    gate_reprojection_compensate_latency: bool = True
+    gate_reprojection_latency_clone_tolerance_s: float = 1.0e-6
+
     # Evaluation-only audit switch. When enabled, the runtime records simulator
     # truth alongside Gate-PnP measurements so detector/PnP/association quality
     # can be diagnosed. Truth is never fed into the estimator update itself.
