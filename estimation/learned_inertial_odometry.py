@@ -1978,6 +1978,88 @@ class LearnedInertialOdometry:
 
         return predicted, H
 
+    def predict_gate_corner_reprojection_at_clone(
+        self,
+        gate_points_w,
+        camera_K,
+        R_bc,
+        t_bc,
+        *,
+        clone_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        min_depth_m: float = 0.05,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Predict gate pixels from a stochastic pose clone.
+
+        This is the timestamp-aware counterpart of
+        :meth:`predict_gate_corner_reprojection`.  The residual is evaluated
+        at the camera capture-time clone, while the full Kalman gain can still
+        update the *current* state through clone/current cross-covariance.
+
+        That is the standard stochastic-cloning treatment of a delayed visual
+        measurement and avoids applying old pixels to the current pose.
+        """
+        clone_index = self._find_clone_index(
+            clone_timestamp_s,
+            tolerance_s=clone_tolerance_s,
+        )
+        points_w = np.asarray(gate_points_w, dtype=np.float64).reshape(-1, 3)
+        if len(points_w) < 1:
+            raise ValueError("at least one mapped gate corner is required")
+        K = np.asarray(camera_K, dtype=np.float64).reshape(3, 3)
+        R_bc = np.asarray(R_bc, dtype=np.float64).reshape(3, 3)
+        t_bc = np.asarray(t_bc, dtype=np.float64).reshape(3)
+        min_depth = float(min_depth_m)
+        if min_depth <= 0.0 or not np.isfinite(min_depth):
+            raise ValueError("min_depth_m must be positive and finite")
+
+        R_clone = self._clone_orientations[clone_index]
+        p_clone = self._clone_positions[clone_index]
+        R_cb = R_bc.T
+        R_bw = R_clone.T
+        predicted = np.empty((len(points_w), 2), dtype=np.float64)
+        H = np.zeros((2 * len(points_w), self.P.shape[0]), dtype=np.float64)
+
+        theta_slice = self._clone_orientation_slice(clone_index)
+        position_slice = self._clone_position_slice(clone_index)
+
+        for corner_index, point_w in enumerate(points_w):
+            q_b = R_bw @ (point_w - p_clone)
+            point_c = R_cb @ (q_b - t_bc)
+            if float(point_c[2]) <= min_depth:
+                raise ValueError(
+                    "mapped gate corner projects behind/too close to the camera"
+                )
+
+            homogeneous = K @ point_c
+            denominator = float(homogeneous[2])
+            if abs(denominator) <= 1.0e-12:
+                raise ValueError("gate corner has singular pinhole projection")
+            predicted[corner_index] = homogeneous[:2] / denominator
+
+            J_proj = np.vstack(
+                [
+                    (
+                        K[0, :] * denominator
+                        - homogeneous[0] * K[2, :]
+                    )
+                    / (denominator * denominator),
+                    (
+                        K[1, :] * denominator
+                        - homogeneous[1] * K[2, :]
+                    )
+                    / (denominator * denominator),
+                ]
+            )
+            J_pc_theta = R_cb @ _skew(q_b)
+            J_pc_position = -R_cb @ R_bw
+
+            rows = slice(2 * corner_index, 2 * corner_index + 2)
+            H[rows, theta_slice] = J_proj @ J_pc_theta
+            H[rows, position_slice] = J_proj @ J_pc_position
+
+        return predicted, H
+
     def update_gate_corner_reprojection(
         self,
         observed_corners_uv,
@@ -1990,6 +2072,8 @@ class LearnedInertialOdometry:
         huber_delta_sigma: float = 2.5,
         min_depth_m: float = 0.05,
         max_normalized_nis: float | None = 25.0,
+        clone_timestamp_s: float | None = None,
+        clone_tolerance_s: float = 1.0e-6,
     ) -> np.ndarray:
         """Fuse mapped gate corners directly in the image plane.
 
@@ -2023,13 +2107,28 @@ class LearnedInertialOdometry:
             if max_normalized_nis <= 0.0 or not np.isfinite(max_normalized_nis):
                 raise ValueError("max_normalized_nis must be positive when set")
 
-        predicted, H = self.predict_gate_corner_reprojection(
-            points_w,
-            camera_K,
-            R_bc,
-            t_bc,
-            min_depth_m=min_depth_m,
-        )
+        if clone_timestamp_s is None:
+            predicted, H = self.predict_gate_corner_reprojection(
+                points_w,
+                camera_K,
+                R_bc,
+                t_bc,
+                min_depth_m=min_depth_m,
+            )
+            measurement_type = "gate_corner_reprojection"
+            measurement_timestamp_s = float(self.timestamp_s)
+        else:
+            predicted, H = self.predict_gate_corner_reprojection_at_clone(
+                points_w,
+                camera_K,
+                R_bc,
+                t_bc,
+                clone_timestamp_s=float(clone_timestamp_s),
+                clone_tolerance_s=float(clone_tolerance_s),
+                min_depth_m=min_depth_m,
+            )
+            measurement_type = "gate_corner_reprojection_delayed_clone"
+            measurement_timestamp_s = float(clone_timestamp_s)
         residual_matrix = observed - predicted
         residual = residual_matrix.reshape(-1)
 
@@ -2082,7 +2181,9 @@ class LearnedInertialOdometry:
         assert self.last_update_diagnostics is not None
         self.last_update_diagnostics.update(
             {
-                "measurement_type": "gate_corner_reprojection",
+                "measurement_type": measurement_type,
+                "measurement_timestamp_s": measurement_timestamp_s,
+                "measurement_age_s": float(self.timestamp_s - measurement_timestamp_s),
                 "gate_corner_count": int(len(observed)),
                 "pixel_rmse_before_update": float(
                     np.sqrt(np.mean(residual_matrix * residual_matrix))
