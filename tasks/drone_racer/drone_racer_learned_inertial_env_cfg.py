@@ -100,6 +100,10 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # relative-position Jacobian H=[-I,+I]. This isolates the stochastic-clone
     # EKF structure from the V6.1 kinematic-residual measurement extension.
     learned_debug_oracle_uzh_displacement_fusion: bool = False
+    # Diagnostic-only gauge-invariant full displacement factor in the endpoint
+    # body frame: z = R_j^T (p_j - p_i). This isolates the V6.1 start-velocity
+    # subtraction from the body-frame representation.
+    learned_debug_oracle_body_end_displacement_fusion: bool = False
     # Diagnostic only: rotate TCN gyro/thrust features with simulator truth
     # attitude instead of EKF attitude. If this materially improves fusion, it
     # proves the current world-frame learned measurement is state-dependent in
