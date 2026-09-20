@@ -155,6 +155,14 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--oracle-body-end-delta-velocity-fusion",
+    action="store_true",
+    help=(
+        "Diagnostic only: fuse exact GT R_end^T[(v_end-v_start)-g*dt] "
+        "through the gauge-invariant endpoint-body delta-v factor."
+    ),
+)
+parser.add_argument(
     "--oracle-delta-velocity-sigma-mps",
     type=float,
     default=0.05,
@@ -429,6 +437,9 @@ def _prepare_cfg():
     cfg.learned_debug_oracle_delta_velocity_fusion = bool(
         args_cli.oracle_delta_velocity_fusion
     )
+    cfg.learned_debug_oracle_body_end_delta_velocity_fusion = bool(
+        args_cli.oracle_body_end_delta_velocity_fusion
+    )
     cfg.learned_debug_oracle_delta_velocity_sigma_mps = float(
         args_cli.oracle_delta_velocity_sigma_mps
     )
@@ -438,6 +449,7 @@ def _prepare_cfg():
         cfg.learned_debug_oracle_body_end_displacement_fusion,
         cfg.learned_debug_oracle_second_difference_fusion,
         cfg.learned_debug_oracle_delta_velocity_fusion,
+        cfg.learned_debug_oracle_body_end_delta_velocity_fusion,
     )
     if sum(int(v) for v in oracle_modes) > 1:
         raise ValueError(
@@ -874,7 +886,10 @@ def main() -> None:
                                     "displacement",
                                 )
                             )
-                            if target_mode == "delta_velocity_gravity_compensated":
+                            if target_mode in (
+                                "delta_velocity_gravity_compensated",
+                                "delta_velocity_body_end_gyro_aligned",
+                            ):
                                 if (
                                     start_key not in truth_velocity_by_time
                                     or end_key not in truth_velocity_by_time
@@ -924,6 +939,7 @@ def main() -> None:
                                 "kinematic_residual_body_end_gyro_aligned",
                                 "kinematic_residual_body_end_gravity_compensated",
                                 "displacement_body_end_gyro_aligned",
+                                "delta_velocity_body_end_gyro_aligned",
                             ):
                                 if end_key not in truth_orientation_by_time:
                                     raise RuntimeError(
@@ -1224,6 +1240,9 @@ def main() -> None:
             ),
             "oracle_delta_velocity_fusion": bool(
                 cfg.learned_debug_oracle_delta_velocity_fusion
+            ),
+            "oracle_body_end_delta_velocity_fusion": bool(
+                cfg.learned_debug_oracle_body_end_delta_velocity_fusion
             ),
             "oracle_delta_velocity_sigma_mps": float(
                 cfg.learned_debug_oracle_delta_velocity_sigma_mps
