@@ -377,6 +377,7 @@ def main() -> None:
         total_steps = int(np.ceil(float(args_cli.duration_s) / raw_env.step_dt))
 
         last_nonreset_target_gate_index = int(command.next_gate_idx[0].item())
+        last_nonreset_truth_gate_index = int(command.gt_next_gate_idx[0].item())
         last_pre_step_truth_diag = None
 
         for step in range(total_steps):
@@ -411,6 +412,9 @@ def main() -> None:
                 action, last_control = _controller_action(raw_env)
                 last_nonreset_target_gate_index = int(
                     last_control["target_gate_index"]
+                )
+                last_nonreset_truth_gate_index = int(
+                    command.gt_next_gate_idx[0].item()
                 )
                 _, _, terminated, truncated, _ = env.step(action)
 
@@ -488,7 +492,7 @@ def main() -> None:
             "mission_gate_passes": int(mission_passes),
             "truth_gate_passes": int(truth_passes),
             "final_target_gate_index": int(last_nonreset_target_gate_index),
-            "final_truth_gate_index": int(command.gt_next_gate_idx[0].item()),
+            "final_truth_gate_index": int(last_nonreset_truth_gate_index),
             "maximum_position_error_m": float(maximum_position_error),
             "maximum_velocity_error_mps": float(maximum_velocity_error),
             "last_pre_step_truth_diagnostic": last_pre_step_truth_diag,
