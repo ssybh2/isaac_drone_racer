@@ -315,6 +315,7 @@ class TorchTcnDisplacementPredictor:
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
+            "displacement_body_end_gyro_aligned",
         ):
             raise ValueError(
                 f"unsupported learned-motion target_mode: {self.target_mode!r}"
@@ -346,6 +347,14 @@ class TorchTcnDisplacementPredictor:
             raise ValueError(
                 "kinematic_residual_body_end_gravity_compensated checkpoints "
                 "must use body_endpoint_gyro_aligned features"
+            )
+        if (
+            self.target_mode == "displacement_body_end_gyro_aligned"
+            and self.feature_frame != "body_endpoint_gyro_aligned"
+        ):
+            raise ValueError(
+                "displacement_body_end_gyro_aligned checkpoints must use "
+                "body_endpoint_gyro_aligned features"
             )
         self.model = build_tcn(input_dim=6, output_dim=6).to(self.device)
         state = checkpoint.get("model_state_dict", checkpoint)
