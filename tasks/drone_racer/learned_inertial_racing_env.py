@@ -252,7 +252,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         from perception.camera_model import CameraCalibration
         from perception.stage2_calibration import load_stage2_gate_geometry, stage2_camera_to_body
         from perception.swift_gate_measurement import CornerPerturbationConfig, GatePoseMeasurementBuilder
-        from perception.swift_isaac_adapter import active_gate_index_from_isaac, track_layout_from_isaac
+        from perception.swift_isaac_adapter import track_layout_from_isaac
         from perception.torchvision_keypoint_detector import TorchvisionGateCornerDetector
 
         checkpoint = Path(self.cfg.swift_detector_checkpoint).expanduser().resolve()
