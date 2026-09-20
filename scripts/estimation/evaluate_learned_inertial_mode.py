@@ -1313,8 +1313,8 @@ def main() -> None:
                 # Preserve the learned-factor diagnostic before an optional
                 # evaluator-only absolute anchor overwrites last_update_diagnostics.
                 learned_diag_before_anchor = getattr(
-                    raw_env._lio,
-                    "last_update_diagnostics",
+                    raw_env,
+                    "_last_learned_update_diagnostics",
                     None,
                 )
 
@@ -2183,12 +2183,15 @@ if __name__ == "__main__":
     try:
         main()
     except BaseException:
-        # Print the traceback before closing Isaac Sim. Some Kit shutdown paths
-        # can terminate the process cleanly enough to hide the original Python
-        # exception from shell-level diagnostics.
+        # Preserve the original failure status. Isaac/Kit shutdown may raise
+        # SystemExit(0), which must not replace the evaluator exception.
         import traceback
 
         traceback.print_exc()
+        try:
+            simulation_app.close()
+        except BaseException:
+            pass
         raise
-    finally:
+    else:
         simulation_app.close()
