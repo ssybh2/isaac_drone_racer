@@ -109,6 +109,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # With equally spaced clones this removes absolute position and constant
     # initial velocity while keeping a position-only Jacobian [+I,-2I,+I].
     learned_debug_oracle_second_difference_fusion: bool = False
+    # Diagnostic-only two-clone velocity increment:
+    # z = (v_end - v_start) - g*dt. This removes the unknown initial velocity
+    # from the learned target while keeping a first-difference velocity-only H.
+    learned_debug_oracle_delta_velocity_fusion: bool = False
+    learned_debug_oracle_delta_velocity_sigma_mps: float = 0.05
     # Diagnostic only: rotate TCN gyro/thrust features with simulator truth
     # attitude instead of EKF attitude. If this materially improves fusion, it
     # proves the current world-frame learned measurement is state-dependent in
