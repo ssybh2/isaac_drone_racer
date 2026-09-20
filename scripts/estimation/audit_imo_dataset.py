@@ -27,6 +27,7 @@ parser.add_argument(
         "kinematic_residual_body_end",
         "kinematic_residual_body_end_gyro_aligned",
         "kinematic_residual_body_end_gravity_compensated",
+        "displacement_body_end_gyro_aligned",
     ),
     default="displacement",
     help="Audit the same target representation that will be used for training.",
