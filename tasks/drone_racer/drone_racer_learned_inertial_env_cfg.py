@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils import configclass
@@ -316,3 +317,30 @@ class DroneRacerLearnedInertialRLCfg(DroneRacerLearnedInertialEnvCfg):
         # driven by EstimatedStateGateTargetingCommand.
         self.initialize_from_fixed_start_truth = True
         self.commands.target.randomise_start = None
+
+        # The diagnostic Swift task intentionally disabled root-state reset,
+        # which is fine for one-shot estimator replays but wrong for episodic
+        # RL. Restore an exact fixed-start reset so simulator state and the
+        # fixed-start estimator reset remain synchronized after termination.
+        self.events.reset_base = EventTerm(
+            func=mdp.reset_root_state_uniform,
+            mode="reset",
+            params={
+                "pose_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+                "velocity_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+            },
+        )
