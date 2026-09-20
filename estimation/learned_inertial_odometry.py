@@ -819,6 +819,62 @@ class LearnedInertialOdometry:
         H[:, self._clone_velocity_slice(end_index)] = np.eye(3)
         return H
 
+    def predicted_clone_delta_velocity_body_end_gravity_compensated(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Return endpoint-body gravity-compensated delta velocity.
+
+        h(x) = R_end^T * [(v_end - v_start) - g*dt].
+        """
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        delta_v_w = (
+            self._clone_velocities[end_index]
+            - self._clone_velocities[start_index]
+            - self.gravity_w * dt
+        )
+        return self._clone_orientations[end_index].T @ delta_v_w
+
+    def clone_delta_velocity_body_end_gravity_compensated_jacobian(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Build H for R_end^T[(v_end-v_start)-g*dt].
+
+        With the filter's right/local attitude error,
+            R_true = R_nominal Exp(dtheta),
+        the endpoint-attitude block is [h(x)]_x.
+        """
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        R_end = self._clone_orientations[end_index]
+        delta_v_w = (
+            self._clone_velocities[end_index]
+            - self._clone_velocities[start_index]
+            - self.gravity_w * dt
+        )
+        predicted_b = R_end.T @ delta_v_w
+        Rt = R_end.T
+
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, self._clone_orientation_slice(end_index)] = _skew(predicted_b)
+        H[:, self._clone_velocity_slice(start_index)] = -Rt
+        H[:, self._clone_velocity_slice(end_index)] = Rt
+        return H
+
     def predicted_clone_kinematic_residual(
         self,
         *,
@@ -1647,6 +1703,43 @@ class LearnedInertialOdometry:
         Rm = self._validated_clone_measurement_covariance(
             covariance_w,
             label="learned clone delta velocity",
+        )
+        innovation = z - predicted
+        self._kalman_update(innovation, H, Rm, gain_mode="full")
+
+        if marginalize_start_clone:
+            self.marginalize_clone(start_index)
+        return innovation
+
+    def update_learned_clone_delta_velocity_body_end_gravity_compensated(
+        self,
+        delta_velocity_b_end,
+        covariance_b_end,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_start_clone: bool = True,
+    ) -> np.ndarray:
+        """Fuse endpoint-body gravity-compensated delta velocity."""
+        start_index = self._find_clone_index(
+            start_timestamp_s,
+            tolerance_s=clone_tolerance_s,
+        )
+        predicted = self.predicted_clone_delta_velocity_body_end_gravity_compensated(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = self.clone_delta_velocity_body_end_gravity_compensated_jacobian(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        z = np.asarray(delta_velocity_b_end, dtype=np.float64).reshape(3)
+        Rm = self._validated_clone_measurement_covariance(
+            covariance_b_end,
+            label="learned clone endpoint-body delta velocity",
         )
         innovation = z - predicted
         self._kalman_update(innovation, H, Rm, gain_mode="full")
