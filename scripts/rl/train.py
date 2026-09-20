@@ -74,6 +74,13 @@ parser.add_argument(
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli, hydra_args = parser.parse_known_args()
+
+# The deployment-faithful learned-inertial task always requires its onboard
+# RTX camera even in headless training. Keep this task-specific requirement
+# explicit so forgetting --enable_cameras cannot silently disable perception.
+if args_cli.task == "Isaac-Drone-Racer-Learned-Inertial-RL-v0":
+    args_cli.enable_cameras = True
+
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
@@ -136,6 +143,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     """Train with skrl agent."""
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    if (
+        args_cli.task == "Isaac-Drone-Racer-Learned-Inertial-RL-v0"
+        and int(env_cfg.scene.num_envs) != 1
+    ):
+        raise ValueError(
+            "Isaac-Drone-Racer-Learned-Inertial-RL-v0 currently requires "
+            "--num_envs 1 because the validated detector/estimator runtime is "
+            "single-stream. Vectorize it deliberately before scaling PPO."
+        )
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
     if args_cli.fake_sensor_profile is not None:
         if not hasattr(env_cfg, "fake_sensors"):
