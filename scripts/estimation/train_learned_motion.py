@@ -44,6 +44,7 @@ def _parse_args() -> argparse.Namespace:
             "kinematic_residual_body_end_gravity_compensated",
             "displacement_body_end_gyro_aligned",
             "delta_velocity_gravity_compensated",
+            "delta_velocity_body_end_gyro_aligned",
         ),
         default="displacement",
         help=(
@@ -342,6 +343,7 @@ def main() -> None:
             args.target_mode in (
                 "kinematic_residual_body_end_gravity_compensated",
                 "delta_velocity_gravity_compensated",
+                "delta_velocity_body_end_gyro_aligned",
             )
         ),
         "feature_frame": (
@@ -350,6 +352,7 @@ def main() -> None:
                 "kinematic_residual_body_end_gyro_aligned",
                 "kinematic_residual_body_end_gravity_compensated",
                 "displacement_body_end_gyro_aligned",
+                "delta_velocity_body_end_gyro_aligned",
             )
             else (
                 "body"
@@ -363,6 +366,7 @@ def main() -> None:
                 "kinematic_residual_body_end_gyro_aligned",
                 "kinematic_residual_body_end_gravity_compensated",
                 "displacement_body_end_gyro_aligned",
+                "delta_velocity_body_end_gyro_aligned",
             )
             else (
                 ["gyro_b_x", "gyro_b_y", "gyro_b_z", "thrust_b_x", "thrust_b_y", "thrust_b_z"]
@@ -379,15 +383,25 @@ def main() -> None:
             if args.target_mode == "displacement"
             else (
                 [
-                    "dv_specific_w_x",
-                    "dv_specific_w_y",
-                    "dv_specific_w_z",
+                    "dv_specific_b_end_x",
+                    "dv_specific_b_end_y",
+                    "dv_specific_b_end_z",
                     "log_var_x",
                     "log_var_y",
                     "log_var_z",
                 ]
-                if args.target_mode == "delta_velocity_gravity_compensated"
+                if args.target_mode == "delta_velocity_body_end_gyro_aligned"
                 else (
+                    [
+                        "dv_specific_w_x",
+                        "dv_specific_w_y",
+                        "dv_specific_w_z",
+                        "log_var_x",
+                        "log_var_y",
+                        "log_var_z",
+                    ]
+                    if args.target_mode == "delta_velocity_gravity_compensated"
+                    else (
                     [
                         "dp_b_end_x",
                         "dp_b_end_y",
@@ -422,6 +436,7 @@ def main() -> None:
                     )
                 )
             )
+        )
         ),
         "train_traces": [str(path) for path in train_paths],
         "val_traces": [str(path) for path in val_paths],
