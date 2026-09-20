@@ -1,0 +1,289 @@
+"""Deterministic full-sensor evaluation for learned-inertial racing policies.
+
+Unlike the legacy CSV logger, this evaluator records the pre-reset terminal
+cause, truth/mission gate counts, estimator errors, and perception/fusion
+availability for every episode.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+
+import numpy as np
+
+from isaaclab.app import AppLauncher
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--task",
+    default="Isaac-Drone-Racer-Learned-Inertial-RL-v0",
+)
+parser.add_argument("--checkpoint", required=True)
+parser.add_argument("--episodes", type=int, default=20)
+parser.add_argument("--seed", type=int, default=1)
+parser.add_argument("--output-dir", type=Path, required=True)
+AppLauncher.add_app_launcher_args(parser)
+args_cli = parser.parse_args()
+
+args_cli.enable_cameras = True
+if args_cli.episodes <= 0:
+    parser.error("--episodes must be positive")
+
+app_launcher = AppLauncher(args_cli)
+simulation_app = app_launcher.app
+
+import gymnasium as gym  # noqa: E402
+import torch  # noqa: E402
+from skrl.utils.runner.torch import Runner  # noqa: E402
+from isaaclab_rl.skrl import SkrlVecEnvWrapper  # noqa: E402
+from isaaclab_tasks.utils import load_cfg_from_registry, parse_env_cfg  # noqa: E402
+
+import tasks  # noqa: F401,E402
+
+
+def _estimator_truth_error(raw_env) -> tuple[float, float]:
+    robot = raw_env.scene["robot"]
+    gt_p = robot.data.root_pos_w[0].detach().cpu().numpy().astype(np.float64)
+    gt_v = robot.data.root_lin_vel_w[0].detach().cpu().numpy().astype(np.float64)
+    state = raw_env.learned_inertial_state
+    est_p = np.asarray(state.position_w_b, dtype=np.float64)
+    est_v = np.asarray(state.linear_velocity_w_b, dtype=np.float64)
+    return (
+        float(np.linalg.norm(est_p - gt_p)),
+        float(np.linalg.norm(est_v - gt_v)),
+    )
+
+
+def _mean(values):
+    return None if not values else float(sum(values) / len(values))
+
+
+def main() -> None:
+    torch.manual_seed(int(args_cli.seed))
+    np.random.seed(int(args_cli.seed))
+
+    env_cfg = parse_env_cfg(
+        args_cli.task,
+        device=args_cli.device,
+        num_envs=1,
+    )
+    env_cfg.scene.num_envs = 1
+    env_cfg.seed = int(args_cli.seed)
+
+    agent_cfg = load_cfg_from_registry(args_cli.task, "skrl_cfg_entry_point")
+    agent_cfg["seed"] = int(args_cli.seed)
+    agent_cfg["trainer"]["close_environment_at_exit"] = False
+    agent_cfg["agent"]["experiment"]["write_interval"] = 0
+    agent_cfg["agent"]["experiment"]["checkpoint_interval"] = 0
+
+    env = gym.make(args_cli.task, cfg=env_cfg)
+    raw_env = env.unwrapped
+    wrapped = SkrlVecEnvWrapper(env, ml_framework="torch")
+    runner = Runner(wrapped, agent_cfg)
+
+    checkpoint = str(Path(args_cli.checkpoint).expanduser().resolve())
+    print(f"[eval] loading checkpoint: {checkpoint}", flush=True)
+    runner.agent.load(checkpoint)
+    runner.agent.set_running_mode("eval")
+
+    output_dir = args_cli.output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    obs, _ = wrapped.reset()
+    records: list[dict[str, object]] = []
+
+    episode_return = 0.0
+    position_sq_sum = 0.0
+    velocity_sq_sum = 0.0
+    error_samples = 0
+    max_position_error = 0.0
+    max_velocity_error = 0.0
+
+    try:
+        while len(records) < int(args_cli.episodes):
+            p_err, v_err = _estimator_truth_error(raw_env)
+            position_sq_sum += p_err * p_err
+            velocity_sq_sum += v_err * v_err
+            error_samples += 1
+            max_position_error = max(max_position_error, p_err)
+            max_velocity_error = max(max_velocity_error, v_err)
+
+            with torch.inference_mode():
+                outputs = runner.agent.act(obs, timestep=0, timesteps=0)
+                actions = outputs[-1].get("mean_actions", outputs[0])
+                obs, reward, terminated, truncated, _ = wrapped.step(actions)
+
+            episode_return += float(reward.reshape(-1)[0].item())
+            done = bool(terminated.reshape(-1)[0].item()) or bool(
+                truncated.reshape(-1)[0].item()
+            )
+            if not done:
+                continue
+
+            terminal = raw_env.last_episode_diagnostic
+            if terminal is None:
+                raise RuntimeError(
+                    "environment terminated without last_episode_diagnostic"
+                )
+
+            sample_count = max(1, error_samples)
+            row = {
+                "episode": len(records) + 1,
+                "return": float(episode_return),
+                **terminal,
+                "position_rmse_m": float(
+                    np.sqrt(position_sq_sum / sample_count)
+                ),
+                "velocity_rmse_mps": float(
+                    np.sqrt(velocity_sq_sum / sample_count)
+                ),
+                "position_max_error_m": float(max_position_error),
+                "velocity_max_error_mps": float(max_velocity_error),
+            }
+            records.append(row)
+
+            cause = (
+                "collision"
+                if row["collision"]
+                else "flyaway"
+                if row["flyaway"]
+                else "timeout"
+                if row["time_out"]
+                else "other"
+            )
+            print(
+                "[eval] "
+                f"ep={row['episode']:02d}/{args_cli.episodes} "
+                f"steps={row['steps']} "
+                f"truth_gates={row['truth_gates_passed']} "
+                f"mission_gates={row['mission_gates_passed']} "
+                f"cause={cause} "
+                f"return={row['return']:.3f} "
+                f"p_rmse={row['position_rmse_m']:.3f}m "
+                f"visual={row['gate_updates']}/{row['gate_attempts']}",
+                flush=True,
+            )
+
+            episode_return = 0.0
+            position_sq_sum = 0.0
+            velocity_sq_sum = 0.0
+            error_samples = 0
+            max_position_error = 0.0
+            max_velocity_error = 0.0
+
+        csv_path = output_dir / "episodes.csv"
+        with csv_path.open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(records[0].keys()))
+            writer.writeheader()
+            writer.writerows(records)
+
+        num_gates = int(records[0]["num_gates"])
+        truth_gates = [int(r["truth_gates_passed"]) for r in records]
+        mission_gates = [int(r["mission_gates_passed"]) for r in records]
+        durations = [float(r["duration_s"]) for r in records]
+        returns = [float(r["return"]) for r in records]
+        p_rmse = [float(r["position_rmse_m"]) for r in records]
+        v_rmse = [float(r["velocity_rmse_mps"]) for r in records]
+
+        summary = {
+            "checkpoint": checkpoint,
+            "episodes": len(records),
+            "num_gates": num_gates,
+            "full_lap_completion_rate": float(
+                sum(g >= num_gates for g in truth_gates) / len(records)
+            ),
+            "truth_gates_passed": {
+                "mean": _mean(truth_gates),
+                "median": float(np.median(truth_gates)),
+                "min": int(min(truth_gates)),
+                "max": int(max(truth_gates)),
+                "histogram": {
+                    str(k): int(sum(g == k for g in truth_gates))
+                    for k in sorted(set(truth_gates))
+                },
+            },
+            "mission_gates_passed": {
+                "mean": _mean(mission_gates),
+                "median": float(np.median(mission_gates)),
+                "min": int(min(mission_gates)),
+                "max": int(max(mission_gates)),
+            },
+            "termination_counts": {
+                "collision": int(sum(bool(r["collision"]) for r in records)),
+                "flyaway": int(sum(bool(r["flyaway"]) for r in records)),
+                "timeout": int(sum(bool(r["time_out"]) for r in records)),
+                "other": int(
+                    sum(
+                        not bool(r["collision"])
+                        and not bool(r["flyaway"])
+                        and not bool(r["time_out"])
+                        for r in records
+                    )
+                ),
+            },
+            "duration_s": {
+                "mean": _mean(durations),
+                "median": float(np.median(durations)),
+                "min": float(min(durations)),
+                "max": float(max(durations)),
+            },
+            "return": {
+                "mean": _mean(returns),
+                "median": float(np.median(returns)),
+            },
+            "estimator": {
+                "position_rmse_mean_m": _mean(p_rmse),
+                "velocity_rmse_mean_mps": _mean(v_rmse),
+                "position_max_error_across_episodes_m": float(
+                    max(float(r["position_max_error_m"]) for r in records)
+                ),
+                "velocity_max_error_across_episodes_mps": float(
+                    max(float(r["velocity_max_error_mps"]) for r in records)
+                ),
+            },
+            "perception": {
+                "gate_attempts_mean": _mean(
+                    [int(r["gate_attempts"]) for r in records]
+                ),
+                "gate_updates_mean": _mean(
+                    [int(r["gate_updates"]) for r in records]
+                ),
+                "gate_rejects_mean": _mean(
+                    [int(r["gate_rejects"]) for r in records]
+                ),
+            },
+            "learned_motion": {
+                "updates_mean": _mean(
+                    [int(r["learned_updates"]) for r in records]
+                ),
+                "fusions_mean": _mean(
+                    [int(r["learned_fusions"]) for r in records]
+                ),
+                "skips_mean": _mean(
+                    [int(r["learned_update_skips"]) for r in records]
+                ),
+            },
+        }
+
+        summary_path = output_dir / "summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+
+        print("=" * 96)
+        print("LEARNED-INERTIAL POLICY EVALUATION SUMMARY")
+        print("=" * 96)
+        print(json.dumps(summary, indent=2))
+        print(f"[eval] wrote: {csv_path}")
+        print(f"[eval] wrote: {summary_path}")
+    finally:
+        wrapped.close()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        simulation_app.close()
