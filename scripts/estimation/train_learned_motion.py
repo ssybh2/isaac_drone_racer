@@ -43,12 +43,12 @@ def _parse_args() -> argparse.Namespace:
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
             "displacement_body_end_gyro_aligned",
+            "delta_velocity_gravity_compensated",
         ),
         default="displacement",
         help=(
-            "Train direct displacement, residual displacement, or endpoint-body "
-            "full displacement. V6.2 deployment target is "
-            "displacement_body_end_gyro_aligned."
+            "Train direct displacement, residual displacement, endpoint-body "
+            "full displacement, or gravity-compensated delta velocity."
         ),
     )
     parser.add_argument("--val_fraction", type=float, default=0.15)
@@ -339,7 +339,10 @@ def main() -> None:
         "stride_time_s": float(args.stride_time_s),
         "target_mode": str(args.target_mode),
         "gravity_compensated_target": bool(
-            args.target_mode == "kinematic_residual_body_end_gravity_compensated"
+            args.target_mode in (
+                "kinematic_residual_body_end_gravity_compensated",
+                "delta_velocity_gravity_compensated",
+            )
         ),
         "feature_frame": (
             "body_endpoint_gyro_aligned"
@@ -376,36 +379,47 @@ def main() -> None:
             if args.target_mode == "displacement"
             else (
                 [
-                    "dp_b_end_x",
-                    "dp_b_end_y",
-                    "dp_b_end_z",
+                    "dv_specific_w_x",
+                    "dv_specific_w_y",
+                    "dv_specific_w_z",
                     "log_var_x",
                     "log_var_y",
                     "log_var_z",
                 ]
-                if args.target_mode == "displacement_body_end_gyro_aligned"
+                if args.target_mode == "delta_velocity_gravity_compensated"
                 else (
                     [
-                        "dp_residual_b_end_x",
-                        "dp_residual_b_end_y",
-                        "dp_residual_b_end_z",
+                        "dp_b_end_x",
+                        "dp_b_end_y",
+                        "dp_b_end_z",
                         "log_var_x",
                         "log_var_y",
                         "log_var_z",
                     ]
-                    if args.target_mode in (
-                        "kinematic_residual_body_end",
-                        "kinematic_residual_body_end_gyro_aligned",
-                        "kinematic_residual_body_end_gravity_compensated",
+                    if args.target_mode == "displacement_body_end_gyro_aligned"
+                    else (
+                        [
+                            "dp_residual_b_end_x",
+                            "dp_residual_b_end_y",
+                            "dp_residual_b_end_z",
+                            "log_var_x",
+                            "log_var_y",
+                            "log_var_z",
+                        ]
+                        if args.target_mode in (
+                            "kinematic_residual_body_end",
+                            "kinematic_residual_body_end_gyro_aligned",
+                            "kinematic_residual_body_end_gravity_compensated",
+                        )
+                        else [
+                            "dp_residual_w_x",
+                            "dp_residual_w_y",
+                            "dp_residual_w_z",
+                            "log_var_x",
+                            "log_var_y",
+                            "log_var_z",
+                        ]
                     )
-                    else [
-                        "dp_residual_w_x",
-                        "dp_residual_w_y",
-                        "dp_residual_w_z",
-                        "log_var_x",
-                        "log_var_y",
-                        "log_var_z",
-                    ]
                 )
             )
         ),
