@@ -7,7 +7,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils import configclass
 
 from . import mdp
-from .drone_racer_env_cfg import ActionsCfg
+from .drone_racer_env_cfg import ActionsCfg, CommandsCfg
 from .drone_racer_swift_perception_env_cfg import DroneRacerSwiftPerceptionEnvCfg
 
 
@@ -25,6 +25,20 @@ class LearnedInertialPolicyCfg(ObsGroup):
     def __post_init__(self) -> None:
         self.enable_corruption = False
         self.concatenate_terms = True
+
+
+@configclass
+class LearnedInertialCommandsCfg(CommandsCfg):
+    """Actor mission target advanced from the learned-inertial estimate."""
+
+    target = mdp.EstimatedStateGateTargetingCommandCfg(
+        asset_name="robot",
+        track_name="track",
+        randomise_start=None,
+        record_fpv=False,
+        resampling_time_range=(1e9, 1e9),
+        debug_vis=True,
+    )
 
 
 @configclass
@@ -46,6 +60,7 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
 
     observations: LearnedInertialObservationsCfg = LearnedInertialObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
+    commands: LearnedInertialCommandsCfg = LearnedInertialCommandsCfg()
 
     learned_motion_checkpoint: str | None = None
     learned_motion_device: str = "cuda"
@@ -230,3 +245,74 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
         self.scene.num_envs = 1
         self.commands.target.randomise_start = None
         self.events.push_robot = None
+
+
+@configclass
+class DroneRacerLearnedInertialRLCfg(DroneRacerLearnedInertialEnvCfg):
+    """Frozen deployment-faithful estimator configuration for PPO integration.
+
+    This profile intentionally encodes the V6.4/V6.5/V6.6 settings validated
+    before RL so that ordinary training does not depend on evaluator-only CLI
+    overrides.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        # Validated learned inertial model.
+        self.learned_motion_checkpoint = (
+            "artifacts/imo_tcn/model_v6_2_body_delta_velocity_balanced.pt"
+        )
+        self.learned_motion_device = "cuda"
+        self.learned_update_rate_hz = 20.0
+        self.learned_fusion_rate_hz = 2.0
+        self.learned_measurement_covariance_multiplier = 1.0
+
+        # Nominal sensor corruption used by the successful V6.4/V6.5
+        # validation campaign.
+        self.imu_accel_white_noise_sigma_mps2 = 0.01
+        self.imu_gyro_white_noise_sigma_radps = 0.001
+        self.imu_accel_bias_rw_sigma_mps2_sqrt_s = 0.001
+        self.imu_gyro_bias_rw_sigma_radps_sqrt_s = 0.0001
+
+        # Production gate perception: detector + visibility guard + mapped
+        # direct pixel reprojection. PnP is not part of the RL estimator path.
+        self.swift_detector_checkpoint = (
+            "artifacts/stage2_next_steps_20260911/checkpoints/"
+            "torchvision_keypointrcnn_best.pt"
+        )
+        self.swift_visibility_checkpoint = (
+            "artifacts/stage2_next_steps_20260911/checkpoints/"
+            "gate_keypoint_net_best.pt"
+        )
+        self.gate_measurement_model = "direct_reprojection"
+        self.gate_reprojection_sigma_px = 0.85
+        self.gate_reprojection_min_visible_corners = 2
+        self.gate_reprojection_association_max_rmse_px = 80.0
+        self.gate_reprojection_min_depth_m = 0.05
+        self.gate_reprojection_huber_delta_sigma = 2.5
+        self.gate_reprojection_max_normalized_nis = 25.0
+
+        # Stress hooks are disabled for the nominal PPO task. They can be
+        # re-enabled later as domain-randomization/curriculum experiments.
+        self.gate_stress_frame_drop_probability = 0.0
+        self.gate_stress_burst_duration_s = 0.0
+        self.gate_stress_pixel_noise_sigma_px = 0.0
+        self.gate_stress_corner_drop_probability = 0.0
+        self.gate_stress_latency_s = 0.0
+
+        # No oracle/debug estimator inputs in the actor training task.
+        self.gate_debug_gt_diagnostics = False
+        self.learned_debug_oracle_residual_fusion = False
+        self.learned_debug_oracle_uzh_displacement_fusion = False
+        self.learned_debug_oracle_body_end_displacement_fusion = False
+        self.learned_debug_oracle_second_difference_fusion = False
+        self.learned_debug_oracle_delta_velocity_fusion = False
+        self.learned_debug_oracle_body_end_delta_velocity_fusion = False
+        self.learned_debug_truth_orientation_for_features = False
+
+        # Fixed known start is part of the deployment contract used throughout
+        # the estimator validation. Mission progression itself is estimator
+        # driven by EstimatedStateGateTargetingCommand.
+        self.initialize_from_fixed_start_truth = True
+        self.commands.target.randomise_start = None
