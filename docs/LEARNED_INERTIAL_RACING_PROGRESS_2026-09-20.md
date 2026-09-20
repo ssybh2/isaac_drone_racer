@@ -31,7 +31,7 @@ The most important result achieved today is that replacing standalone planar PnP
 
 The estimator is no longer the primary blocker to RL. The remaining work is mainly deployment-faithful RL integration: remove indirect GT dependence from target progression, freeze the validated estimator configuration into an RL task, validate one estimated-state closed loop, and then begin PPO training.
 
-V6.6 adds timestamp-aware delayed visual updates using stochastic pose clones. The three 50/100/200 ms latency experiments are currently being rerun. These experiments are considered robustness/engineering hardening rather than a required RL gate for the intended hardware, because the target hardware pipeline is not expected to incur such uncompensated visual latency.
+V6.6 adds timestamp-aware delayed visual updates using stochastic pose clones. The 50/100/200 ms compensated-latency experiments have now completed successfully: all three cases returned to the same approximately 5-6 cm position-RMSE regime as the neutral baseline. This validates the delayed-measurement stochastic-clone design. These experiments remain robustness/engineering hardening rather than a required RL gate for the intended hardware, because the target hardware pipeline is not expected to incur such large uncompensated visual latency.
 
 ---
 
@@ -413,21 +413,52 @@ Unit tests cover:
 
 The latest CI passed after fixing the test-only missing `pytest` import.
 
-### 8.3 Current experiment in progress
+### 8.3 V6.6 compensated-latency result
 
-At the time of this summary, the user has already pulled V6.6 and started rerunning only the three key latency cases:
+The three key compensated-latency cases completed successfully:
+
+| Case | Position RMSE | Tail20 | Position max | Velocity RMSE | Orientation RMSE | Gate acceptance | Association match | NIS/dof |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 50 ms configured | 0.05677 m | 0.05139 m | 0.11968 m | 0.03042 m/s | 0.74595 deg | 71.33% | 97.66% | 1.106 |
+| 100 ms configured | 0.05822 m | 0.05439 m | 0.12184 m | 0.03122 m/s | 0.76352 deg | 71.20% | 97.65% | 1.104 |
+| 200 ms configured | 0.05681 m | 0.05263 m | 0.11773 m | 0.03192 m/s | 0.73832 deg | 70.93% | 97.64% | 1.111 |
+
+Observed mean measurement ages were approximately 0.08 s, 0.12 s, and 0.20 s respectively because measurements are released on the discrete camera/evaluator schedule.
+
+All three runs used:
 
 ```text
-50 ms
-100 ms
-200 ms
+latency_compensation_enabled = True
+max_position_clones = 32
 ```
+
+The results are effectively back at the neutral V6.5 baseline:
+
+```text
+neutral position RMSE ~= 0.0578 m
+neutral position max  ~= 0.1178 m
+neutral orientation   ~= 0.766 deg
+```
+
+This is a strong validation that the catastrophic V6.5 latency result was caused by timestamp/state mismatch rather than by the direct-reprojection factor itself.
+
+The compensated update:
+
+```text
+z(t_capture)
+   ->
+reprojection at clone x(t_capture)
+   ->
+full stochastic-clone covariance update
+   ->
+current x(t_now)
+```
+
+restores consistency even for deliberately exaggerated delay.
 
 Do **not** rerun burst-dropout or pixel-noise experiments; V6.5 already established those results.
 
-For the intended real hardware, 50+ ms uncompensated visual latency is not expected to be a practical operating condition. Therefore V6.6 latency work is treated as robustness/engineering hardening, not as the final blocker preventing RL work.
-
-The useful outcome of the current V6.6 rerun is to verify that the stochastic-clone delayed-measurement mechanism is mathematically and operationally correct. RL integration does not need to wait for repeated burst/noise studies.
+For the intended real hardware, these 50-200 ms tests remain robustness hardening rather than an RL entry criterion. Their purpose is now complete: the delayed-measurement mechanism has been shown to work.
 
 ---
 
@@ -560,11 +591,9 @@ Therefore the project does not need a new RL framework. It needs the existing RL
 
 The shortest defensible path is:
 
-### Step 1 — Finish the currently running V6.6 latency rerun
+### Step 1 — Freeze the estimator baseline
 
-Record the 50/100/200 ms compensated results.
-
-This is useful robustness evidence but not a requirement to repeat any burst/noise experiments.
+The V6.6 compensated-latency rerun is complete and passed. Treat the estimator architecture as frozen unless RL integration exposes a genuine estimator bug.
 
 ### Step 2 — Create the RL-integration branch from the accepted estimator baseline
 
@@ -662,8 +691,8 @@ direct gate reprojection                   DONE
 5-seed inertial-noise robustness           DONE
 1 s complete visual blackout               DONE
 +0.5 / +1 / +2 px visual-noise tests       DONE
-V6.6 delayed-measurement mechanism         IMPLEMENTED
-V6.6 50/100/200 ms rerun                   IN PROGRESS
+V6.6 delayed-measurement mechanism         DONE
+V6.6 50/100/200 ms rerun                   DONE
 
 GT-free actor state                        DONE
 GT-free target-position computation        DONE
@@ -685,11 +714,12 @@ formal PPO/RL                              NEXT AFTER ABOVE
 5. Five-seed testing shows good robustness to the tested IMU-noise realizations.
 6. One second of total visual blackout caused almost no degradation on the tested trajectory.
 7. Additional 2 px corner noise did not cause position divergence.
-8. Uncompensated delayed pixels are dangerous because they violate the measurement timestamp/state relationship; V6.6 adds clone-based delayed visual updates.
-9. For the intended hardware, the artificial 50-200 ms latency stress is not treated as a blocker to RL.
-10. The estimator architecture is sufficiently mature to stop being the main research focus.
-11. The remaining pre-RL work is interface/integration work: GT-free gate progression, frozen RL configuration, and one estimated-state closed-loop test.
-12. Once these three integration tasks pass, the project should move directly into PPO rather than continuing to optimize estimator RMSE.
+8. Uncompensated delayed pixels are dangerous because they violate the measurement timestamp/state relationship; V6.6 clone-based delayed visual updates restore the 50/100/200 ms cases to approximately 5-6 cm position RMSE.
+9. The delayed-measurement stochastic-clone implementation is now experimentally validated.
+10. For the intended hardware, the artificial 50-200 ms latency stress is not treated as a blocker to RL.
+11. The estimator architecture is sufficiently mature to stop being the main research focus.
+12. The remaining pre-RL work is interface/integration work: GT-free gate progression, frozen RL configuration, and one estimated-state closed-loop test.
+13. Once these three integration tasks pass, the project should move directly into PPO rather than continuing to optimize estimator RMSE.
 
 ---
 
