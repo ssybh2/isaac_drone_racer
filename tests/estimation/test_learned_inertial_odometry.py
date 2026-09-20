@@ -83,7 +83,7 @@ def test_multi_clone_augmentation_preserves_cross_covariance():
 
     est.clone_current_position()
     assert est.clone_count == 1
-    assert est.state().covariance.shape == (21, 21)
+    assert est.state().covariance.shape == (24, 24)
 
     for k in range(1, 6):
         est.propagate(
@@ -95,8 +95,8 @@ def test_multi_clone_augmentation_preserves_cross_covariance():
 
     P = est.state().covariance
     assert est.clone_count == 2
-    assert P.shape == (27, 27)
-    assert np.linalg.norm(P[15:21, 21:27]) > 1.0e-6
+    assert P.shape == (33, 33)
+    assert np.linalg.norm(P[15:24, 24:33]) > 1.0e-6
     assert np.allclose(P, P.T, atol=1e-12)
 
 
@@ -115,13 +115,13 @@ def test_20hz_clone_cadence_retains_half_second_history():
 
     timestamps = np.asarray(est.clone_timestamps_s)
     assert est.clone_count == 11
-    assert est.state().covariance.shape == (81, 81)
+    assert est.state().covariance.shape == (114, 114)
     assert np.allclose(np.diff(timestamps), 0.05, atol=1e-12)
     assert np.isclose(timestamps[-1] - timestamps[0], 0.5)
 
     H = est.relative_displacement_jacobian(start_timestamp_s=0.0)
     assert np.allclose(H[:, 6:9], np.eye(3))
-    assert np.allclose(H[:, 18:21], -np.eye(3))
+    assert np.allclose(H[:, 21:24], -np.eye(3))
 
 
 def test_relative_displacement_jacobian_selects_historical_clone():
@@ -137,9 +137,9 @@ def test_relative_displacement_jacobian_selects_historical_clone():
         est.clone_current_position()
 
     H = est.relative_displacement_jacobian(start_timestamp_s=0.10)
-    clone_start = 15 + 6 * 2
+    clone_start = 15 + 9 * 2
     assert np.allclose(H[:, 6:9], np.eye(3))
-    assert np.allclose(H[:, clone_start + 3 : clone_start + 6], -np.eye(3))
+    assert np.allclose(H[:, clone_start + 6 : clone_start + 9], -np.eye(3))
     assert np.count_nonzero(H) == 6
 
 
@@ -158,7 +158,7 @@ def test_clone_marginalization_updates_covariance_dimension_and_order():
     removed = est.marginalize_clones_before(0.10)
     assert removed == 2
     assert np.allclose(est.clone_timestamps_s, (0.10, 0.15, 0.20))
-    assert est.state().covariance.shape == (33, 33)
+    assert est.state().covariance.shape == (42, 42)
     assert np.allclose(est.state().covariance, est.state().covariance.T, atol=1e-12)
 
 
@@ -188,8 +188,8 @@ def test_kinematic_residual_removes_known_start_velocity_term():
         clone_tolerance_s=1e-9,
     )
     assert np.allclose(H[:, 6:9], np.eye(3))
-    assert np.allclose(H[:, 15:18], -0.5 * np.eye(3))
-    assert np.allclose(H[:, 18:21], -np.eye(3))
+    assert np.allclose(H[:, 18:21], -0.5 * np.eye(3))
+    assert np.allclose(H[:, 21:24], -np.eye(3))
 
     innovation = est.update_learned_kinematic_residual(
         residual_displacement_w=(0.0, 0.0, 0.0),
@@ -235,7 +235,7 @@ def test_body_end_kinematic_residual_jacobian_matches_finite_difference():
     # Check current attitude, current position, cloned velocity and cloned
     # position columns. These are all terms in the endpoint-body measurement.
     columns = list(range(0, 3)) + list(range(6, 9))
-    columns += list(range(15, 18)) + list(range(18, 21))
+    columns += list(range(18, 21)) + list(range(21, 24))
     for col in columns:
         perturbed = copy.deepcopy(est)
         dx = np.zeros(perturbed.P.shape[0], dtype=np.float64)
@@ -312,7 +312,7 @@ def test_gravity_compensated_body_residual_jacobian_matches_finite_difference():
     )
     eps = 1.0e-7
     columns = list(range(0, 3)) + list(range(6, 9))
-    columns += list(range(15, 18)) + list(range(18, 21))
+    columns += list(range(18, 21)) + list(range(21, 24))
 
     for col in columns:
         perturbed = copy.deepcopy(est)
@@ -359,6 +359,192 @@ def test_gravity_compensated_body_residual_is_zero_for_ballistic_gravity():
     np.testing.assert_allclose(z, 0.0, atol=1e-9)
 
 
+
+def test_uzh_two_clone_relative_jacobian_uses_both_cloned_endpoints():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    est.reset(
+        position_w_b=(0.2, -0.1, 1.0),
+        linear_velocity_w_b=(1.0, 0.2, 0.0),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.0, 0.0, 0.0),
+            accel_b=(0.0, 0.0, 9.81),
+            timestamp_s=k * 0.01,
+        )
+    est.clone_current_position()
+
+    H = est.clone_relative_displacement_jacobian(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+    start_index = est._find_clone_index(0.0, tolerance_s=1e-9)
+    end_index = est._find_clone_index(0.5, tolerance_s=1e-9)
+
+    np.testing.assert_allclose(H[:, :15], 0.0, atol=0.0)
+    np.testing.assert_allclose(
+        H[:, est._clone_position_slice(start_index)],
+        -np.eye(3),
+    )
+    np.testing.assert_allclose(
+        H[:, est._clone_position_slice(end_index)],
+        np.eye(3),
+    )
+    assert np.count_nonzero(H) == 6
+
+    N = est.unobservable_basis()
+    np.testing.assert_allclose(H @ N[:, 1:4], 0.0, atol=1e-12)
+
+
+def test_uzh_two_clone_body_factor_jacobian_matches_finite_difference_and_gauge():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    q0 = lio.rotmat_to_quat_wxyz(
+        lio._exp_so3(np.array([0.12, -0.08, 0.20]))
+    )
+    est.reset(
+        position_w_b=(0.2, -0.1, 1.0),
+        linear_velocity_w_b=(0.8, -0.3, 0.1),
+        orientation_w_b_wxyz=q0,
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.02, -0.01, 0.07),
+            accel_b=(0.3, -0.1, 9.7),
+            timestamp_s=k * 0.01,
+        )
+    est.clone_current_position()
+
+    start_index = est._find_clone_index(0.0, tolerance_s=1e-9)
+    end_index = est._find_clone_index(0.5, tolerance_s=1e-9)
+    H = est.clone_kinematic_residual_body_end_gravity_compensated_jacobian(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+    base = est.predicted_clone_kinematic_residual_body_end_gravity_compensated(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+
+    columns = []
+    columns += list(range(
+        est._clone_orientation_slice(end_index).start,
+        est._clone_orientation_slice(end_index).stop,
+    ))
+    columns += list(range(
+        est._clone_velocity_slice(start_index).start,
+        est._clone_velocity_slice(start_index).stop,
+    ))
+    columns += list(range(
+        est._clone_position_slice(start_index).start,
+        est._clone_position_slice(start_index).stop,
+    ))
+    columns += list(range(
+        est._clone_position_slice(end_index).start,
+        est._clone_position_slice(end_index).stop,
+    ))
+
+    eps = 1.0e-7
+    for col in columns:
+        perturbed = copy.deepcopy(est)
+        dx = np.zeros(perturbed.P.shape[0], dtype=np.float64)
+        dx[col] = eps
+        perturbed._inject_error(dx)
+        value = (
+            perturbed.predicted_clone_kinematic_residual_body_end_gravity_compensated(
+                start_timestamp_s=0.0,
+                end_timestamp_s=0.5,
+                clone_tolerance_s=1e-9,
+            )
+        )
+        numerical = (value - base) / eps
+        np.testing.assert_allclose(
+            numerical,
+            H[:, col],
+            rtol=3e-5,
+            atol=3e-6,
+        )
+
+    N = est.unobservable_basis()
+    np.testing.assert_allclose(H @ N[:, 1:4], 0.0, atol=1e-11)
+    np.testing.assert_allclose(H @ N[:, 0], 0.0, atol=1e-8)
+
+
+def test_uzh_two_clone_update_uses_full_gain_and_keeps_endpoint_synced():
+    est = lio.LearnedInertialOdometry(
+        max_position_clones=11,
+        # Deliberately configure a legacy mask. The V6.2 two-clone API must
+        # still use the UZH-style full Kalman gain.
+        learned_kalman_gain_mode="freeze_clones_attitude_bias",
+    )
+    est.reset(
+        position_w_b=(0.1, -0.2, 0.8),
+        linear_velocity_w_b=(1.0, 0.2, -0.1),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.01, -0.02, 0.10),
+            accel_b=(0.3, 0.1, 9.75),
+            timestamp_s=k * 0.01,
+        )
+    est.clone_current_position()
+
+    end_index = est._find_clone_index(0.5, tolerance_s=1e-9)
+    predicted = (
+        est.predicted_clone_kinematic_residual_body_end_gravity_compensated(
+            start_timestamp_s=0.0,
+            end_timestamp_s=0.5,
+            clone_tolerance_s=1e-9,
+        )
+    )
+    measurement = predicted + np.array([0.02, -0.01, 0.005])
+
+    innovation = (
+        est.update_learned_clone_kinematic_residual_body_end_gravity_compensated(
+            measurement,
+            np.eye(3) * 1.0e-4,
+            start_timestamp_s=0.0,
+            end_timestamp_s=0.5,
+            clone_tolerance_s=1e-9,
+            marginalize_start_clone=False,
+        )
+    )
+    np.testing.assert_allclose(
+        innovation,
+        np.array([0.02, -0.01, 0.005]),
+        atol=1e-12,
+    )
+    assert est.last_update_diagnostics["kalman_gain_mode"] == "full"
+    assert est.last_update_diagnostics["kalman_gain_clone_position_norm"] > 0.0
+    assert est.last_update_diagnostics["measurement_translation_nullspace_norm"] < 1e-10
+
+    # The endpoint clone was an exact stochastic copy of the evolving
+    # kinematic state at t=0.5. A full joint update must keep those nominal
+    # quantities synchronized instead of leaving a frozen pre-update clone.
+    np.testing.assert_allclose(
+        est._clone_positions[end_index],
+        est.p,
+        rtol=1e-10,
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        est._clone_velocities[end_index],
+        est.v,
+        rtol=1e-10,
+        atol=1e-10,
+    )
+    R_delta = est._clone_orientations[end_index].T @ est.R
+    np.testing.assert_allclose(R_delta, np.eye(3), rtol=1e-9, atol=1e-9)
+
+
 def test_learned_relative_displacement_pulls_position_toward_measurement():
     est = lio.LearnedInertialOdometry(max_position_clones=11)
     est.reset(initial_covariance=np.eye(15) * 0.1)
@@ -384,7 +570,7 @@ def test_learned_relative_displacement_pulls_position_toward_measurement():
     assert residual[0] < 0.0
     assert abs(after) < abs(before)
     assert est.clone_count == 10
-    assert est.state().covariance.shape == (75, 75)
+    assert est.state().covariance.shape == (105, 105)
 
 
 def test_post_update_endpoint_clone_prevents_next_window_correction_echo():
@@ -442,18 +628,19 @@ def test_post_update_endpoint_clone_prevents_next_window_correction_echo():
     np.testing.assert_allclose(corrected._clone_velocities[0], corrected_v, atol=1e-12)
     np.testing.assert_allclose(corrected._clone_positions[0], corrected_p, atol=1e-12)
 
-    J = np.zeros((6, 15), dtype=np.float64)
-    J[0:3, 3:6] = np.eye(3)
-    J[3:6, 6:9] = np.eye(3)
+    J = np.zeros((9, 15), dtype=np.float64)
+    J[0:3, 0:3] = np.eye(3)
+    J[3:6, 3:6] = np.eye(3)
+    J[6:9, 6:9] = np.eye(3)
     expected_cross = J @ P_after_update
     np.testing.assert_allclose(
-        corrected.P[15:21, :15],
+        corrected.P[15:24, :15],
         expected_cross,
         rtol=1e-11,
         atol=1e-11,
     )
     np.testing.assert_allclose(
-        corrected.P[15:21, 15:21],
+        corrected.P[15:24, 15:24],
         J @ P_after_update @ J.T,
         rtol=1e-11,
         atol=1e-11,
@@ -563,7 +750,7 @@ def test_max_clone_count_bounds_fixed_lag_state():
         est.clone_current_position()
     assert est.clone_count == 3
     assert np.allclose(est.clone_timestamps_s, (0.15, 0.20, 0.25))
-    assert est.state().covariance.shape == (33, 33)
+    assert est.state().covariance.shape == (42, 42)
 
 
 def test_learned_covariance_protection_blocks_millimetre_horizontal_sigma():
@@ -587,7 +774,7 @@ def test_gate_position_update_moves_state_toward_absolute_anchor_with_clones():
     )
     assert est.state().position_w_b[0] < 1.01
     assert est.clone_count == 1
-    assert est.state().covariance.shape == (21, 21)
+    assert est.state().covariance.shape == (24, 24)
 
 
 def test_learned_kalman_gain_modes_zero_expected_rows():
