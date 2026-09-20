@@ -127,6 +127,9 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # z = (v_end - v_start) - g*dt. This removes the unknown initial velocity
     # from the learned target while keeping a first-difference velocity-only H.
     learned_debug_oracle_delta_velocity_fusion: bool = False
+    # Gauge-invariant endpoint-body version of the delta-velocity Oracle:
+    # z = R_end^T[(v_end-v_start)-g*dt].
+    learned_debug_oracle_body_end_delta_velocity_fusion: bool = False
     learned_debug_oracle_delta_velocity_sigma_mps: float = 0.05
     # Diagnostic only: rotate TCN gyro/thrust features with simulator truth
     # attitude instead of EKF attitude. If this materially improves fusion, it
