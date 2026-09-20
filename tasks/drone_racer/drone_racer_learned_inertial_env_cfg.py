@@ -184,6 +184,27 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     gate_reprojection_huber_delta_sigma: float = 2.5
     gate_reprojection_max_normalized_nis: float | None = 25.0
 
+    # V6.5 perception robustness stress hooks. Defaults are exactly neutral,
+    # so production-style V6.4 behavior is preserved unless an evaluator
+    # explicitly enables corruption. These hooks operate on camera/gate
+    # observations only; they never alter simulator truth or policy rewards.
+    gate_stress_seed: int = 0
+    # Independent random full-frame loss probability at each 30 Hz camera
+    # sample. A deterministic burst can be superimposed below.
+    gate_stress_frame_drop_probability: float = 0.0
+    gate_stress_burst_start_s: float = 10.0
+    gate_stress_burst_duration_s: float = 0.0
+    # Additional isotropic Gaussian corruption applied to detector corner
+    # pixels before association/fusion. The EKF measurement sigma remains the
+    # configured gate_reprojection_sigma_px, intentionally exposing mismatch.
+    gate_stress_pixel_noise_sigma_px: float = 0.0
+    # Independent per-semantic-corner visibility erasure after the detector.
+    gate_stress_corner_drop_probability: float = 0.0
+    # Processing delay applied after corner detection. The delayed measurement
+    # is fused against the current state (no OOSM rewind), intentionally testing
+    # robustness to uncompensated perception latency.
+    gate_stress_latency_s: float = 0.0
+
     # Evaluation-only audit switch. When enabled, the runtime records simulator
     # truth alongside Gate-PnP measurements so detector/PnP/association quality
     # can be diagnosed. Truth is never fed into the estimator update itself.
