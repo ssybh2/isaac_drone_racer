@@ -224,6 +224,56 @@ def test_gravity_compensated_body_target_removes_ballistic_gravity(tmp_path):
     np.testing.assert_allclose(windows.targets, 0.0, atol=1e-6)
 
 
+def test_body_end_delta_velocity_target_uses_endpoint_frame_and_aligned_features(tmp_path):
+    trace = tmp_path / "body_delta_v_trace.csv"
+    q = [np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)]  # +90 deg yaw
+    with trace.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        for t in np.arange(0.0, 1.0 + 1.0e-9, 0.01):
+            writer.writerow(
+                {
+                    "t_s": t,
+                    "truth_px": 0.5 * t * t,
+                    "truth_py": 0.0,
+                    "truth_pz": 1.0,
+                    "truth_vx": t,
+                    "truth_vy": 0.0,
+                    "truth_vz": 0.0,
+                    "truth_qw": q[0],
+                    "truth_qx": q[1],
+                    "truth_qy": q[2],
+                    "truth_qz": q[3],
+                    "imu_gx": 0.0,
+                    "imu_gy": 0.0,
+                    "imu_gz": 0.0,
+                    "thrust_b_x": 0.0,
+                    "thrust_b_y": 1.0,
+                    "thrust_b_z": 9.81,
+                }
+            )
+
+    windows = load_trace_windows(
+        trace,
+        window_time_s=0.5,
+        sample_rate_hz=100.0,
+        stride_time_s=0.5,
+        target_mode="delta_velocity_body_end_gyro_aligned",
+    )
+
+    assert windows.target_mode == "delta_velocity_body_end_gyro_aligned"
+    # World specific delta-v is [0.5, 0, 4.905] m/s. A +90 deg yaw maps
+    # world +x to endpoint-body -y while leaving z unchanged.
+    np.testing.assert_allclose(
+        windows.targets,
+        [[0.0, -0.5, 4.905], [0.0, -0.5, 4.905]],
+        atol=1e-5,
+    )
+    # Zero gyro means the endpoint alignment leaves the raw body features fixed.
+    np.testing.assert_allclose(windows.features[:, 4, :], 1.0, atol=1e-6)
+    np.testing.assert_allclose(windows.features[:, 5, :], 9.81, atol=1e-6)
+
+
 def test_delta_velocity_gravity_compensated_target_removes_ballistic_gravity(tmp_path):
     trace = tmp_path / "delta_v_gravity_trace.csv"
     with trace.open("w", newline="", encoding="utf-8") as handle:
