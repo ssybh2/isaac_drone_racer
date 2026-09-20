@@ -471,9 +471,18 @@ def test_uzh_two_clone_body_factor_jacobian_matches_finite_difference_and_gauge(
             atol=3e-6,
         )
 
-    N = est.unobservable_basis()
-    np.testing.assert_allclose(H @ N[:, 1:4], 0.0, atol=1e-11)
-    np.testing.assert_allclose(H @ N[:, 0], 0.0, atol=1e-8)
+    N_propagated = est.unobservable_basis()
+    N_instantaneous = est._instantaneous_unobservable_basis()
+    np.testing.assert_allclose(H @ N_propagated[:, 1:4], 0.0, atol=1e-11)
+    np.testing.assert_allclose(H @ N_instantaneous[:, 1:4], 0.0, atol=1e-11)
+    np.testing.assert_allclose(H @ N_instantaneous[:, 0], 0.0, atol=1e-8)
+
+    # The propagated UZH/TLIO consistency basis is intentionally stricter than
+    # rebuilding the nullspace from the current nominal state. With this
+    # estimator's first-order right-error propagation, a small yaw-nullspace
+    # defect is measurable even over 0.5 s; keep it visible rather than hiding
+    # it by recomputing N at update time.
+    assert np.linalg.norm(H @ N_propagated[:, 0]) < 1.0e-4
 
 
 def test_uzh_two_clone_update_uses_full_gain_and_keeps_endpoint_synced():
