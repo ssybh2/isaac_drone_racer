@@ -177,9 +177,14 @@ parser.add_argument(
     "--gate-stress-latency-ms",
     type=float,
     default=0.0,
+    help="Perception processing latency in milliseconds.",
+)
+parser.add_argument(
+    "--disable-gate-latency-compensation",
+    action="store_true",
     help=(
-        "Uncompensated perception processing latency in milliseconds. "
-        "Delayed pixels are fused against the current filter state."
+        "Ablation only: fuse delayed gate pixels against the current pose "
+        "instead of the V6.6 capture-time stochastic clone."
     ),
 )
 parser.add_argument(
@@ -630,6 +635,20 @@ def _prepare_cfg():
         args_cli.gate_stress_corner_drop_probability
     )
     cfg.gate_stress_latency_s = float(args_cli.gate_stress_latency_ms) / 1000.0
+    cfg.gate_reprojection_compensate_latency = not bool(
+        args_cli.disable_gate_latency_compensation
+    )
+    if (
+        cfg.gate_stress_latency_s > 0.0
+        and cfg.gate_reprojection_compensate_latency
+    ):
+        # The 0.5 s learned-motion window already needs ~11 20 Hz clones.
+        # Camera-time clones add ~25 Hz more states. Keep enough fixed-lag
+        # capacity that visual OOSM support cannot evict learned-factor clones.
+        cfg.learned_max_position_clones = max(
+            int(cfg.learned_max_position_clones),
+            32,
+        )
 
     cfg.terminations.collision = None
     cfg.terminations.flyaway = None
@@ -2175,6 +2194,10 @@ def main() -> None:
                     cfg.gate_stress_corner_drop_probability
                 ),
                 "latency_s": float(cfg.gate_stress_latency_s),
+                "latency_compensation_enabled": bool(
+                    cfg.gate_reprojection_compensate_latency
+                ),
+                "max_position_clones": int(cfg.learned_max_position_clones),
                 "frame_drop_count": int(
                     getattr(raw_env, "_gate_stress_frame_drop_count", 0)
                 ),
