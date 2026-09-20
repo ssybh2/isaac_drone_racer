@@ -386,14 +386,6 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
         self._prev_estimated_pos_w = estimated_pos_w.clone()
         self.prev_robot_pos_w = current_gt_pos_w.clone()
 
-
-@configclass
-class EstimatedStateGateTargetingCommandCfg(GateTargetingCommandCfg):
-    """Deployment-faithful gate mission state for learned-inertial RL."""
-
-    class_type: type = EstimatedStateGateTargetingCommand
-
-
 @configclass
 class GateTargetingCommandCfg(CommandTermCfg):
     """Configuration for gate targeting command generator."""
@@ -424,3 +416,10 @@ class GateTargetingCommandCfg(CommandTermCfg):
     # Set the scale of the visualization markers to (0.1, 0.1, 0.1)
     target_visualizer_cfg.markers["frame"].scale = (0.0001, 0.0001, 0.0001)
     drone_visualizer_cfg.markers["frame"].scale = (0.0001, 0.0001, 0.0001)
+
+
+@configclass
+class EstimatedStateGateTargetingCommandCfg(GateTargetingCommandCfg):
+    """Deployment-faithful gate mission state for learned-inertial RL."""
+
+    class_type: type = EstimatedStateGateTargetingCommand
