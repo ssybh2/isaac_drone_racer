@@ -2,7 +2,7 @@ name: learned inertial pure checks
 
 on:
   push:
-    branches: ["feature/learned-inertial-racing", "feature/v6.2-uzh-stochastic-cloning", "feature/v6.3-gate-pnp-diagnostics"]
+    branches: ["feature/learned-inertial-racing", "feature/v6.2-uzh-stochastic-cloning", "feature/v6.3-gate-pnp-diagnostics", "feature/v6.4-direct-gate-reprojection"]
   pull_request:
     branches: ["debug/openvins-imu-convention-isolation", master]
 
