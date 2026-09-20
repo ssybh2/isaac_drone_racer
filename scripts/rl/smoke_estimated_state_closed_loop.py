@@ -457,8 +457,8 @@ def main() -> None:
                 )
 
             if done:
-                terminated_early = True
                 termination_step = step + 1
+                terminated_early = termination_step < total_steps
                 break
 
         _consume_gate_diagnostics(raw_env, gate_diag_state)
@@ -493,6 +493,9 @@ def main() -> None:
             "maximum_velocity_error_mps": float(maximum_velocity_error),
             "last_pre_step_truth_diagnostic": last_pre_step_truth_diag,
             "terminated_early": bool(terminated_early),
+            "completed_requested_duration": bool(
+                termination_step is None or termination_step >= total_steps
+            ),
             "gate_updates_current_episode": int(raw_env._gate_update_count),
             "gate_rejects_current_episode": int(raw_env._gate_reject_count),
             "learned_fusions_current_episode": int(raw_env._learned_fusion_count),
