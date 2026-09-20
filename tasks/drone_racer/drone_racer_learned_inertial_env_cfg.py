@@ -104,6 +104,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # body frame: z = R_j^T (p_j - p_i). This isolates the V6.1 start-velocity
     # subtraction from the body-frame representation.
     learned_debug_oracle_body_end_displacement_fusion: bool = False
+    # Diagnostic-only three-clone acceleration-like factor:
+    # z = p_end - 2*p_mid + p_start - g*half_dt^2.
+    # With equally spaced clones this removes absolute position and constant
+    # initial velocity while keeping a position-only Jacobian [+I,-2I,+I].
+    learned_debug_oracle_second_difference_fusion: bool = False
     # Diagnostic only: rotate TCN gyro/thrust features with simulator truth
     # attitude instead of EKF attitude. If this materially improves fusion, it
     # proves the current world-frame learned measurement is state-dependent in
