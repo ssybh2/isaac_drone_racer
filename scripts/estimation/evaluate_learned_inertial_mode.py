@@ -138,6 +138,51 @@ parser.add_argument(
     help="Override V6.4 final normalized NIS gate; omit to use config default.",
 )
 parser.add_argument(
+    "--gate-stress-seed",
+    type=int,
+    default=None,
+    help="Deterministic seed for V6.5 perception corruption; defaults to --seed.",
+)
+parser.add_argument(
+    "--gate-stress-frame-drop-probability",
+    type=float,
+    default=0.0,
+    help="Independent probability of dropping each 30 Hz camera frame.",
+)
+parser.add_argument(
+    "--gate-stress-burst-start-s",
+    type=float,
+    default=10.0,
+    help="Start time of deterministic camera blackout relative to reset.",
+)
+parser.add_argument(
+    "--gate-stress-burst-duration-s",
+    type=float,
+    default=0.0,
+    help="Duration of deterministic camera blackout; zero disables it.",
+)
+parser.add_argument(
+    "--gate-stress-pixel-noise-sigma-px",
+    type=float,
+    default=0.0,
+    help="Additional Gaussian sigma applied to each detected corner coordinate.",
+)
+parser.add_argument(
+    "--gate-stress-corner-drop-probability",
+    type=float,
+    default=0.0,
+    help="Independent probability of erasing each detector-visible corner.",
+)
+parser.add_argument(
+    "--gate-stress-latency-ms",
+    type=float,
+    default=0.0,
+    help=(
+        "Uncompensated perception processing latency in milliseconds. "
+        "Delayed pixels are fused against the current filter state."
+    ),
+)
+parser.add_argument(
     "--gate-gt-diagnostics",
     action="store_true",
     help=(
@@ -548,6 +593,44 @@ def _prepare_cfg():
         cfg.gate_reprojection_max_normalized_nis = float(
             args_cli.gate_reprojection_max_normalized_nis
         )
+
+    probability_args = (
+        ("--gate-stress-frame-drop-probability", args_cli.gate_stress_frame_drop_probability),
+        ("--gate-stress-corner-drop-probability", args_cli.gate_stress_corner_drop_probability),
+    )
+    for name, value in probability_args:
+        if not 0.0 <= float(value) <= 1.0:
+            raise ValueError(f"{name} must be in [0, 1]")
+    nonnegative_args = (
+        ("--gate-stress-burst-start-s", args_cli.gate_stress_burst_start_s),
+        ("--gate-stress-burst-duration-s", args_cli.gate_stress_burst_duration_s),
+        ("--gate-stress-pixel-noise-sigma-px", args_cli.gate_stress_pixel_noise_sigma_px),
+        ("--gate-stress-latency-ms", args_cli.gate_stress_latency_ms),
+    )
+    for name, value in nonnegative_args:
+        if float(value) < 0.0:
+            raise ValueError(f"{name} must be non-negative")
+
+    cfg.gate_stress_seed = int(
+        args_cli.seed
+        if args_cli.gate_stress_seed is None
+        else args_cli.gate_stress_seed
+    )
+    cfg.gate_stress_frame_drop_probability = float(
+        args_cli.gate_stress_frame_drop_probability
+    )
+    cfg.gate_stress_burst_start_s = float(args_cli.gate_stress_burst_start_s)
+    cfg.gate_stress_burst_duration_s = float(
+        args_cli.gate_stress_burst_duration_s
+    )
+    cfg.gate_stress_pixel_noise_sigma_px = float(
+        args_cli.gate_stress_pixel_noise_sigma_px
+    )
+    cfg.gate_stress_corner_drop_probability = float(
+        args_cli.gate_stress_corner_drop_probability
+    )
+    cfg.gate_stress_latency_s = float(args_cli.gate_stress_latency_ms) / 1000.0
+
     cfg.terminations.collision = None
     cfg.terminations.flyaway = None
     cfg.commands.target.randomise_start = None
@@ -1155,6 +1238,7 @@ def _summarize_gate_reprojection_diagnostics(records: list[dict]) -> dict:
         "pixel_residual_radial_rmse_px": stats(
             "pixel_residual_radial_rmse_px", accepted
         ),
+        "measurement_age_s": stats("measurement_age_s", accepted),
         "normalized_nis": stats("normalized_nis", accepted),
         "huber_weights": array_stats(huber_weights),
         "corner_normalized_innovation": array_stats(
@@ -2077,6 +2161,30 @@ def main() -> None:
             "gate_measurement_model": str(
                 getattr(cfg, "gate_measurement_model", "pnp_pose")
             ),
+            "gate_stress_config": {
+                "seed": int(cfg.gate_stress_seed),
+                "frame_drop_probability": float(
+                    cfg.gate_stress_frame_drop_probability
+                ),
+                "burst_start_s": float(cfg.gate_stress_burst_start_s),
+                "burst_duration_s": float(cfg.gate_stress_burst_duration_s),
+                "pixel_noise_sigma_px": float(
+                    cfg.gate_stress_pixel_noise_sigma_px
+                ),
+                "corner_drop_probability": float(
+                    cfg.gate_stress_corner_drop_probability
+                ),
+                "latency_s": float(cfg.gate_stress_latency_s),
+                "frame_drop_count": int(
+                    getattr(raw_env, "_gate_stress_frame_drop_count", 0)
+                ),
+                "corner_drop_count": int(
+                    getattr(raw_env, "_gate_stress_corner_drop_count", 0)
+                ),
+                "pending_delayed_measurements": int(
+                    len(getattr(raw_env, "_gate_observation_queue", []))
+                ),
+            },
             "gate_reprojection_config": {
                 "pixel_sigma_px": float(cfg.gate_reprojection_sigma_px),
                 "min_visible_corners": int(
@@ -2139,6 +2247,15 @@ def main() -> None:
                 f"[gate-reprojection:{args_cli.mode}] "
                 f"rejects={direct['rejected_by_reason']} "
                 f"huber_mean={direct['huber_weights']['mean']}",
+                flush=True,
+            )
+            stress = summary["gate_stress_config"]
+            print(
+                f"[gate-stress:{args_cli.mode}] "
+                f"frame_drop={stress['frame_drop_count']} "
+                f"corner_drop={stress['corner_drop_count']} "
+                f"pending={stress['pending_delayed_measurements']} "
+                f"age_mean={direct['measurement_age_s']['mean']}s",
                 flush=True,
             )
         if gate_records and args_cli.mode != "R":
