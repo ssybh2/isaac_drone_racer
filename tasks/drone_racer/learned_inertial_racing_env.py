@@ -137,6 +137,20 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         if any(float(value) < 0.0 or not np.isfinite(float(value)) for value in imu_sigmas):
             raise ValueError("IMU corruption and EKF noise sigmas must be finite and non-negative")
 
+        filter_structure = str(
+            getattr(cfg, "learned_filter_structure", "legacy_current_clone")
+        )
+        if filter_structure != "uzh_two_clone_full":
+            raise ValueError(
+                "V6.2 learned inertial environment requires "
+                "learned_filter_structure='uzh_two_clone_full'"
+            )
+        if str(cfg.learned_kalman_gain_mode) != "full":
+            raise ValueError(
+                "V6.2 UZH-style two-clone fusion requires the full Kalman gain; "
+                "legacy freeze_* gain masks are not valid runtime configurations"
+            )
+
         self._lio = LearnedInertialOdometry(
             accel_noise_sigma=float(cfg.ekf_accel_noise_sigma),
             gyro_noise_sigma=float(cfg.ekf_gyro_noise_sigma),
