@@ -782,6 +782,43 @@ class LearnedInertialOdometry:
         H[:, self._clone_position_slice(end_index)] = np.eye(3)
         return H
 
+    def predicted_clone_delta_velocity_gravity_compensated(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Return (v_end - v_start) - g*dt for two stochastic clones."""
+        start_index, end_index, dt = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        return (
+            self._clone_velocities[end_index]
+            - self._clone_velocities[start_index]
+            - self.gravity_w * dt
+        )
+
+    def clone_delta_velocity_gravity_compensated_jacobian(
+        self,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+    ) -> np.ndarray:
+        """Build H=[-I,+I] on the two clone-velocity blocks only."""
+        start_index, end_index, _ = self._clone_pair_indices(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = np.zeros((3, self.P.shape[0]), dtype=np.float64)
+        H[:, self._clone_velocity_slice(start_index)] = -np.eye(3)
+        H[:, self._clone_velocity_slice(end_index)] = np.eye(3)
+        return H
+
     def predicted_clone_kinematic_residual(
         self,
         *,
@@ -1580,6 +1617,43 @@ class LearnedInertialOdometry:
             marginalize_start_clone=marginalize_start_clone,
             covariance_label="learned clone endpoint-body displacement",
         )
+
+    def update_learned_clone_delta_velocity_gravity_compensated(
+        self,
+        delta_velocity_w,
+        covariance_w,
+        *,
+        start_timestamp_s: float,
+        end_timestamp_s: float,
+        clone_tolerance_s: float = 1.0e-6,
+        marginalize_start_clone: bool = True,
+    ) -> np.ndarray:
+        """Fuse a two-clone gravity-compensated delta-velocity factor."""
+        start_index = self._find_clone_index(
+            start_timestamp_s,
+            tolerance_s=clone_tolerance_s,
+        )
+        predicted = self.predicted_clone_delta_velocity_gravity_compensated(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        H = self.clone_delta_velocity_gravity_compensated_jacobian(
+            start_timestamp_s=start_timestamp_s,
+            end_timestamp_s=end_timestamp_s,
+            clone_tolerance_s=clone_tolerance_s,
+        )
+        z = np.asarray(delta_velocity_w, dtype=np.float64).reshape(3)
+        Rm = self._validated_clone_measurement_covariance(
+            covariance_w,
+            label="learned clone delta velocity",
+        )
+        innovation = z - predicted
+        self._kalman_update(innovation, H, Rm, gain_mode="full")
+
+        if marginalize_start_clone:
+            self.marginalize_clone(start_index)
+        return innovation
 
     def update_learned_clone_second_difference_gravity_compensated(
         self,
