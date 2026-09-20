@@ -125,6 +125,12 @@ def load_trace_windows(
     subtracts the known 0.5*g*dt^2 term before expressing the target in the
     endpoint body frame. This removes absolute gravity direction from what the
     network must infer from gyro+thrust alone.
+
+    target_mode="displacement_body_end_gyro_aligned" produces the full
+        dp_b1 = R_wb(t1)^T * (p1 - p0)
+    displacement while using the same gyro-only endpoint-body aligned features
+    as V6.1. Unlike the kinematic-residual targets, it does not subtract
+    v_start*dt or gravity motion.
     """
     path = Path(path)
     if window_time_s <= 0.0 or sample_rate_hz <= 0.0 or stride_time_s <= 0.0:
@@ -139,6 +145,7 @@ def load_trace_windows(
         "kinematic_residual_body_end",
         "kinematic_residual_body_end_gyro_aligned",
         "kinematic_residual_body_end_gravity_compensated",
+        "displacement_body_end_gyro_aligned",
     )
     if target_mode not in valid_target_modes:
         raise ValueError(
@@ -158,6 +165,7 @@ def load_trace_windows(
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
+            "displacement_body_end_gyro_aligned",
         )
         else features_w
     )
@@ -188,6 +196,7 @@ def load_trace_windows(
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
+            "displacement_body_end_gyro_aligned",
         )
         else None
     )
@@ -200,6 +209,7 @@ def load_trace_windows(
         if target_mode in (
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
+            "displacement_body_end_gyro_aligned",
         ):
             features[window_index, :, :] = endpoint_body_gyro_aligned_features(
                 features[window_index, :, :],
@@ -238,6 +248,7 @@ def load_trace_windows(
             "kinematic_residual_body_end",
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
+            "displacement_body_end_gyro_aligned",
         ):
             # Interpolate the endpoint attitude and project the matrix back to
             # SO(3). The target is expressed in the endpoint body frame.
