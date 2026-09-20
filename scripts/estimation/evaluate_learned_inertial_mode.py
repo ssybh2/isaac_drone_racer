@@ -1275,8 +1275,18 @@ def main() -> None:
             writer.writeheader()
 
             for step in range(int(args_cli.steps)):
-                if not simulation_app.is_running():
-                    break
+                # This worker has a finite, deterministic step budget. Do not
+                # silently terminate the evaluation solely because Kit reports
+                # is_running()==False: in headless/off-screen runs that can mask
+                # initialization/shutdown-state issues and leave only a CSV
+                # header with exit code 0. Let env.step surface the real error.
+                if step == 0:
+                    print(
+                        f"[estimator-ab:{args_cli.mode}] "
+                        f"pre-step app_is_running={simulation_app.is_running()} "
+                        f"timestamp={raw_env._timestamp_s():.6f}",
+                        flush=True,
+                    )
 
                 elapsed_before_step = float(raw_env._timestamp_s()) - start_timestamp_s
                 if args_cli.mode == "A":
@@ -2172,5 +2182,13 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+    except BaseException:
+        # Print the traceback before closing Isaac Sim. Some Kit shutdown paths
+        # can terminate the process cleanly enough to hide the original Python
+        # exception from shell-level diagnostics.
+        import traceback
+
+        traceback.print_exc()
+        raise
     finally:
         simulation_app.close()
