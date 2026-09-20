@@ -660,10 +660,18 @@ def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
     def scalar_summary(key: str, subset=None) -> dict:
         values = scalar_values(key, subset)
         if not len(values):
-            return {"samples": 0, "mean": None, "median": None, "p95": None, "max": None}
+            return {
+                "samples": 0,
+                "mean": None,
+                "rmse": None,
+                "median": None,
+                "p95": None,
+                "max": None,
+            }
         return {
             "samples": int(len(values)),
             "mean": float(np.mean(values)),
+            "rmse": float(np.sqrt(np.mean(values**2))),
             "median": float(np.median(values)),
             "p95": float(np.percentile(values, 95.0)),
             "max": float(np.max(values)),
@@ -671,6 +679,10 @@ def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
 
     accepted = [record for record in records if bool(record.get("accepted", False))]
     rejected = [record for record in records if not bool(record.get("accepted", False))]
+    built_measurements = [
+        record for record in records
+        if record.get("selected_gate_index") is not None
+    ]
 
     rejected_by_stage: dict[str, int] = {}
     rejected_by_reason: dict[str, int] = {}
@@ -763,16 +775,26 @@ def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
                 "pnp_position_error_norm_m", mismatches
             ),
         },
+        "built_measurements": int(len(built_measurements)),
         "pnp_position_error": {
             "axis_bias_m": position_axis_bias,
             "axis_rmse_m": position_axis_rmse,
             "norm_m": scalar_summary("pnp_position_error_norm_m", accepted),
+            "all_built_norm_m": scalar_summary(
+                "pnp_position_error_norm_m", built_measurements
+            ),
         },
         "pnp_orientation_error_deg": scalar_summary(
             "pnp_orientation_error_deg", accepted
         ),
+        "pnp_orientation_error_all_built_deg": scalar_summary(
+            "pnp_orientation_error_deg", built_measurements
+        ),
         "reprojection_rmse_px": scalar_summary(
             "reprojection_rmse_px", accepted
+        ),
+        "reprojection_rmse_all_built_px": scalar_summary(
+            "reprojection_rmse_px", built_measurements
         ),
         "camera_to_gate_range_m": scalar_summary(
             "camera_to_gate_range_m", accepted
@@ -1771,7 +1793,7 @@ def main() -> None:
                 f"[gate-pnp-audit:{args_cli.mode}] "
                 f"accepted={gate_audit_summary['accepted']}/{gate_audit_summary['attempts']} "
                 f"assoc_match={association['match_rate']} "
-                f"pnp_pos_rmse={pnp_pos['mean']}m(mean) "
+                f"pnp_pos_rmse={pnp_pos['rmse']}m "
                 f"pnp_ori_mean={pnp_ori['mean']}deg "
                 f"nees_p95={nees['p95']}",
                 flush=True,
