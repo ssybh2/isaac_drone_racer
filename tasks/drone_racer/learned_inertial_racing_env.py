@@ -937,6 +937,18 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "post_update_orientation_error_deg": None,
             "exception_type": None,
             "exception_message": None,
+            "oracle_corner_complete": None,
+            "detector_corner_error_px_by_corner": None,
+            "detector_corner_error_px_rmse": None,
+            "detector_corner_error_px_mean": None,
+            "detector_corner_error_px_max": None,
+            "oracle_pnp_reprojection_rmse_px": None,
+            "oracle_pnp_gate_translation_error_m": None,
+            "oracle_pnp_gate_rotation_error_deg": None,
+            "oracle_pnp_body_translation_error_m": None,
+            "oracle_pnp_body_rotation_error_deg": None,
+            "oracle_extrinsic_translation_error_m": None,
+            "oracle_extrinsic_rotation_error_deg": None,
         }
 
         try:
@@ -974,6 +986,81 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             diagnostic["exception_message"] = str(exc)
             self._gate_diagnostics.append(diagnostic)
             return
+
+        if bool(self.cfg.gate_debug_gt_diagnostics):
+            # Decisive Stage2 decomposition on the exact live frame:
+            # simulator truth -> perfect projected pixels -> the same PnP stack.
+            # This is audit-only. Neither oracle pixels nor oracle poses are
+            # ever supplied to the runtime estimator update.
+            try:
+                from perception.isaac_adapter import IsaacStage2TruthAdapter
+                from perception.stage2a_pipeline import Stage2APerceptionPipeline
+
+                snapshot = IsaacStage2TruthAdapter(self).snapshot(
+                    env_id=0,
+                    timestamp_s=self._timestamp_s(),
+                )
+                oracle_pipeline = Stage2APerceptionPipeline(
+                    self._gate_builder.geometry,
+                    snapshot.camera,
+                    self._gate_builder.T_bc,
+                )
+                T_cg_truth = snapshot.truth.T_wc.inverse() @ snapshot.truth.T_wg
+                oracle_corners = oracle_pipeline.project_perfect_corners(
+                    T_cg_truth,
+                    timestamp_s=self._timestamp_s(),
+                )
+                diagnostic["oracle_corner_complete"] = bool(oracle_corners.complete)
+
+                corner_errors_px = np.linalg.norm(
+                    np.asarray(observation.corners_uv, dtype=np.float64)
+                    - np.asarray(oracle_corners.corners_uv, dtype=np.float64),
+                    axis=1,
+                )
+                diagnostic["detector_corner_error_px_by_corner"] = (
+                    corner_errors_px.tolist()
+                )
+                diagnostic["detector_corner_error_px_rmse"] = float(
+                    np.sqrt(np.mean(corner_errors_px**2))
+                )
+                diagnostic["detector_corner_error_px_mean"] = float(
+                    np.mean(corner_errors_px)
+                )
+                diagnostic["detector_corner_error_px_max"] = float(
+                    np.max(corner_errors_px)
+                )
+
+                if oracle_corners.complete:
+                    oracle_result = oracle_pipeline.process_truth(snapshot.truth)
+                    metrics = oracle_result.metrics
+                    diagnostic["oracle_pnp_reprojection_rmse_px"] = float(
+                        metrics.corner_reprojection_rmse_px
+                    )
+                    diagnostic["oracle_pnp_gate_translation_error_m"] = float(
+                        metrics.gate_translation_error_m
+                    )
+                    diagnostic["oracle_pnp_gate_rotation_error_deg"] = float(
+                        np.degrees(metrics.gate_rotation_error_rad)
+                    )
+                    if metrics.body_translation_error_m is not None:
+                        diagnostic["oracle_pnp_body_translation_error_m"] = float(
+                            metrics.body_translation_error_m
+                        )
+                    if metrics.body_rotation_error_rad is not None:
+                        diagnostic["oracle_pnp_body_rotation_error_deg"] = float(
+                            np.degrees(metrics.body_rotation_error_rad)
+                        )
+                    if metrics.extrinsic_translation_error_m is not None:
+                        diagnostic["oracle_extrinsic_translation_error_m"] = float(
+                            metrics.extrinsic_translation_error_m
+                        )
+                    if metrics.extrinsic_rotation_error_rad is not None:
+                        diagnostic["oracle_extrinsic_rotation_error_deg"] = float(
+                            np.degrees(metrics.extrinsic_rotation_error_rad)
+                        )
+            except (AttributeError, KeyError, RuntimeError, ValueError, np.linalg.LinAlgError) as exc:
+                diagnostic["oracle_corner_audit_exception_type"] = type(exc).__name__
+                diagnostic["oracle_corner_audit_exception_message"] = str(exc)
 
         try:
             measurement = self._gate_builder.build(
