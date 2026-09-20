@@ -17,7 +17,7 @@ from isaaclab.app import AppLauncher
 
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--mode", choices=("A", "S", "B", "P", "C"), required=True)
+parser.add_argument("--mode", choices=("A", "S", "B", "P", "C", "R"), required=True)
 parser.add_argument("--steps", type=int, default=6000)
 parser.add_argument(
     "--profile",
@@ -113,6 +113,30 @@ parser.add_argument(
     ),
 )
 parser.add_argument("--disable-visibility", action="store_true")
+parser.add_argument(
+    "--gate-reprojection-sigma-px",
+    type=float,
+    default=None,
+    help="Override V6.4 direct gate-corner per-coordinate pixel sigma.",
+)
+parser.add_argument(
+    "--gate-reprojection-huber-delta-sigma",
+    type=float,
+    default=None,
+    help="Override V6.4 per-corner Huber threshold in normalized-sigma units.",
+)
+parser.add_argument(
+    "--gate-reprojection-min-visible-corners",
+    type=int,
+    default=None,
+    help="Minimum semantic corners required for one V6.4 visual update.",
+)
+parser.add_argument(
+    "--gate-reprojection-max-normalized-nis",
+    type=float,
+    default=None,
+    help="Override V6.4 final normalized NIS gate; omit to use config default.",
+)
 parser.add_argument(
     "--gate-gt-diagnostics",
     action="store_true",
@@ -235,6 +259,7 @@ MODE_LABELS = {
     "B": "imu_tcn_20hz",
     "P": "imu_tcn_gate_position_only",
     "C": "imu_tcn_gate_pose",
+    "R": "imu_tcn_gate_direct_reprojection",
 }
 
 
@@ -493,6 +518,36 @@ def _prepare_cfg():
         args_cli.truth_orientation_for_tcn_features
     )
     cfg.gate_debug_gt_diagnostics = bool(args_cli.gate_gt_diagnostics)
+    if args_cli.gate_reprojection_sigma_px is not None:
+        if args_cli.gate_reprojection_sigma_px <= 0.0:
+            raise ValueError("--gate-reprojection-sigma-px must be positive")
+        cfg.gate_reprojection_sigma_px = float(
+            args_cli.gate_reprojection_sigma_px
+        )
+    if args_cli.gate_reprojection_huber_delta_sigma is not None:
+        if args_cli.gate_reprojection_huber_delta_sigma <= 0.0:
+            raise ValueError(
+                "--gate-reprojection-huber-delta-sigma must be positive"
+            )
+        cfg.gate_reprojection_huber_delta_sigma = float(
+            args_cli.gate_reprojection_huber_delta_sigma
+        )
+    if args_cli.gate_reprojection_min_visible_corners is not None:
+        if not 1 <= args_cli.gate_reprojection_min_visible_corners <= 4:
+            raise ValueError(
+                "--gate-reprojection-min-visible-corners must be in [1, 4]"
+            )
+        cfg.gate_reprojection_min_visible_corners = int(
+            args_cli.gate_reprojection_min_visible_corners
+        )
+    if args_cli.gate_reprojection_max_normalized_nis is not None:
+        if args_cli.gate_reprojection_max_normalized_nis <= 0.0:
+            raise ValueError(
+                "--gate-reprojection-max-normalized-nis must be positive"
+            )
+        cfg.gate_reprojection_max_normalized_nis = float(
+            args_cli.gate_reprojection_max_normalized_nis
+        )
     cfg.terminations.collision = None
     cfg.terminations.flyaway = None
     cfg.commands.target.randomise_start = None
@@ -564,14 +619,19 @@ def _prepare_cfg():
     else:
         cfg.learned_motion_checkpoint = str(args_cli.learned_checkpoint.expanduser().resolve())
         cfg.learned_apply_displacement_updates = args_cli.mode != "S"
-        if args_cli.mode in ("P", "C"):
+        if args_cli.mode in ("P", "C", "R"):
             cfg.swift_detector_checkpoint = str(args_cli.gate_checkpoint.expanduser().resolve())
             cfg.swift_visibility_checkpoint = (
                 None
                 if args_cli.disable_visibility
                 else str(args_cli.visibility_checkpoint.expanduser().resolve())
             )
-            cfg.gate_use_orientation_update = args_cli.mode == "C"
+            if args_cli.mode == "R":
+                cfg.gate_measurement_model = "direct_reprojection"
+                cfg.gate_use_orientation_update = False
+            else:
+                cfg.gate_measurement_model = "pnp_pose"
+                cfg.gate_use_orientation_update = args_cli.mode == "C"
         else:
             cfg.swift_detector_checkpoint = None
             cfg.swift_visibility_checkpoint = None
@@ -621,10 +681,10 @@ def _validate_inputs() -> None:
             raise ValueError("--oracle-anchor-orientation-sigma-deg must be positive")
     if args_cli.mode in ("S", "B", "P", "C") and not args_cli.learned_checkpoint.expanduser().exists():
         raise FileNotFoundError(f"learned checkpoint not found: {args_cli.learned_checkpoint}")
-    if args_cli.mode in ("P", "C") and not args_cli.gate_checkpoint.expanduser().exists():
+    if args_cli.mode in ("P", "C", "R") and not args_cli.gate_checkpoint.expanduser().exists():
         raise FileNotFoundError(f"gate checkpoint not found: {args_cli.gate_checkpoint}")
     if (
-        args_cli.mode in ("P", "C")
+        args_cli.mode in ("P", "C", "R")
         and not args_cli.disable_visibility
         and not args_cli.visibility_checkpoint.expanduser().exists()
     ):
