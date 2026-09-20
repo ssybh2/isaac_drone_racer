@@ -157,12 +157,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             bool(cfg.learned_debug_oracle_body_end_displacement_fusion),
             bool(cfg.learned_debug_oracle_second_difference_fusion),
             bool(cfg.learned_debug_oracle_delta_velocity_fusion),
+            bool(cfg.learned_debug_oracle_body_end_delta_velocity_fusion),
         )
         if sum(int(v) for v in oracle_modes) > 1:
             raise ValueError(
                 "choose only one Oracle fusion mode: kinematic residual, "
                 "exact UZH relative displacement, endpoint-body displacement, "
-                "three-clone second difference, or delta velocity"
+                "three-clone second difference, world delta velocity, "
+                "or endpoint-body delta velocity"
             )
 
         self._lio = LearnedInertialOdometry(
@@ -403,6 +405,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             or bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion)
             or bool(self.cfg.learned_debug_oracle_second_difference_fusion)
             or bool(self.cfg.learned_debug_oracle_delta_velocity_fusion)
+            or bool(self.cfg.learned_debug_oracle_body_end_delta_velocity_fusion)
         ):
             robot = self.scene["robot"]
             key = round(float(timestamp_s), 9)
@@ -495,7 +498,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "learned_measurement_covariance_multiplier must be positive and finite"
             )
         protected_covariance = protected_covariance * covariance_multiplier
-        if bool(self.cfg.learned_debug_oracle_delta_velocity_fusion):
+        if (
+            bool(self.cfg.learned_debug_oracle_delta_velocity_fusion)
+            or bool(self.cfg.learned_debug_oracle_body_end_delta_velocity_fusion)
+        ):
             sigma_v = float(self.cfg.learned_debug_oracle_delta_velocity_sigma_mps)
             if sigma_v <= 0.0 or not np.isfinite(sigma_v):
                 raise ValueError(
@@ -510,6 +516,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             fusion_target_mode = "second_difference_gravity_compensated"
         elif bool(self.cfg.learned_debug_oracle_delta_velocity_fusion):
             fusion_target_mode = "delta_velocity_gravity_compensated"
+        elif bool(self.cfg.learned_debug_oracle_body_end_delta_velocity_fusion):
+            fusion_target_mode = "delta_velocity_body_end_gyro_aligned"
         else:
             fusion_target_mode = target_mode
         try:
@@ -571,6 +579,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         clone_tolerance_s=timing_tolerance_s,
                     )
                 )
+            elif fusion_target_mode == "delta_velocity_body_end_gyro_aligned":
+                predicted_rel = (
+                    self._lio.predicted_clone_delta_velocity_body_end_gravity_compensated(
+                        start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                    )
+                )
             else:
                 raise RuntimeError(
                     f"unsupported learned-motion fusion target mode: {fusion_target_mode!r}"
@@ -582,7 +598,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             network_bias = np.asarray(
                 (
                     self.cfg.learned_delta_velocity_network_bias_mps
-                    if target_mode == "delta_velocity_gravity_compensated"
+                    if target_mode in (
+                        "delta_velocity_gravity_compensated",
+                        "delta_velocity_body_end_gyro_aligned",
+                    )
                     else self.cfg.learned_network_bias_m
                 ),
                 dtype=np.float64,
@@ -673,6 +692,33 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     - self._lio.gravity_w * window_dt
                 )
                 measurement_source = "oracle_delta_velocity_gravity_compensated"
+
+            if bool(self.cfg.learned_debug_oracle_body_end_delta_velocity_fusion):
+                start_key = round(float(start_s), 9)
+                end_key = round(float(scheduled_end_s), 9)
+                if (
+                    start_key not in self._debug_truth_motion_history
+                    or end_key not in self._debug_truth_motion_history
+                ):
+                    raise RuntimeError(
+                        "endpoint-body delta-velocity Oracle is missing GT history for window"
+                    )
+                _, v_start_gt = self._debug_truth_motion_history[start_key]
+                _, v_end_gt = self._debug_truth_motion_history[end_key]
+                window_dt = float(scheduled_end_s - start_s)
+                delta_v_specific_w = (
+                    v_end_gt
+                    - v_start_gt
+                    - self._lio.gravity_w * window_dt
+                )
+                robot = self.scene["robot"]
+                R_end_gt = quat_wxyz_to_rotmat(
+                    _np(robot.data.root_quat_w[0]).astype(np.float64)
+                )
+                measurement_w = R_end_gt.T @ delta_v_specific_w
+                measurement_source = (
+                    "oracle_body_end_delta_velocity_gravity_compensated"
+                )
 
             if bool(self.cfg.learned_debug_oracle_residual_fusion):
                 if target_mode not in (
@@ -781,6 +827,15 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     )
                 elif fusion_target_mode == "delta_velocity_gravity_compensated":
                     self._lio.update_learned_clone_delta_velocity_gravity_compensated(
+                        measurement_w,
+                        protected_covariance,
+                        start_timestamp_s=start_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                        marginalize_start_clone=True,
+                    )
+                elif fusion_target_mode == "delta_velocity_body_end_gyro_aligned":
+                    self._lio.update_learned_clone_delta_velocity_body_end_gravity_compensated(
                         measurement_w,
                         protected_covariance,
                         start_timestamp_s=start_s,
