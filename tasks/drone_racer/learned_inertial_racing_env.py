@@ -58,6 +58,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._next_learned_update_s: float | None = None
         self.swift_detector = None
         self._gate_builder = None
+        self._gate_geometry = None
+        self._gate_camera_calibration = None
+        self._gate_T_bc = None
+        self._gate_track_layout = None
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
         self._learned_update_count = 0
@@ -242,7 +246,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_update_timestamp_s = None
         self._last_learned_fused = False
         self._last_learned_skip_reason = None
+        self._gate_attempt_count = 0
+        self._gate_update_count = 0
+        self._gate_reject_count = 0
         self._last_gate_mahalanobis2 = None
+        self._gate_diagnostics = []
         self.learned_inertial_state = self._lio.state()
 
     def _initialize_detector_and_gate_builder(self) -> None:
@@ -269,16 +277,35 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             distortion=None,
             model="pinhole",
         )
-        self._gate_builder = GatePoseMeasurementBuilder(
-            load_stage2_gate_geometry(),
-            calibration,
-            stage2_camera_to_body(),
-            track_layout_from_isaac(self, env_id=0),
-            perturbation=CornerPerturbationConfig(
-                num_samples=20,
-                corner_sigma_px=self.cfg.swift_corner_sigma_px,
-            ),
+        geometry = load_stage2_gate_geometry()
+        T_bc = stage2_camera_to_body()
+        track_layout = track_layout_from_isaac(self, env_id=0)
+        self._gate_geometry = geometry
+        self._gate_camera_calibration = calibration
+        self._gate_T_bc = T_bc
+        self._gate_track_layout = track_layout
+
+        measurement_model = str(
+            getattr(self.cfg, "gate_measurement_model", "pnp_pose")
         )
+        if measurement_model not in ("pnp_pose", "direct_reprojection"):
+            raise ValueError(
+                "gate_measurement_model must be 'pnp_pose' or "
+                "'direct_reprojection'"
+            )
+        if measurement_model == "pnp_pose":
+            self._gate_builder = GatePoseMeasurementBuilder(
+                geometry,
+                calibration,
+                T_bc,
+                track_layout,
+                perturbation=CornerPerturbationConfig(
+                    num_samples=20,
+                    corner_sigma_px=self.cfg.swift_corner_sigma_px,
+                ),
+            )
+        else:
+            self._gate_builder = None
 
         coordinate_detector = TorchvisionGateCornerDetector(
             checkpoint,
