@@ -28,6 +28,7 @@ parser.add_argument(
         "kinematic_residual_body_end_gyro_aligned",
         "kinematic_residual_body_end_gravity_compensated",
         "displacement_body_end_gyro_aligned",
+        "delta_velocity_gravity_compensated",
     ),
     default="displacement",
     help="Audit the same target representation that will be used for training.",
@@ -102,6 +103,11 @@ def main() -> None:
         "sample_rate_hz": float(args.sample_rate_hz),
         "stride_time_s": float(args.stride_time_s),
         "target_mode": str(args.target_mode),
+        "target_unit": (
+            "m/s"
+            if args.target_mode == "delta_velocity_gravity_compensated"
+            else "m"
+        ),
         "splits": {},
     }
 
