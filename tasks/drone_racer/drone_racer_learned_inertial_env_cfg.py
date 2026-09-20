@@ -95,6 +95,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # kinematic residual for the same window. This must never be enabled for
     # training/deployment; it isolates EKF measurement-model correctness.
     learned_debug_oracle_residual_fusion: bool = False
+    # Diagnostic-only exact-paper factor. Keep running the V6.1 network for
+    # shadow metrics, but fuse GT (p_j - p_i) through the pure UZH two-clone
+    # relative-position Jacobian H=[-I,+I]. This isolates the stochastic-clone
+    # EKF structure from the V6.1 kinematic-residual measurement extension.
+    learned_debug_oracle_uzh_displacement_fusion: bool = False
     # Diagnostic only: rotate TCN gyro/thrust features with simulator truth
     # attitude instead of EKF attitude. If this materially improves fusion, it
     # proves the current world-frame learned measurement is state-dependent in
