@@ -316,6 +316,7 @@ class TorchTcnDisplacementPredictor:
             "kinematic_residual_body_end_gyro_aligned",
             "kinematic_residual_body_end_gravity_compensated",
             "displacement_body_end_gyro_aligned",
+            "delta_velocity_gravity_compensated",
         ):
             raise ValueError(
                 f"unsupported learned-motion target_mode: {self.target_mode!r}"
