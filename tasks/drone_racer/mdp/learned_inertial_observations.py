@@ -30,10 +30,19 @@ def learned_inertial_drone_state(env: ManagerBasedRLEnv) -> torch.Tensor:
     ).view(1, 3)
     v_b = math_utils.quat_rotate_inverse(q, v_w)
 
-    imu = env.scene["imu"]
-    omega_b = imu.data.ang_vel_b
-    if omega_b.shape[0] != env.num_envs:
-        omega_b = omega_b[:1]
+    # Use the same synthetic onboard gyro sample consumed by the estimator
+    # when available. Falling back to the Isaac IMU keeps the observation
+    # usable before the first propagated estimator sample.
+    gyro_meas = getattr(env, "_last_imu_gyro_b_meas", None)
+    if gyro_meas is not None:
+        omega_b = torch.as_tensor(
+            gyro_meas, dtype=torch.float32, device=env.device
+        ).view(1, 3)
+    else:
+        imu = env.scene["imu"]
+        omega_b = imu.data.ang_vel_b
+        if omega_b.shape[0] != env.num_envs:
+            omega_b = omega_b[:1]
     return torch.cat((p, q, v_b, omega_b), dim=-1)
 
 
