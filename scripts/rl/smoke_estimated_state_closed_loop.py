@@ -29,6 +29,16 @@ parser.add_argument(
 parser.add_argument("--duration-s", type=float, default=40.0)
 parser.add_argument("--max-speed-mps", type=float, default=2.0)
 parser.add_argument("--lookahead-m", type=float, default=1.0)
+parser.add_argument(
+    "--heading-mode",
+    choices=("target", "gate-normal"),
+    default="target",
+    help=(
+        "Body/camera yaw strategy. 'target' keeps the camera pointed toward "
+        "the mapped gate/through-point using only estimated state; "
+        "'gate-normal' reproduces the original smoke controller."
+    ),
+)
 parser.add_argument("--position-gain", type=float, default=0.8)
 parser.add_argument("--velocity-gain", type=float, default=2.0)
 parser.add_argument("--attitude-gain", type=float, default=0.08)
@@ -143,8 +153,19 @@ def _controller_action(raw_env) -> tuple[torch.Tensor, dict]:
         force_norm = float(np.linalg.norm(desired_force_w))
 
     z_des = desired_force_w / force_norm
-    heading = gate_normal_w.copy()
+    if args_cli.heading_mode == "target":
+        # The onboard camera optical axis is body +X.  Point yaw toward the
+        # actor-visible through-point so the next mapped gate remains inside
+        # the camera field of view during gate-to-gate transitions.  This uses
+        # only the estimated position and known map target.
+        heading = goal_w - p_w
+    else:
+        heading = gate_normal_w.copy()
+
     heading[2] = 0.0
+    if np.linalg.norm(heading) < 1.0e-6:
+        heading = gate_normal_w.copy()
+        heading[2] = 0.0
     if np.linalg.norm(heading) < 1.0e-6:
         heading = np.array([1.0, 0.0, 0.0])
     heading /= np.linalg.norm(heading)
@@ -206,6 +227,7 @@ def _controller_action(raw_env) -> tuple[torch.Tensor, dict]:
         "moment_nm": moment_nm.tolist(),
         "action": action_np.tolist(),
         "target_gate_index": int(command.next_gate_idx[0].item()),
+        "heading_mode": str(args_cli.heading_mode),
     }
 
 
@@ -528,6 +550,7 @@ def main() -> None:
             "last_control": last_control,
             "controller_uses_simulator_root_state": False,
             "mission_progression_uses_simulator_root_state": False,
+            "controller_heading_mode": str(args_cli.heading_mode),
         }
 
         print("=" * 90)
