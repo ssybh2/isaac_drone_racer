@@ -399,6 +399,77 @@ def test_uzh_two_clone_relative_jacobian_uses_both_cloned_endpoints():
     np.testing.assert_allclose(H @ N[:, 1:4], 0.0, atol=1e-12)
 
 
+def test_endpoint_body_displacement_factor_matches_finite_difference_and_gauge():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    q0 = lio.rotmat_to_quat_wxyz(
+        lio._exp_so3(np.array([0.11, -0.06, 0.23]))
+    )
+    est.reset(
+        position_w_b=(0.2, -0.1, 1.0),
+        linear_velocity_w_b=(0.9, -0.25, 0.05),
+        orientation_w_b_wxyz=q0,
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.02, -0.01, 0.08),
+            accel_b=(0.25, -0.08, 9.72),
+            timestamp_s=k * 0.01,
+        )
+    est.clone_current_position()
+
+    start_index = est._find_clone_index(0.0, tolerance_s=1e-9)
+    end_index = est._find_clone_index(0.5, tolerance_s=1e-9)
+    H = est.clone_relative_displacement_body_end_jacobian(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+    base = est.predicted_clone_relative_displacement_body_end(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+
+    columns = []
+    columns += list(range(
+        est._clone_orientation_slice(end_index).start,
+        est._clone_orientation_slice(end_index).stop,
+    ))
+    columns += list(range(
+        est._clone_position_slice(start_index).start,
+        est._clone_position_slice(start_index).stop,
+    ))
+    columns += list(range(
+        est._clone_position_slice(end_index).start,
+        est._clone_position_slice(end_index).stop,
+    ))
+
+    eps = 1.0e-7
+    for col in columns:
+        perturbed = copy.deepcopy(est)
+        dx = np.zeros(perturbed.P.shape[0], dtype=np.float64)
+        dx[col] = eps
+        perturbed._inject_error(dx)
+        value = perturbed.predicted_clone_relative_displacement_body_end(
+            start_timestamp_s=0.0,
+            end_timestamp_s=0.5,
+            clone_tolerance_s=1e-9,
+        )
+        numerical = (value - base) / eps
+        np.testing.assert_allclose(
+            numerical,
+            H[:, col],
+            rtol=3e-5,
+            atol=3e-6,
+        )
+
+    N_inst = est._instantaneous_unobservable_basis()
+    np.testing.assert_allclose(H @ N_inst[:, 1:4], 0.0, atol=1e-11)
+    np.testing.assert_allclose(H @ N_inst[:, 0], 0.0, atol=1e-8)
+
+
 def test_uzh_two_clone_body_factor_jacobian_matches_finite_difference_and_gauge():
     est = lio.LearnedInertialOdometry(max_position_clones=11)
     q0 = lio.rotmat_to_quat_wxyz(
