@@ -176,6 +176,32 @@ parser.add_argument(
         "instead of the EKF attitude."
     ),
 )
+parser.add_argument(
+    "--oracle-anchor-rate-hz",
+    type=float,
+    default=None,
+    help=(
+        "Diagnostic only: inject simulator-truth absolute anchors at this rate "
+        "after each estimator step. This tests whether sparse exteroceptive "
+        "pose anchors resolve inertial-only gauge modes."
+    ),
+)
+parser.add_argument(
+    "--oracle-anchor-mode",
+    choices=("position", "pose"),
+    default="pose",
+    help="Use truth position only or truth position+orientation for Oracle anchors.",
+)
+parser.add_argument(
+    "--oracle-anchor-position-sigma-m",
+    type=float,
+    default=0.10,
+)
+parser.add_argument(
+    "--oracle-anchor-orientation-sigma-deg",
+    type=float,
+    default=2.0,
+)
 parser.add_argument("--replay-npz", type=Path, required=True)
 parser.add_argument("--output-dir", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
@@ -577,6 +603,13 @@ def _validate_inputs() -> None:
         raise ValueError("--steps must be positive")
     if args_cli.progress_every < 1:
         raise ValueError("--progress-every must be positive")
+    if args_cli.oracle_anchor_rate_hz is not None:
+        if args_cli.oracle_anchor_rate_hz <= 0.0:
+            raise ValueError("--oracle-anchor-rate-hz must be positive")
+        if args_cli.oracle_anchor_position_sigma_m <= 0.0:
+            raise ValueError("--oracle-anchor-position-sigma-m must be positive")
+        if args_cli.oracle_anchor_orientation_sigma_deg <= 0.0:
+            raise ValueError("--oracle-anchor-orientation-sigma-deg must be positive")
     if args_cli.mode in ("S", "B", "P", "C") and not args_cli.learned_checkpoint.expanduser().exists():
         raise FileNotFoundError(f"learned checkpoint not found: {args_cli.learned_checkpoint}")
     if args_cli.mode in ("P", "C") and not args_cli.gate_checkpoint.expanduser().exists():
@@ -683,6 +716,18 @@ def main() -> None:
             round(start_timestamp_s, 6): _np(robot.data.root_quat_w[0]).astype(np.float64).copy()
         }
 
+        oracle_anchor_count = 0
+        oracle_anchor_interval_s = (
+            None
+            if args_cli.oracle_anchor_rate_hz is None
+            else 1.0 / float(args_cli.oracle_anchor_rate_hz)
+        )
+        next_oracle_anchor_s = (
+            None
+            if oracle_anchor_interval_s is None
+            else start_timestamp_s + oracle_anchor_interval_s
+        )
+
         with trace_path.open("w", newline="", encoding="utf-8", buffering=1) as handle:
             writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
             writer.writeheader()
@@ -713,10 +758,46 @@ def main() -> None:
 
                 env.step(action.unsqueeze(0))
 
-                state = raw_env.learned_inertial_state
+                # Preserve the learned-factor diagnostic before an optional
+                # evaluator-only absolute anchor overwrites last_update_diagnostics.
+                learned_diag_before_anchor = getattr(
+                    raw_env._lio,
+                    "last_update_diagnostics",
+                    None,
+                )
+
                 truth_p = _np(robot.data.root_pos_w[0]).astype(np.float64)
                 truth_v = _np(robot.data.root_lin_vel_w[0]).astype(np.float64)
                 truth_q = _np(robot.data.root_quat_w[0]).astype(np.float64)
+
+                if (
+                    next_oracle_anchor_s is not None
+                    and float(raw_env._timestamp_s()) + 1.0e-9 >= next_oracle_anchor_s
+                ):
+                    position_sigma = float(args_cli.oracle_anchor_position_sigma_m)
+                    orientation_sigma_rad = np.deg2rad(
+                        float(args_cli.oracle_anchor_orientation_sigma_deg)
+                    )
+                    raw_env._lio.update_gate_pose(
+                        position_w_b=truth_p,
+                        position_covariance_w=(
+                            np.eye(3, dtype=np.float64) * position_sigma**2
+                        ),
+                        orientation_w_b_wxyz=(
+                            truth_q
+                            if args_cli.oracle_anchor_mode == "pose"
+                            else None
+                        ),
+                        orientation_covariance_rad2=(
+                            np.eye(3, dtype=np.float64)
+                            * orientation_sigma_rad**2
+                        ),
+                    )
+                    raw_env.learned_inertial_state = raw_env._lio.state()
+                    oracle_anchor_count += 1
+                    next_oracle_anchor_s += oracle_anchor_interval_s
+
+                state = raw_env.learned_inertial_state
                 est_p = np.asarray(state.position_w_b, dtype=np.float64)
                 est_v = np.asarray(state.linear_velocity_w_b, dtype=np.float64)
                 est_q = np.asarray(state.orientation_w_b_wxyz, dtype=np.float64)
@@ -733,7 +814,7 @@ def main() -> None:
                 accel_bias_norms.append(float(np.linalg.norm(state.accel_bias_b)))
                 gyro_bias_norms.append(float(np.linalg.norm(state.gyro_bias_b)))
 
-                diag = getattr(raw_env._lio, "last_update_diagnostics", None)
+                diag = learned_diag_before_anchor
                 if diag is not None and diag is not last_seen_update_diag:
                     last_seen_update_diag = diag
                     update_nis.append(float(diag["nis"]))
@@ -1253,6 +1334,19 @@ def main() -> None:
             "truth_orientation_for_tcn_features": bool(
                 cfg.learned_debug_truth_orientation_for_features
             ),
+            "oracle_anchor_rate_hz": (
+                None
+                if args_cli.oracle_anchor_rate_hz is None
+                else float(args_cli.oracle_anchor_rate_hz)
+            ),
+            "oracle_anchor_mode": str(args_cli.oracle_anchor_mode),
+            "oracle_anchor_position_sigma_m": float(
+                args_cli.oracle_anchor_position_sigma_m
+            ),
+            "oracle_anchor_orientation_sigma_deg": float(
+                args_cli.oracle_anchor_orientation_sigma_deg
+            ),
+            "oracle_anchor_count": int(oracle_anchor_count),
             "samples": int(len(pos)),
             "duration_s": float(duration_s),
             "imu_corruption": {
