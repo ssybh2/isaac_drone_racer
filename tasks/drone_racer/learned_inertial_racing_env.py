@@ -156,12 +156,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             bool(cfg.learned_debug_oracle_uzh_displacement_fusion),
             bool(cfg.learned_debug_oracle_body_end_displacement_fusion),
             bool(cfg.learned_debug_oracle_second_difference_fusion),
+            bool(cfg.learned_debug_oracle_delta_velocity_fusion),
         )
         if sum(int(v) for v in oracle_modes) > 1:
             raise ValueError(
                 "choose only one Oracle fusion mode: kinematic residual, "
                 "exact UZH relative displacement, endpoint-body displacement, "
-                "or three-clone second difference"
+                "three-clone second difference, or delta velocity"
             )
 
         self._lio = LearnedInertialOdometry(
@@ -401,6 +402,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             or bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion)
             or bool(self.cfg.learned_debug_oracle_body_end_displacement_fusion)
             or bool(self.cfg.learned_debug_oracle_second_difference_fusion)
+            or bool(self.cfg.learned_debug_oracle_delta_velocity_fusion)
         ):
             robot = self.scene["robot"]
             key = round(float(timestamp_s), 9)
@@ -485,6 +487,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "learned_measurement_covariance_multiplier must be positive and finite"
             )
         protected_covariance = protected_covariance * covariance_multiplier
+        if bool(self.cfg.learned_debug_oracle_delta_velocity_fusion):
+            sigma_v = float(self.cfg.learned_debug_oracle_delta_velocity_sigma_mps)
+            if sigma_v <= 0.0 or not np.isfinite(sigma_v):
+                raise ValueError(
+                    "learned_debug_oracle_delta_velocity_sigma_mps must be positive and finite"
+                )
+            protected_covariance = np.eye(3, dtype=np.float64) * sigma_v * sigma_v
         target_mode = str(
             getattr(self._motion_predictor, "target_mode", "displacement")
         )
@@ -494,6 +503,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             fusion_target_mode = "displacement_body_end"
         elif bool(self.cfg.learned_debug_oracle_second_difference_fusion):
             fusion_target_mode = "second_difference_gravity_compensated"
+        elif bool(self.cfg.learned_debug_oracle_delta_velocity_fusion):
+            fusion_target_mode = "delta_velocity_gravity_compensated"
         else:
             fusion_target_mode = target_mode
         try:
@@ -543,6 +554,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     self._lio.predicted_clone_second_difference_gravity_compensated(
                         start_timestamp_s=start_s,
                         middle_timestamp_s=middle_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                    )
+                )
+            elif fusion_target_mode == "delta_velocity_gravity_compensated":
+                predicted_rel = (
+                    self._lio.predicted_clone_delta_velocity_gravity_compensated(
+                        start_timestamp_s=start_s,
                         end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
                     )
@@ -625,6 +644,26 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     - self._lio.gravity_w * half_dt * half_dt
                 )
                 measurement_source = "oracle_second_difference_gravity_compensated"
+
+            if bool(self.cfg.learned_debug_oracle_delta_velocity_fusion):
+                start_key = round(float(start_s), 9)
+                end_key = round(float(scheduled_end_s), 9)
+                if (
+                    start_key not in self._debug_truth_motion_history
+                    or end_key not in self._debug_truth_motion_history
+                ):
+                    raise RuntimeError(
+                        "delta-velocity Oracle is missing GT history for window"
+                    )
+                _, v_start_gt = self._debug_truth_motion_history[start_key]
+                _, v_end_gt = self._debug_truth_motion_history[end_key]
+                window_dt = float(scheduled_end_s - start_s)
+                measurement_w = (
+                    v_end_gt
+                    - v_start_gt
+                    - self._lio.gravity_w * window_dt
+                )
+                measurement_source = "oracle_delta_velocity_gravity_compensated"
 
             if bool(self.cfg.learned_debug_oracle_residual_fusion):
                 if target_mode not in (
@@ -727,6 +766,15 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         protected_covariance,
                         start_timestamp_s=start_s,
                         middle_timestamp_s=middle_s,
+                        end_timestamp_s=scheduled_end_s,
+                        clone_tolerance_s=timing_tolerance_s,
+                        marginalize_start_clone=True,
+                    )
+                elif fusion_target_mode == "delta_velocity_gravity_compensated":
+                    self._lio.update_learned_clone_delta_velocity_gravity_compensated(
+                        measurement_w,
+                        protected_covariance,
+                        start_timestamp_s=start_s,
                         end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_start_clone=True,
