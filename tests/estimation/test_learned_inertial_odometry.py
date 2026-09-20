@@ -1520,3 +1520,131 @@ def test_gate_corner_reprojection_exact_measurement_has_unit_huber_weights():
         np.ones(4),
         atol=1.0e-12,
     )
+
+
+def test_delayed_gate_reprojection_clone_jacobian_matches_finite_difference():
+    est = lio.LearnedInertialOdometry(max_position_clones=8)
+    est.reset(
+        timestamp_s=0.0,
+        position_w_b=(0.2, -0.1, 1.2),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+
+    K = np.array(
+        [[293.0, 0.0, 128.0], [0.0, 293.0, 128.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    R_bc = np.array(
+        [[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]],
+        dtype=np.float64,
+    )
+    t_bc = np.array([0.08, 0.0, 0.02], dtype=np.float64)
+    gate_points_w = np.array(
+        [[5.0, 0.8, 0.5], [5.0, -0.8, 0.5], [5.0, -0.8, 2.1]],
+        dtype=np.float64,
+    )
+
+    base, H = est.predict_gate_corner_reprojection_at_clone(
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+        clone_timestamp_s=0.0,
+    )
+    clone_index = est._find_clone_index(0.0)
+    columns = list(
+        range(
+            est._clone_orientation_slice(clone_index).start,
+            est._clone_orientation_slice(clone_index).stop,
+        )
+    ) + list(
+        range(
+            est._clone_position_slice(clone_index).start,
+            est._clone_position_slice(clone_index).stop,
+        )
+    )
+
+    eps = 1.0e-7
+    for col in columns:
+        perturbed = copy.deepcopy(est)
+        dx = np.zeros(perturbed.P.shape[0], dtype=np.float64)
+        dx[col] = eps
+        perturbed._inject_error(dx)
+        value, _ = perturbed.predict_gate_corner_reprojection_at_clone(
+            gate_points_w,
+            K,
+            R_bc,
+            t_bc,
+            clone_timestamp_s=0.0,
+        )
+        numerical = ((value - base) / eps).reshape(-1)
+        np.testing.assert_allclose(
+            numerical,
+            H[:, col],
+            rtol=3e-5,
+            atol=3e-5,
+        )
+
+
+def test_delayed_gate_reprojection_updates_current_state_through_clone_cross_covariance():
+    K = np.array(
+        [[293.0, 0.0, 128.0], [0.0, 293.0, 128.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    R_bc = np.array(
+        [[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]],
+        dtype=np.float64,
+    )
+    t_bc = np.array([0.08, 0.0, 0.02], dtype=np.float64)
+    gate_points_w = np.array(
+        [[5.0, 0.8, 0.5], [5.0, -0.8, 0.5], [5.0, -0.8, 2.1], [5.0, 0.8, 2.1]],
+        dtype=np.float64,
+    )
+
+    truth = lio.LearnedInertialOdometry(max_position_clones=8)
+    truth.reset(
+        timestamp_s=0.0,
+        position_w_b=(0.0, 0.0, 1.2),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    truth.clone_current_position()
+    observed, _ = truth.predict_gate_corner_reprojection_at_clone(
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+        clone_timestamp_s=0.0,
+    )
+
+    est = lio.LearnedInertialOdometry(max_position_clones=8)
+    est.reset(
+        timestamp_s=0.0,
+        position_w_b=(0.10, -0.08, 1.25),
+        initial_covariance=np.eye(15) * 0.2,
+    )
+    est.clone_current_position()
+    est.propagate(
+        gyro_b=np.zeros(3),
+        accel_b=np.array([0.0, 0.0, 9.81]),
+        timestamp_s=0.10,
+    )
+    before = est.p.copy()
+
+    est.update_gate_corner_reprojection(
+        observed,
+        gate_points_w,
+        K,
+        R_bc,
+        t_bc,
+        pixel_sigma_px=1.0,
+        clone_timestamp_s=0.0,
+        max_normalized_nis=100.0,
+    )
+
+    assert est.last_update_diagnostics["measurement_type"] == (
+        "gate_corner_reprojection_delayed_clone"
+    )
+    assert est.last_update_diagnostics["measurement_age_s"] == pytest.approx(0.10)
+    assert np.linalg.norm(est.p - before) > 0.0
+    assert np.linalg.eigvalsh(est.P).min() > -1.0e-10
