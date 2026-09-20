@@ -87,3 +87,17 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
     },
 )
+
+
+gym.register(
+    id="Isaac-Drone-Racer-Learned-Inertial-RL-v0",
+    entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_learned_inertial_env_cfg:"
+            "DroneRacerLearnedInertialRLCfg"
+        ),
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
+    },
+)
