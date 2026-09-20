@@ -259,7 +259,6 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
 
         from perception.camera_model import CameraCalibration
         from perception.stage2_calibration import load_stage2_gate_geometry, stage2_camera_to_body
-        from perception.swift_gate_measurement import CornerPerturbationConfig, GatePoseMeasurementBuilder
         from perception.swift_isaac_adapter import track_layout_from_isaac
         from perception.torchvision_keypoint_detector import TorchvisionGateCornerDetector
 
@@ -294,6 +293,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "'direct_reprojection'"
             )
         if measurement_model == "pnp_pose":
+            from perception.swift_gate_measurement import (
+                CornerPerturbationConfig,
+                GatePoseMeasurementBuilder,
+            )
+
             self._gate_builder = GatePoseMeasurementBuilder(
                 geometry,
                 calibration,
