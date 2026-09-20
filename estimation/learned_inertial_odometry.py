@@ -972,7 +972,8 @@ class LearnedInertialOdometry:
     ) -> None:
         residual = np.asarray(residual, dtype=np.float64).reshape(-1)
         Rm = np.asarray(Rm, dtype=np.float64)
-        S = H @ self.P @ H.T + Rm
+        measurement_state_covariance = H @ self.P @ H.T
+        S = measurement_state_covariance + Rm
         S_symmetric = 0.5 * (S + S.T)
         S_eigenvalues = np.linalg.eigvalsh(S_symmetric)
         S_condition_number = float(np.linalg.cond(S_symmetric))
@@ -1083,6 +1084,21 @@ class LearnedInertialOdometry:
             ),
             "kalman_gain_clone_position_norm": float(
                 np.linalg.norm(clone_position_gain)
+            ),
+            "state_position_covariance_diag_before": np.diag(
+                self.P[6:9, 6:9]
+            ).copy(),
+            "state_velocity_covariance_diag_before": np.diag(
+                self.P[3:6, 3:6]
+            ).copy(),
+            "measurement_state_covariance_diag": np.diag(
+                measurement_state_covariance
+            ).copy(),
+            "ph_t_current_position_norm": float(
+                np.linalg.norm(self.P[6:9, :] @ H.T)
+            ),
+            "ph_t_current_velocity_norm": float(
+                np.linalg.norm(self.P[3:6, :] @ H.T)
             ),
             "innovation_covariance_diag": np.diag(S).copy(),
             "innovation_covariance_condition_number": S_condition_number,
