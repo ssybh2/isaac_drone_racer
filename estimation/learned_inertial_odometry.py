@@ -208,6 +208,7 @@ class LearnedInertialOdometry:
         self._clone_velocities: list[np.ndarray] = []
         self._clone_positions: list[np.ndarray] = []
         self._clone_timestamps_s: list[float] = []
+        self._unobservable_shift = self._instantaneous_unobservable_basis()
         self.last_update_diagnostics: dict[str, object] | None = None
 
     @property
@@ -310,6 +311,9 @@ class LearnedInertialOdometry:
         P_aug[old_dim:, old_dim:] = J @ self.P @ J.T
 
         self.P = 0.5 * (P_aug + P_aug.T)
+        self._unobservable_shift = np.vstack(
+            [self._unobservable_shift, J @ self._unobservable_shift]
+        )
         self._clone_orientations.append(self.R.copy())
         self._clone_velocities.append(self.v.copy())
         self._clone_positions.append(self.p.copy())
@@ -331,6 +335,7 @@ class LearnedInertialOdometry:
         keep = np.ones(self.P.shape[0], dtype=bool)
         keep[sl] = False
         self.P = self.P[np.ix_(keep, keep)].copy()
+        self._unobservable_shift = self._unobservable_shift[keep, :].copy()
         del self._clone_orientations[index]
         del self._clone_velocities[index]
         del self._clone_positions[index]
@@ -765,8 +770,14 @@ class LearnedInertialOdometry:
         H[:, self._clone_position_slice(end_index)] = Rt
         return H
 
-    def unobservable_basis(self) -> np.ndarray:
-        """Return local-error gauge directions: global yaw + XYZ translation."""
+    def _instantaneous_unobservable_basis(self) -> np.ndarray:
+        """Build gauge directions from the current nominal state.
+
+        This is useful as a local sanity check, but it is *not* the UZH/TLIO
+        consistency basis. The production diagnostic uses a basis initialized
+        once and propagated through the same linearized state-transition and
+        clone-augmentation maps as the covariance.
+        """
         N = np.zeros((self.P.shape[0], 4), dtype=np.float64)
         gravity_axis_w = np.array([0.0, 0.0, 1.0], dtype=np.float64)
 
@@ -790,6 +801,17 @@ class LearnedInertialOdometry:
             )
             N[self._clone_position_slice(clone_index), 1:4] = np.eye(3)
         return N
+
+    def unobservable_basis(self) -> np.ndarray:
+        """Return the UZH/TLIO-style propagated gauge basis.
+
+        UZH initializes the yaw/translation gauge directions once, propagates
+        them with the same augmented transition matrix used by the covariance,
+        augments them when a clone is created, and slices them on
+        marginalization. Recomputing N from the current nominal state can hide
+        linearization inconsistency because H @ N may be zero by construction.
+        """
+        return self._unobservable_shift.copy()
 
     def unobservable_information(
         self,
@@ -851,6 +873,7 @@ class LearnedInertialOdometry:
         G_aug[:self._CURRENT_DIM, :] = G
         self.P = F_aug @ self.P @ F_aug.T + G_aug @ Qc @ G_aug.T
         self.P = 0.5 * (self.P + self.P.T)
+        self._unobservable_shift = F_aug @ self._unobservable_shift
 
     def _inject_error(self, dx: np.ndarray) -> None:
         dx = np.asarray(dx, dtype=np.float64).reshape(-1)
@@ -960,6 +983,8 @@ class LearnedInertialOdometry:
 
         gauge_basis = self.unobservable_basis()
         gauge_projection = H @ gauge_basis
+        instantaneous_gauge_basis = self._instantaneous_unobservable_basis()
+        instantaneous_gauge_projection = H @ instantaneous_gauge_basis
         gauge_information = self.unobservable_information(gauge_basis)
 
         clone_orientation_gain = (
@@ -1068,6 +1093,12 @@ class LearnedInertialOdometry:
             ),
             "measurement_translation_nullspace_norm": float(
                 np.linalg.norm(gauge_projection[:, 1:4])
+            ),
+            "measurement_instantaneous_unobservable_projection_norm": float(
+                np.linalg.norm(instantaneous_gauge_projection)
+            ),
+            "measurement_instantaneous_translation_nullspace_norm": float(
+                np.linalg.norm(instantaneous_gauge_projection[:, 1:4])
             ),
             "unobservable_information_diag": gauge_information.copy(),
         }
