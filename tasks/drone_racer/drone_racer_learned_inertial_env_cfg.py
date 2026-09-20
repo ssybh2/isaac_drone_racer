@@ -163,6 +163,27 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     gate_orientation_sigma_deg: float = 5.0
     gate_use_orientation_update: bool = True
     gate_position_mahalanobis2_max: float = 16.27  # chi2(3), ~99.9%
+
+    # Gate measurement model. "pnp_pose" preserves the V6.3 Swift-style
+    # detector->IPPE->absolute-pose path for ablations. V6.4 production
+    # experiments use "direct_reprojection": detected gate pixels are compared
+    # directly against mapped 3-D gate corners inside the inertial EKF.
+    gate_measurement_model: str = "pnp_pose"
+    # Pixel-domain uncertainty from the independent Stage2 detector
+    # calibration. This is a per-coordinate sigma, not a 2-D radial RMSE.
+    gate_reprojection_sigma_px: float = 0.85
+    # Require at least two semantic corners, matching the intended partial-gate
+    # direct-reprojection use case. Four-corner completeness is no longer a
+    # prerequisite for an EKF visual update.
+    gate_reprojection_min_visible_corners: int = 2
+    # Association is performed without PnP: every mapped gate is projected
+    # through the current inertial state and scored in pixel space.
+    gate_reprojection_association_max_rmse_px: float = 80.0
+    gate_reprojection_min_depth_m: float = 0.05
+    # Robust innovation weighting and a permissive final consistency gate.
+    gate_reprojection_huber_delta_sigma: float = 2.5
+    gate_reprojection_max_normalized_nis: float | None = 25.0
+
     # Evaluation-only audit switch. When enabled, the runtime records simulator
     # truth alongside Gate-PnP measurements so detector/PnP/association quality
     # can be diagnosed. Truth is never fed into the estimator update itself.
