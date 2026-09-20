@@ -983,6 +983,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         V6.4 deliberately does not call IPPE/PnP on this path. Gate identity is
         selected by projecting every mapped gate through the current inertial
         state and choosing the smallest semantic-corner pixel residual.
+
+        V6.5 can inject deterministic frame loss, burst dropout, corner erasure,
+        pixel noise and uncompensated processing latency before this update.
+        All stress hooks are neutral by default.
         """
         if (
             self.swift_detector is None
@@ -994,11 +998,15 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         ):
             return
 
-        self._last_camera_timestamp_s = self._timestamp_s()
+        now = float(self._timestamp_s())
+        self._last_camera_timestamp_s = now
         self._gate_attempt_count += 1
-        diagnostic: dict[str, object] = {
+        capture_diagnostic: dict[str, object] = {
             "attempt_index": int(self._gate_attempt_count),
-            "timestamp_s": float(self._timestamp_s()),
+            "timestamp_s": now,
+            "capture_timestamp_s": now,
+            "process_timestamp_s": None,
+            "measurement_age_s": None,
             "measurement_model": "direct_reprojection",
             "accepted": False,
             "reject_stage": None,
@@ -1022,41 +1030,129 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "post_update_orientation_error_deg": None,
             "exception_type": None,
             "exception_message": None,
+            "stress_frame_dropped": False,
+            "stress_burst_active": False,
+            "stress_pixel_noise_sigma_px": float(
+                self.cfg.gate_stress_pixel_noise_sigma_px
+            ),
+            "stress_corner_drop_count": 0,
+            "stress_latency_s": float(self.cfg.gate_stress_latency_s),
         }
 
         try:
             from perception.swift_isaac_adapter import active_gate_index_from_isaac
 
-            diagnostic["expected_active_gate_index"] = int(
+            capture_diagnostic["expected_active_gate_index"] = int(
                 active_gate_index_from_isaac(self, env_id=0)
             )
         except (AttributeError, KeyError, RuntimeError, ValueError):
             pass
 
-        camera = self.scene["tiled_camera"]
-        rgb = _np(camera.data.output["rgb"][0])[..., :3]
-        if rgb.dtype != np.uint8:
-            scale = (
-                255.0
-                if np.issubdtype(rgb.dtype, np.floating)
-                and float(np.nanmax(rgb)) <= 1.0 + 1e-6
-                else 1.0
-            )
-            rgb = np.clip(rgb * scale, 0.0, 255.0).astype(np.uint8)
+        burst_start = float(self.cfg.gate_stress_burst_start_s)
+        burst_duration = float(self.cfg.gate_stress_burst_duration_s)
+        burst_active = (
+            burst_duration > 0.0
+            and burst_start <= now < burst_start + burst_duration
+        )
+        random_drop = bool(
+            float(self.cfg.gate_stress_frame_drop_probability) > 0.0
+            and self._gate_stress_rng.random()
+            < float(self.cfg.gate_stress_frame_drop_probability)
+        )
+        frame_dropped = bool(burst_active or random_drop)
+        capture_diagnostic["stress_burst_active"] = bool(burst_active)
+        capture_diagnostic["stress_frame_dropped"] = frame_dropped
 
-        try:
-            observation = self.swift_detector.detect(
-                np.ascontiguousarray(rgb),
-                timestamp_s=self._timestamp_s(),
-            )
-        except (ValueError, RuntimeError) as exc:
+        if frame_dropped:
             self._gate_reject_count += 1
-            diagnostic["reject_stage"] = "detector"
-            diagnostic["reject_reason"] = "detector_exception"
-            diagnostic["exception_type"] = type(exc).__name__
-            diagnostic["exception_message"] = str(exc)
-            self._gate_diagnostics.append(diagnostic)
+            self._gate_stress_frame_drop_count += 1
+            capture_diagnostic["reject_stage"] = "stress"
+            capture_diagnostic["reject_reason"] = "stress_frame_dropout"
+            self._gate_diagnostics.append(capture_diagnostic)
+        else:
+            camera = self.scene["tiled_camera"]
+            rgb = _np(camera.data.output["rgb"][0])[..., :3]
+            if rgb.dtype != np.uint8:
+                scale = (
+                    255.0
+                    if np.issubdtype(rgb.dtype, np.floating)
+                    and float(np.nanmax(rgb)) <= 1.0 + 1e-6
+                    else 1.0
+                )
+                rgb = np.clip(rgb * scale, 0.0, 255.0).astype(np.uint8)
+
+            try:
+                observation = self.swift_detector.detect(
+                    np.ascontiguousarray(rgb),
+                    timestamp_s=now,
+                )
+            except (ValueError, RuntimeError) as exc:
+                self._gate_reject_count += 1
+                capture_diagnostic["reject_stage"] = "detector"
+                capture_diagnostic["reject_reason"] = "detector_exception"
+                capture_diagnostic["exception_type"] = type(exc).__name__
+                capture_diagnostic["exception_message"] = str(exc)
+                self._gate_diagnostics.append(capture_diagnostic)
+            else:
+                from perception.corner_detection import CornerObservation
+
+                corners_uv = np.asarray(
+                    observation.corners_uv, dtype=np.float64
+                ).copy()
+                visible = np.asarray(
+                    observation.visible, dtype=bool
+                ).reshape(4).copy()
+                confidence = np.asarray(
+                    observation.confidence, dtype=np.float64
+                ).reshape(4).copy()
+
+                pixel_noise_sigma = float(
+                    self.cfg.gate_stress_pixel_noise_sigma_px
+                )
+                if pixel_noise_sigma > 0.0:
+                    corners_uv += self._gate_stress_rng.normal(
+                        loc=0.0,
+                        scale=pixel_noise_sigma,
+                        size=corners_uv.shape,
+                    )
+
+                corner_drop_probability = float(
+                    self.cfg.gate_stress_corner_drop_probability
+                )
+                if corner_drop_probability > 0.0:
+                    drop_draw = (
+                        self._gate_stress_rng.random(4)
+                        < corner_drop_probability
+                    )
+                    effective_drop = visible & drop_draw
+                    dropped_count = int(np.sum(effective_drop))
+                    if dropped_count:
+                        visible[effective_drop] = False
+                        self._gate_stress_corner_drop_count += dropped_count
+                        capture_diagnostic["stress_corner_drop_count"] = (
+                            dropped_count
+                        )
+
+                stressed_observation = CornerObservation(
+                    corners_uv=corners_uv,
+                    visible=visible,
+                    confidence=confidence,
+                    timestamp_s=now,
+                    source=f"{observation.source}+v6.5_stress",
+                )
+                self._gate_observation_queue.append(
+                    (now, stressed_observation, capture_diagnostic)
+                )
+
+        latency_s = float(self.cfg.gate_stress_latency_s)
+        if not self._gate_observation_queue:
             return
+        capture_time_s, observation, diagnostic = self._gate_observation_queue[0]
+        if now - capture_time_s + 1.0e-12 < latency_s:
+            return
+        self._gate_observation_queue.pop(0)
+        diagnostic["process_timestamp_s"] = now
+        diagnostic["measurement_age_s"] = float(now - capture_time_s)
 
         visible_indices = np.flatnonzero(
             np.asarray(observation.visible, dtype=bool).reshape(4)
