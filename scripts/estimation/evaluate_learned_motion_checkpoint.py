@@ -217,7 +217,10 @@ def main() -> None:
         "target_unit": (
             "m/s"
             if str(metadata.get("target_mode", "displacement"))
-            == "delta_velocity_gravity_compensated"
+            in (
+                "delta_velocity_gravity_compensated",
+                "delta_velocity_body_end_gyro_aligned",
+            )
             else "m"
         ),
         "manifest": str(manifest_path),
