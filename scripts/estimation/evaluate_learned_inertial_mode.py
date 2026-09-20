@@ -82,8 +82,9 @@ parser.add_argument(
     ),
     default=None,
     help=(
-        "Diagnostic learned-relative Kalman-gain ablation. Selected gain rows "
-        "are zeroed consistently for state injection and Joseph covariance update."
+        "Legacy current-vs-clone Kalman-gain ablation. V6.2 UZH-style "
+        "two-clone learned factors always use the full Kalman gain; this option "
+        "is retained only for legacy estimator diagnostics."
     ),
 )
 parser.add_argument(
@@ -1094,6 +1095,9 @@ def main() -> None:
             ],
             "configured_learned_kalman_gain_mode": str(
                 cfg.learned_kalman_gain_mode
+            ),
+            "learned_filter_structure": str(
+                getattr(cfg, "learned_filter_structure", "legacy_current_clone")
             ),
             "position_rmse_m": float(np.sqrt(np.mean(np.sum(pos**2, axis=1)))),
             "position_axis_rmse_m": np.sqrt(np.mean(pos**2, axis=0)).tolist(),
