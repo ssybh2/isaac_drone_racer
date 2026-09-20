@@ -74,6 +74,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_window_end_s = None
         self._last_learned_update_timestamp_s = None
         self._last_learned_fused = False
+        self._last_learned_skip_reason = None
         self._gate_attempt_count = 0
         self._gate_update_count = 0
         self._gate_reject_count = 0
@@ -232,6 +233,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_window_end_s = None
         self._last_learned_update_timestamp_s = None
         self._last_learned_fused = False
+        self._last_learned_skip_reason = None
         self._last_gate_mahalanobis2 = None
         self.learned_inertial_state = self._lio.state()
 
@@ -390,7 +392,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             thrust_w=feature_thrust,
         )
 
-        if bool(self.cfg.learned_debug_oracle_residual_fusion):
+        if (
+            bool(self.cfg.learned_debug_oracle_residual_fusion)
+            or bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion)
+        ):
             robot = self.scene["robot"]
             key = round(float(timestamp_s), 9)
             self._debug_truth_motion_history[key] = (
@@ -647,8 +652,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     start_s,
                     tolerance_s=timing_tolerance_s,
                 )
-        except (KeyError, RuntimeError):
+        except (KeyError, RuntimeError) as exc:
             self._learned_update_skip_count += 1
+            self._last_learned_skip_reason = f"{type(exc).__name__}: {exc}"
             self._lio.marginalize_clones_before(start_s, inclusive=True)
             self._motion_buffer.discard_before(start_s)
             return
@@ -675,6 +681,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_learned_window_end_s = float(scheduled_end_s)
         self._last_learned_update_timestamp_s = now
         self._last_learned_fused = bool(should_fuse)
+        self._last_learned_skip_reason = None
         # discard_before retains one interpolation predecessor. The next
         # 0.5 s window begins only 0.05 s later, so the histories overlap.
         self._motion_buffer.discard_before(start_s)
