@@ -147,6 +147,20 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--oracle-delta-velocity-fusion",
+    action="store_true",
+    help=(
+        "Diagnostic only: fuse exact GT (v_end-v_start)-g*dt through a "
+        "two-clone velocity-only factor."
+    ),
+)
+parser.add_argument(
+    "--oracle-delta-velocity-sigma-mps",
+    type=float,
+    default=0.05,
+    help="Isotropic Oracle delta-velocity measurement sigma [m/s].",
+)
+parser.add_argument(
     "--truth-orientation-for-tcn-features",
     action="store_true",
     help=(
@@ -412,11 +426,18 @@ def _prepare_cfg():
     cfg.learned_debug_oracle_second_difference_fusion = bool(
         args_cli.oracle_second_difference_fusion
     )
+    cfg.learned_debug_oracle_delta_velocity_fusion = bool(
+        args_cli.oracle_delta_velocity_fusion
+    )
+    cfg.learned_debug_oracle_delta_velocity_sigma_mps = float(
+        args_cli.oracle_delta_velocity_sigma_mps
+    )
     oracle_modes = (
         cfg.learned_debug_oracle_residual_fusion,
         cfg.learned_debug_oracle_uzh_displacement_fusion,
         cfg.learned_debug_oracle_body_end_displacement_fusion,
         cfg.learned_debug_oracle_second_difference_fusion,
+        cfg.learned_debug_oracle_delta_velocity_fusion,
     )
     if sum(int(v) for v in oracle_modes) > 1:
         raise ValueError(
@@ -1179,6 +1200,12 @@ def main() -> None:
             ),
             "oracle_second_difference_fusion": bool(
                 cfg.learned_debug_oracle_second_difference_fusion
+            ),
+            "oracle_delta_velocity_fusion": bool(
+                cfg.learned_debug_oracle_delta_velocity_fusion
+            ),
+            "oracle_delta_velocity_sigma_mps": float(
+                cfg.learned_debug_oracle_delta_velocity_sigma_mps
             ),
             "last_learned_measurement_source": (
                 raw_env._last_learned_measurement_source
