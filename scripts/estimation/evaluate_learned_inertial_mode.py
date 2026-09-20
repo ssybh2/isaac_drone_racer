@@ -1035,6 +1035,148 @@ def _summarize_gate_pnp_diagnostics(records: list[dict]) -> dict:
     }
 
 
+def _summarize_gate_reprojection_diagnostics(records: list[dict]) -> dict:
+    direct = [
+        record
+        for record in records
+        if record.get("measurement_model") == "direct_reprojection"
+    ]
+    accepted = [record for record in direct if bool(record.get("accepted", False))]
+    rejected = [record for record in direct if not bool(record.get("accepted", False))]
+
+    def values(key: str, subset=None) -> np.ndarray:
+        source = direct if subset is None else subset
+        output = []
+        for record in source:
+            value = record.get(key)
+            if value is None:
+                continue
+            value = float(value)
+            if np.isfinite(value):
+                output.append(value)
+        return np.asarray(output, dtype=np.float64)
+
+    def stats(key: str, subset=None) -> dict:
+        array = values(key, subset)
+        if not len(array):
+            return {
+                "samples": 0,
+                "mean": None,
+                "rmse": None,
+                "median": None,
+                "p95": None,
+                "max": None,
+            }
+        return {
+            "samples": int(len(array)),
+            "mean": float(np.mean(array)),
+            "rmse": float(np.sqrt(np.mean(array**2))),
+            "median": float(np.median(array)),
+            "p95": float(np.percentile(array, 95.0)),
+            "max": float(np.max(array)),
+        }
+
+    reject_reasons: dict[str, int] = {}
+    for record in rejected:
+        reason = str(record.get("reject_reason") or "unknown")
+        reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
+
+    corner_count_histogram: dict[str, int] = {}
+    for record in accepted:
+        count = int(record.get("visible_corner_count") or 0)
+        key = str(count)
+        corner_count_histogram[key] = corner_count_histogram.get(key, 0) + 1
+
+    comparable = [
+        record
+        for record in direct
+        if record.get("association_matches_active_gate") is not None
+    ]
+    match_count = sum(
+        bool(record.get("association_matches_active_gate"))
+        for record in comparable
+    )
+
+    huber_weights = []
+    normalized_corner_innovation = []
+    for record in accepted:
+        weights = record.get("huber_weights")
+        if weights is not None:
+            huber_weights.extend(float(value) for value in weights)
+        normalized = record.get("corner_normalized_innovation")
+        if normalized is not None:
+            normalized_corner_innovation.extend(float(value) for value in normalized)
+
+    def array_stats(array_like) -> dict:
+        array = np.asarray(array_like, dtype=np.float64)
+        array = array[np.isfinite(array)]
+        if not len(array):
+            return {
+                "samples": 0,
+                "mean": None,
+                "median": None,
+                "p05": None,
+                "p95": None,
+                "min": None,
+                "max": None,
+            }
+        return {
+            "samples": int(len(array)),
+            "mean": float(np.mean(array)),
+            "median": float(np.median(array)),
+            "p05": float(np.percentile(array, 5.0)),
+            "p95": float(np.percentile(array, 95.0)),
+            "min": float(np.min(array)),
+            "max": float(np.max(array)),
+        }
+
+    return {
+        "attempts": int(len(direct)),
+        "accepted": int(len(accepted)),
+        "rejected": int(len(rejected)),
+        "acceptance_rate": (
+            None if not direct else float(len(accepted) / len(direct))
+        ),
+        "rejected_by_reason": reject_reasons,
+        "accepted_visible_corner_count_histogram": corner_count_histogram,
+        "visible_corner_count": stats("visible_corner_count"),
+        "association_pixel_rmse_px": stats("association_pixel_rmse_px"),
+        "association_second_best_rmse_px": stats(
+            "association_second_best_rmse_px"
+        ),
+        "association_active_gate_comparable": int(len(comparable)),
+        "association_active_gate_matches": int(match_count),
+        "association_active_gate_match_rate": (
+            None if not comparable else float(match_count / len(comparable))
+        ),
+        "pixel_residual_rmse_px": stats(
+            "pixel_residual_rmse_px", accepted
+        ),
+        "pixel_residual_radial_rmse_px": stats(
+            "pixel_residual_radial_rmse_px", accepted
+        ),
+        "normalized_nis": stats("normalized_nis", accepted),
+        "huber_weights": array_stats(huber_weights),
+        "corner_normalized_innovation": array_stats(
+            normalized_corner_innovation
+        ),
+        "filter_error_at_accepted_updates": {
+            "pre_position_norm_m": stats(
+                "pre_update_position_error_norm_m", accepted
+            ),
+            "post_position_norm_m": stats(
+                "post_update_position_error_norm_m", accepted
+            ),
+            "pre_orientation_deg": stats(
+                "pre_update_orientation_error_deg", accepted
+            ),
+            "post_orientation_deg": stats(
+                "post_update_orientation_error_deg", accepted
+            ),
+        },
+    }
+
+
 def main() -> None:
     _validate_inputs()
     cfg = _prepare_cfg()
@@ -1686,6 +1828,9 @@ def main() -> None:
         gate_rejected = int(raw_env._gate_reject_count)
         gate_records = list(getattr(raw_env, "_gate_diagnostics", []))
         gate_audit_summary = _summarize_gate_pnp_diagnostics(gate_records)
+        gate_reprojection_summary = _summarize_gate_reprojection_diagnostics(
+            gate_records
+        )
         if gate_records:
             gate_audit_path.write_text(
                 "".join(json.dumps(record, sort_keys=True) + "\n" for record in gate_records),
@@ -1919,6 +2064,28 @@ def main() -> None:
                 None if gate_attempts == 0 else float(gate_accepted / gate_attempts)
             ),
             "gate_gt_diagnostics_enabled": bool(cfg.gate_debug_gt_diagnostics),
+            "gate_measurement_model": str(
+                getattr(cfg, "gate_measurement_model", "pnp_pose")
+            ),
+            "gate_reprojection_config": {
+                "pixel_sigma_px": float(cfg.gate_reprojection_sigma_px),
+                "min_visible_corners": int(
+                    cfg.gate_reprojection_min_visible_corners
+                ),
+                "association_max_rmse_px": float(
+                    cfg.gate_reprojection_association_max_rmse_px
+                ),
+                "min_depth_m": float(cfg.gate_reprojection_min_depth_m),
+                "huber_delta_sigma": float(
+                    cfg.gate_reprojection_huber_delta_sigma
+                ),
+                "max_normalized_nis": (
+                    None
+                    if cfg.gate_reprojection_max_normalized_nis is None
+                    else float(cfg.gate_reprojection_max_normalized_nis)
+                ),
+            },
+            "gate_reprojection_diagnostics": gate_reprojection_summary,
             "gate_pnp_diagnostics": gate_audit_summary,
             "gate_pnp_diagnostics_path": (
                 str(gate_audit_path) if gate_records else None
@@ -1947,7 +2114,24 @@ def main() -> None:
         )
         print(f"[estimator-ab:{args_cli.mode}] trace={trace_path}", flush=True)
         print(f"[estimator-ab:{args_cli.mode}] summary={summary_path}", flush=True)
-        if gate_records:
+        if gate_records and args_cli.mode == "R":
+            direct = gate_reprojection_summary
+            print(
+                f"[gate-reprojection:{args_cli.mode}] "
+                f"accepted={direct['accepted']}/{direct['attempts']} "
+                f"assoc_match={direct['association_active_gate_match_rate']} "
+                f"pixel_rmse={direct['pixel_residual_radial_rmse_px']['rmse']}px "
+                f"nis/dof_mean={direct['normalized_nis']['mean']} "
+                f"corners={direct['accepted_visible_corner_count_histogram']}",
+                flush=True,
+            )
+            print(
+                f"[gate-reprojection:{args_cli.mode}] "
+                f"rejects={direct['rejected_by_reason']} "
+                f"huber_mean={direct['huber_weights']['mean']}",
+                flush=True,
+            )
+        if gate_records and args_cli.mode != "R":
             pnp_pos = gate_audit_summary["pnp_position_error"]["norm_m"]
             pnp_ori = gate_audit_summary["pnp_orientation_error_deg"]
             association = gate_audit_summary["association"]
