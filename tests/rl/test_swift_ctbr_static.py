@@ -307,3 +307,32 @@ def test_estimated_state_gt_policy_deployment_contract():
         "self.next_gate_idx[self._mission_gate_passed] += 1",
     ):
         assert token in audit
+
+
+
+def test_gt_control_estimator_shadow_contract():
+    registry = _text("tasks/drone_racer/__init__.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    obs = _text("tasks/drone_racer/mdp/observations.py")
+
+    for token in (
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-GTShadow-v0",
+        "DroneRacerLearnedInertialSwiftCTBRGTShadowCfg",
+        "skrl_swift_ctbr_gt_racing_cfg.yaml",
+    ):
+        assert token in registry
+
+    for token in (
+        "class SwiftGTShadowPolicyCfg",
+        "platform_state = ObsTerm(func=mdp.swift_gt_state)",
+        "swift_gt_truth_next_gate_corners_relative_w",
+        "class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg",
+    ):
+        assert token in cfg
+
+    for token in (
+        "def swift_gt_truth_next_gate_corners_relative_w",
+        "gt_next_gate_idx",
+        "asset.data.root_pos_w",
+    ):
+        assert token in obs
