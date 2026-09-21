@@ -156,3 +156,51 @@ def target_pos_b(
     pos_b, _ = math_utils.subtract_frame_transforms(asset.data.root_pos_w, asset.data.root_quat_w, target_pos_tensor)
 
     return pos_b
+
+
+def swift_gt_state(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Return Swift-style GT state [p_w(3), v_w(3), R_wb(9)] for training."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    p_w = asset.data.root_pos_w
+    v_w = asset.data.root_lin_vel_w
+    R_wb = math_utils.matrix_from_quat(asset.data.root_quat_w).reshape(env.num_envs, 9)
+    return torch.cat((p_w, v_w, R_wb), dim=-1)
+
+
+def swift_gt_next_gate_corners_relative_w(
+    env: ManagerBasedRLEnv,
+    command_name: str = "target",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Return four mapped gate-corner vectors relative to the GT vehicle position."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+    gate_pose_w = command.command
+    gate_center_w = gate_pose_w[:, :3]
+    gate_quat_w = gate_pose_w[:, 3:7]
+    half = float(command.gate_size) / 2.0
+
+    local_corners = torch.tensor(
+        [
+            [0.0, -half, -half],
+            [0.0, +half, -half],
+            [0.0, +half, +half],
+            [0.0, -half, +half],
+        ],
+        dtype=asset.data.root_pos_w.dtype,
+        device=asset.device,
+    ).unsqueeze(0).expand(env.num_envs, -1, -1)
+
+    q = gate_quat_w.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 4)
+    corners_w = math_utils.quat_apply(
+        q,
+        local_corners.reshape(-1, 3),
+    ).reshape(env.num_envs, 4, 3)
+    corners_w = corners_w + gate_center_w.unsqueeze(1)
+
+    relative_w = corners_w - asset.data.root_pos_w.unsqueeze(1)
+    return relative_w.reshape(env.num_envs, 12)
+
