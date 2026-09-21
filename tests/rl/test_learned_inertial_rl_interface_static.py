@@ -109,27 +109,29 @@ def test_learned_inertial_rl_uses_bounded_policy_profile():
 
 
 
-def test_legacy_actor_transfer_has_explicit_recalibration_path():
+def test_legacy_actor_transfer_has_behavior_preserving_path():
     train = _text("scripts/rl/train.py")
     overrides = _text("utils/training_overrides.py")
 
     expected_train = (
         "--recalibrate_legacy_actor",
         "--legacy_actor_calibration_samples",
-        "--legacy_actor_target_pretanh_abs",
-        "--legacy_preprocessor_count_cap",
+        "--legacy_behavior_action_limit",
+        "--legacy_transfer_only_path",
         "_migrate_legacy_learned_inertial_checkpoint",
-        "_sample_legacy_actor_raw_means",
+        "_sample_legacy_actor_features",
+        "distilled_behavior_mae",
+        "distilled_sign_agreement",
     )
     for token in expected_train:
         assert token in train
 
     expected_overrides = (
-        "def recalibrate_legacy_actor_output(",
-        "reference_quantile: float = 0.75",
-        "target_pretanh_abs: float = 1.25",
-        "def cap_running_scaler_count(",
-        "def reset_optimizer_state(",
+        "def distill_legacy_clamped_actor_output(",
+        "old_executed = raw.clamp(-1.0, 1.0)",
+        "pretanh_target = torch.atanh(bounded_target)",
+        "torch.linalg.solve",
+        "def reset_optimizer_parameter_state(",
     )
     for token in expected_overrides:
         assert token in overrides
