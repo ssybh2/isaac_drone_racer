@@ -88,7 +88,12 @@ def main() -> None:
     checkpoint = str(Path(args_cli.checkpoint).expanduser().resolve())
     print(f"[collect] loading legacy checkpoint: {checkpoint}", flush=True)
     runner.agent.load(checkpoint)
+    print("[collect] checkpoint loaded successfully", flush=True)
     runner.agent.set_running_mode("eval")
+
+    output = args_cli.output.expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[collect] output path: {output}", flush=True)
 
     observations: list[np.ndarray] = []
     standardized: list[np.ndarray] = []
@@ -99,20 +104,26 @@ def main() -> None:
     truth_gate_counts: list[int] = []
     mission_gate_counts: list[int] = []
 
+    print("[collect] resetting environment ...", flush=True)
     obs, _ = wrapped.reset()
+    print(
+        f"[collect] environment reset complete; obs_shape={tuple(obs.shape)}",
+        flush=True,
+    )
     episode = 0
     step_in_episode = 0
 
     try:
         while episode < int(args_cli.episodes):
             with torch.inference_mode():
-                # Match PPO.act exactly: the checkpoint's RunningStandardScaler
-                # transforms the 20D actor observation before the policy trunk.
+                # Use the exact legacy PPO action path already validated by the
+                # faithful evaluator. agent.act applies the loaded state
+                # preprocessor; mean_actions is the raw unbounded Gaussian mean
+                # because this collector forces output=ACTIONS and
+                # clip_actions=False.
                 std_obs = runner.agent._state_preprocessor(obs)
-                mean, _ = runner.agent.policy.compute(
-                    {"states": std_obs},
-                    role="policy",
-                )
+                outputs = runner.agent.act(obs, timestep=0, timesteps=0)
+                mean = outputs[-1].get("mean_actions", outputs[0])
                 executed = mean.clamp(-1.0, 1.0)
 
             observations.append(
@@ -169,8 +180,33 @@ def main() -> None:
             episode += 1
             step_in_episode = 0
 
-        output = args_cli.output.expanduser().resolve()
-        output.parent.mkdir(parents=True, exist_ok=True)
+            # Incremental checkpoint: keep all completed transfer data even if
+            # a later Isaac/RTX shutdown interrupts the collection run.
+            np.savez_compressed(
+                output,
+                observation=np.stack(observations, axis=0),
+                standardized_observation=np.stack(standardized, axis=0),
+                legacy_raw_mean=np.stack(raw_means, axis=0),
+                legacy_executed_action=np.stack(executed_actions, axis=0),
+                episode_id=np.asarray(episode_ids, dtype=np.int32),
+                episode_step=np.asarray(episode_steps, dtype=np.int32),
+                truth_gates_per_episode=np.asarray(
+                    truth_gate_counts, dtype=np.int32
+                ),
+                mission_gates_per_episode=np.asarray(
+                    mission_gate_counts, dtype=np.int32
+                ),
+                source_checkpoint=np.asarray(checkpoint),
+                action_semantics=np.asarray(
+                    "legacy_raw_mean_environment_hard_clip"
+                ),
+                completed_episodes=np.asarray(episode, dtype=np.int32),
+            )
+            print(
+                f"[collect] incremental save: {output} "
+                f"({episode}/{args_cli.episodes} episodes)",
+                flush=True,
+            )
 
         np.savez_compressed(
             output,
