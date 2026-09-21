@@ -568,8 +568,11 @@ class SwiftPassStateGateTargetingCommand(GateTargetingCommand):
             env_ids=ids,
         )
 
-        # Keep progress bookkeeping synchronized with the reset pose.
-        self.prev_robot_pos_w = self.robot.data.root_pos_w.clone()
+        # Keep progress bookkeeping synchronized with the reset pose even if
+        # only a subset of vectorized environments is being reset.
+        previous = self.robot.data.root_pos_w.clone()
+        previous[ids] = start_pos
+        self.prev_robot_pos_w = previous
 
 
 @configclass
