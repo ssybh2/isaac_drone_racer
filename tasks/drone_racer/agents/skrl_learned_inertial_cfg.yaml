@@ -1,0 +1,84 @@
+seed: 1
+
+# Learned-inertial PPO profile for bounded motor-action training.
+#
+# This profile is intentionally separate from skrl_cfg.yaml so the legacy
+# Stage 1 / oracle tasks keep their original policy and optimizer settings.
+models:
+  separate: False
+  policy:
+    class: GaussianMixin
+    # LearnedInertialRacingEnv exposes a finite [-1, 1]^4 action space.
+    # Clipping here therefore happens before the action is stored by PPO,
+    # avoiding the previous policy-vs-environment hard-clipping mismatch.
+    clip_actions: True
+    clip_mean_actions: False
+    clip_log_std: True
+    min_log_std: -20.0
+    # log(0.08): exploration is never allowed to grow above 0.08 std.
+    max_log_std: -2.5257286443082556
+    initial_log_std: -2.5257286443082556
+    network:
+      - name: net
+        input: STATES
+        layers: [256, 256, 256]
+        activations: elu
+    # Preserve the exact parameterized output layer used by the legacy
+    # checkpoint, but bound its mean without adding any trainable parameters.
+    # This keeps old checkpoints state-dict compatible.
+    output: 0.8 * tanh(ACTIONS)
+
+  value:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: STATES
+        layers: [256, 256, 256]
+        activations: elu
+    output: ONE
+
+memory:
+  class: RandomMemory
+  memory_size: -1
+
+agent:
+  class: PPO
+  # With one sensor-faithful environment, 1024 steps gives several complete
+  # episodes per PPO update instead of roughly one trajectory.
+  rollouts: 1024
+  learning_epochs: 5
+  mini_batches: 8
+  discount_factor: 0.99
+  lambda: 0.95
+  learning_rate: 1.0e-05
+  learning_rate_scheduler: KLAdaptiveLR
+  learning_rate_scheduler_kwargs:
+    kl_threshold: 0.01
+    max_lr: 2.0e-05
+  state_preprocessor: RunningStandardScaler
+  state_preprocessor_kwargs: null
+  value_preprocessor: RunningStandardScaler
+  value_preprocessor_kwargs: null
+  random_timesteps: 0
+  learning_starts: 0
+  grad_norm_clip: 1.0
+  ratio_clip: 0.2
+  value_clip: 0.2
+  clip_predicted_values: True
+  # Do not encourage the global Gaussian std to grow again.
+  entropy_loss_scale: 0.0
+  value_loss_scale: 1.0
+  kl_threshold: 0.0
+  rewards_shaper_scale: 0.6
+  time_limit_bootstrap: False
+  experiment:
+    directory: "learned_inertial_rl_phase2_bounded"
+    experiment_name: "easy_swift_bounded"
+    write_interval: auto
+    checkpoint_interval: auto
+
+trainer:
+  class: SequentialTrainer
+  timesteps: 51200
+  environment_info: log
