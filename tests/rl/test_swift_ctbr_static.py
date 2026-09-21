@@ -472,3 +472,37 @@ def test_perception_aware_gt_racing_contract():
 
     assert "SWIFT_CTBR_GT_RACING_TASKS = {" in train
     assert '"Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0"' in train
+
+
+def test_perception_aware_gt_racing_v2_contract():
+    registry = _text("tasks/drone_racer/__init__.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    rewards = _text("tasks/drone_racer/mdp/rewards.py")
+    agent = _text(
+        "tasks/drone_racer/agents/skrl_swift_ctbr_gt_perception_v2_cfg.yaml"
+    )
+    train = _text("scripts/rl/train.py")
+
+    assert "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV2-v0" in registry
+    assert "DroneRacerSwiftCTBRGTPerceptionAwareV2EnvCfg" in registry
+    assert "skrl_swift_ctbr_gt_perception_v2_cfg.yaml" in registry
+
+    assert "class SwiftCTBRGTPerceptionAwareV2RewardsCfg" in cfg
+    assert "camera_observability = RewTerm(" in cfg
+    assert "weight=5.0" in cfg
+    assert '"output_bias": -1.0' in cfg
+    assert '"insufficient_visible_penalty": 0.50' in cfg
+
+    assert "insufficient_visible_penalty" in rewards
+    assert "visible_count < 2" in rewards
+
+    for token in (
+        "rollouts: 24",
+        "learning_epochs: 5",
+        "mini_batches: 4",
+        "learning_rate: 1.0e-04",
+        "timesteps: 50000",
+    ):
+        assert token in agent
+
+    assert '"Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV2-v0"' in train
