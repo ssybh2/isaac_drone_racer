@@ -182,3 +182,30 @@ def test_swift_policy0_train_script_audit():
         '"Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0"',
     ):
         assert token in train
+
+
+
+def test_swift_pass_state_curriculum_and_evaluator():
+    commands = _text("tasks/drone_racer/mdp/commands.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    evaluator = _text("scripts/rl/evaluate_swift_ctbr_policy0.py")
+
+    for token in (
+        "class SwiftPassStateGateTargetingCommand",
+        "forward_speed_range_mps",
+        "start_pos",
+        "velocity_w = heading * speed",
+        "class SwiftPassStateGateTargetingCommandCfg",
+    ):
+        assert token in commands
+
+    assert "SwiftPassStateGateTargetingCommandCfg" in cfg
+    assert "forward_speed_range_mps=(1.5, 3.0)" in cfg
+
+    for token in (
+        "SWIFT CTBR POLICY-0 EVALUATION SUMMARY",
+        "gates_passed",
+        "action_saturation_fraction",
+        "full_lap_completion_rate",
+    ):
+        assert token in evaluator
