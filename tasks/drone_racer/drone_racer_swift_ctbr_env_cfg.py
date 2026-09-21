@@ -175,6 +175,37 @@ class SwiftCTBRGTPerceptionAwareV2RewardsCfg(SwiftCTBRGTRacingRewardsCfg):
 
 
 @configclass
+class SwiftCTBRGTPerceptionAwareV3RewardsCfg(SwiftCTBRGTRacingRewardsCfg):
+    """Dense directional camera shaping plus an explicit >=2-corner constraint.
+
+    V2's mostly binary visibility penalty improved racing speed but barely
+    changed observability. V3 adds a squared 3-D camera-boresight angle penalty,
+    which remains informative even when the gate is far outside the image.
+    """
+
+    camera_angle_l2 = RewTerm(
+        func=mdp.gt_next_gate_camera_angle_l2,
+        weight=-8.0,
+        params={"command_name": "target"},
+    )
+    camera_observability = RewTerm(
+        func=mdp.gt_next_gate_image_visibility,
+        weight=2.0,
+        params={
+            "command_name": "target",
+            "margin_px": 24.0,
+            "center_sigma": 1.0,
+            "center_weight": 0.20,
+            "coverage_weight": 0.25,
+            "margin_weight": 0.15,
+            "usable_bonus_weight": 0.40,
+            "output_bias": -1.0,
+            "insufficient_visible_penalty": 0.50,
+        },
+    )
+
+
+@configclass
 class SwiftCTBRGTShadowRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
     """GT-racing rewards evaluated against the truth-only shadow mission."""
 
@@ -373,6 +404,17 @@ class DroneRacerSwiftCTBRGTPerceptionAwareV2EnvCfg(
 
     rewards: SwiftCTBRGTPerceptionAwareV2RewardsCfg = (
         SwiftCTBRGTPerceptionAwareV2RewardsCfg()
+    )
+
+
+@configclass
+class DroneRacerSwiftCTBRGTPerceptionAwareV3EnvCfg(
+    DroneRacerSwiftCTBRGTRacingEnvCfg
+):
+    """Matched GT racing task with dense camera-direction shaping."""
+
+    rewards: SwiftCTBRGTPerceptionAwareV3RewardsCfg = (
+        SwiftCTBRGTPerceptionAwareV3RewardsCfg()
     )
 
 
