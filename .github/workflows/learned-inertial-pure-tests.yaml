@@ -45,6 +45,7 @@ jobs:
           python -m py_compile tasks/drone_racer/mdp/swift_ctbr_action.py
           python -m py_compile tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py
           python -m py_compile tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py
+          python -m py_compile tasks/drone_racer/swift_ctbr_racing_env.py
           python -m py_compile tasks/drone_racer/learned_inertial_racing_env.py
       - name: Run pure estimator tests
         env:
