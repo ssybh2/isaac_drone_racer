@@ -98,6 +98,8 @@ gym.register(
             f"{__name__}.drone_racer_learned_inertial_env_cfg:"
             "DroneRacerLearnedInertialRLCfg"
         ),
-        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_cfg.yaml",
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_learned_inertial_cfg.yaml"
+        ),
     },
 )
