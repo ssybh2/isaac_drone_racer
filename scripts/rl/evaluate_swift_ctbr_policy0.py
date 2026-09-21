@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
+import traceback
 import csv
 import json
 from pathlib import Path
@@ -23,6 +25,7 @@ parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--output-dir", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+faulthandler.enable()
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -77,13 +80,21 @@ def main() -> None:
     checkpoint = str(Path(args_cli.checkpoint).expanduser().resolve())
     print(f"[swift-eval] loading checkpoint: {checkpoint}", flush=True)
     runner.agent.load(checkpoint)
+    print("[swift-eval] checkpoint loaded", flush=True)
     runner.agent.set_running_mode("eval")
+    runner.agent.set_mode("eval")
+    print("[swift-eval] agent set to eval mode", flush=True)
 
     out_dir = args_cli.output_dir.expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict] = []
+    print("[swift-eval] resetting environment ...", flush=True)
     obs, _ = wrapped.reset()
+    print(
+        f"[swift-eval] reset complete; obs_shape={tuple(obs.shape)}",
+        flush=True,
+    )
     episode = 0
     ep_steps = 0
     ep_return = 0.0
@@ -254,5 +265,9 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+    except BaseException:
+        print("[swift-eval] fatal exception:", flush=True)
+        traceback.print_exc()
+        raise
     finally:
         simulation_app.close()
