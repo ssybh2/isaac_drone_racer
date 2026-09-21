@@ -362,3 +362,15 @@ def test_gtshadow_flyaway_uses_truth_gate():
     shadow_block = cfg[shadow_start:]
     assert "self.terminations.flyaway = DoneTerm(" in shadow_block
     assert "func=mdp.flyaway_truth_gate" in shadow_block
+
+
+def test_gtshadow_truth_progression_matches_gt_training_semantics():
+    commands = _text("tasks/drone_racer/mdp/commands.py")
+
+    estimated_start = commands.index("class EstimatedStateGateTargetingCommand")
+    estimated = commands[estimated_start:]
+
+    assert "def _legacy_gt_gate_crossing(" in estimated
+    assert "euler_xyz_from_quat" in estimated
+    assert "absolute_offset_w = torch.abs(current_pos_w - gate_pose_w[:, :3])" in estimated
+    assert "self._legacy_gt_gate_crossing(" in estimated

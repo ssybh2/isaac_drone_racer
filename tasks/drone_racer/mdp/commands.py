@@ -323,6 +323,43 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
         return position
 
     @staticmethod
+    def _legacy_gt_gate_crossing(
+        previous_pos_w: torch.Tensor,
+        current_pos_w: torch.Tensor,
+        gate_pose_w: torch.Tensor,
+        gate_size: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Mirror GateTargetingCommand's exact GT-training gate semantics.
+
+        GTShadow is a policy-isolation benchmark, so its truth mission must
+        advance exactly as the successful GT racing task did during training.
+        In particular, the legacy task uses a yaw-derived plane normal and an
+        axis-aligned world-frame opening test, even for rotated gates.
+        """
+        (_, _, yaw) = math_utils.euler_xyz_from_quat(gate_pose_w[:, 3:7])
+        normal = torch.stack([torch.cos(yaw), torch.sin(yaw)], dim=1)
+
+        previous_projected = (
+            (previous_pos_w[:, 0] - gate_pose_w[:, 0]) * normal[:, 0]
+            + (previous_pos_w[:, 1] - gate_pose_w[:, 1]) * normal[:, 1]
+        )
+        current_projected = (
+            (current_pos_w[:, 0] - gate_pose_w[:, 0]) * normal[:, 0]
+            + (current_pos_w[:, 1] - gate_pose_w[:, 1]) * normal[:, 1]
+        )
+        crossed_plane = (previous_projected < 0.0) & (current_projected > 0.0)
+
+        half_size = 0.5 * float(gate_size)
+        absolute_offset_w = torch.abs(current_pos_w - gate_pose_w[:, :3])
+        inside_legacy_box = torch.all(absolute_offset_w < half_size, dim=1)
+        outside_legacy_box = torch.any(absolute_offset_w > half_size, dim=1)
+
+        return (
+            crossed_plane & inside_legacy_box,
+            crossed_plane & outside_legacy_box,
+        )
+
+    @staticmethod
     def _gate_crossing(
         previous_pos_w: torch.Tensor,
         current_pos_w: torch.Tensor,
@@ -406,11 +443,13 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
             (gt_gate_positions, gt_gate_orientations), dim=1
         )
         current_gt_pos_w = self.robot.data.root_pos_w
-        self._gt_gate_passed, self._gt_gate_missed = self._gate_crossing(
-            self.prev_robot_pos_w,
-            current_gt_pos_w,
-            gt_active_gate_w,
-            self.gate_size,
+        self._gt_gate_passed, self._gt_gate_missed = (
+            self._legacy_gt_gate_crossing(
+                self.prev_robot_pos_w,
+                current_gt_pos_w,
+                gt_active_gate_w,
+                self.gate_size,
+            )
         )
 
         self._mission_gate_pass_count += self._mission_gate_passed.to(torch.int32)
