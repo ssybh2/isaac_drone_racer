@@ -278,6 +278,8 @@ def gt_next_gate_image_visibility(
     coverage_weight: float = 0.25,
     margin_weight: float = 0.20,
     usable_bonus_weight: float = 0.30,
+    output_bias: float = 0.0,
+    insufficient_visible_penalty: float = 0.0,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Reward keeping the active GT gate usable in the calibrated camera image.
@@ -431,7 +433,20 @@ def gt_next_gate_image_visibility(
         + weights[2] * margin_score
         + weights[3] * usable_bonus
     ) / weight_sum
-    return torch.clamp(score, min=0.0, max=1.0)
+
+    # Optional signed shaping used by perception-aware V2. A negative output
+    # bias turns the term into a penalty-only objective (perfect visibility
+    # approaches zero rather than accumulating positive reward by hovering).
+    # The extra hard penalty directly targets the production estimator
+    # contract: fewer than two visible corners cannot produce a reprojection
+    # update.
+    visible_count = visible.sum(dim=1)
+    score = score + float(output_bias)
+    if float(insufficient_visible_penalty) != 0.0:
+        score = score - float(insufficient_visible_penalty) * (
+            visible_count < 2
+        ).to(dtype)
+    return score
 
 def ang_vel_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize base angular velocity using L2 squared kernel."""
