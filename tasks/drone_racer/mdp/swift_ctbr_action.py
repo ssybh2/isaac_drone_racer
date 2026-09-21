@@ -46,6 +46,7 @@ class SwiftCTBRAction(ActionTerm):
 
         self._raw_actions = torch.zeros(self.num_envs, 4, device=self.device)
         self._ctbr_command = torch.zeros(self.num_envs, 4, device=self.device)
+        self._previous_ctbr_command = torch.zeros(self.num_envs, 4, device=self.device)
         self._processed_actions = torch.zeros(self.num_envs, 4, device=self.device)
         self._omega_ref = torch.zeros(self.num_envs, 4, device=self.device)
         self._omega_real = torch.zeros(self.num_envs, 4, device=self.device)
@@ -122,6 +123,11 @@ class SwiftCTBRAction(ActionTerm):
         return self._ctbr_command
 
     @property
+    def previous_ctbr_command(self) -> torch.Tensor:
+        """Previous physical CTBR command for Swift command-smoothness reward."""
+        return self._previous_ctbr_command
+
+    @property
     def has_debug_vis_implementation(self) -> bool:
         return False
 
@@ -132,6 +138,7 @@ class SwiftCTBRAction(ActionTerm):
             )
 
         self._raw_actions.copy_(actions)
+        self._previous_ctbr_command.copy_(self._ctbr_command)
         normalized = torch.clamp(actions, -1.0, 1.0)
 
         # Piecewise hover-centred thrust map:
@@ -200,6 +207,7 @@ class SwiftCTBRAction(ActionTerm):
 
         self._raw_actions[env_ids] = 0.0
         self._ctbr_command[env_ids] = 0.0
+        self._previous_ctbr_command[env_ids] = 0.0
         self._processed_actions[env_ids] = 0.0
         self._omega_ref[env_ids] = 0.0
         self._omega_real[env_ids] = 0.0
