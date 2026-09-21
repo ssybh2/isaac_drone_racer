@@ -171,7 +171,9 @@ def test_swift_policy0_train_script_audit():
     train = _text("scripts/rl/train.py")
 
     for token in (
-        'SWIFT_CTBR_POLICY0_TASK = "Isaac-Drone-Racer-Swift-CTBR-Train-v0"',
+        "SWIFT_CTBR_POLICY0_TASKS = {",
+        '"Isaac-Drone-Racer-Swift-CTBR-Train-v0"',
+        '"Isaac-Drone-Racer-Swift-CTBR-Train-PassState-v0"',
         "def _audit_swift_ctbr_policy0_cfg",
         'str(policy_cfg.get("output")) != "tanh(ACTIONS)"',
         "expected_layers = [128, 128]",
@@ -188,6 +190,7 @@ def test_swift_policy0_train_script_audit():
 def test_swift_pass_state_curriculum_and_evaluator():
     commands = _text("tasks/drone_racer/mdp/commands.py")
     cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
     evaluator = _text("scripts/rl/evaluate_swift_ctbr_policy0.py")
 
     for token in (
@@ -201,6 +204,8 @@ def test_swift_pass_state_curriculum_and_evaluator():
 
     assert "SwiftPassStateGateTargetingCommandCfg" in cfg
     assert "forward_speed_range_mps=(1.5, 3.0)" in cfg
+    assert "Isaac-Drone-Racer-Swift-CTBR-Train-PassState-v0" in registry
+    assert "skrl_swift_ctbr_passstate_cfg.yaml" in registry
 
     for token in (
         "SWIFT CTBR POLICY-0 EVALUATION SUMMARY",
