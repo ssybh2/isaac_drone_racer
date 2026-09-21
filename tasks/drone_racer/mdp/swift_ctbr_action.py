@@ -134,10 +134,17 @@ class SwiftCTBRAction(ActionTerm):
         self._raw_actions.copy_(actions)
         normalized = torch.clamp(actions, -1.0, 1.0)
 
-        thrust_span = self._max_collective_accel - float(self.cfg.gravity_mps2)
-        collective_accel = (
-            float(self.cfg.gravity_mps2)
-            + normalized[:, 0] * thrust_span
+        # Piecewise hover-centred thrust map:
+        #   -1 -> 0 thrust, 0 -> hover (1 g), +1 -> platform maximum.
+        # This keeps the physically important hover point at zero policy output
+        # without wasting the negative third of the normalized action range.
+        gravity = float(self.cfg.gravity_mps2)
+        thrust_action = normalized[:, 0]
+        collective_accel = torch.where(
+            thrust_action >= 0.0,
+            gravity
+            + thrust_action * (self._max_collective_accel - gravity),
+            gravity + thrust_action * gravity,
         ).clamp(0.0, self._max_collective_accel)
 
         desired_rate = normalized[:, 1:4] * self._body_rate_max
@@ -225,10 +232,10 @@ class SwiftCTBRActionCfg(ActionTermCfg):
 
     body_rate_max_radps: tuple[float, float, float] = (10.0, 10.0, 6.0)
 
-    rate_kp: tuple[float, float, float] = (0.025, 0.025, 0.012)
-    rate_ki: tuple[float, float, float] = (0.004, 0.004, 0.002)
-    rate_kd: tuple[float, float, float] = (0.00035, 0.00035, 0.00015)
+    rate_kp: tuple[float, float, float] = (0.025, 0.025, 0.030)
+    rate_ki: tuple[float, float, float] = (0.004, 0.004, 0.001)
+    rate_kd: tuple[float, float, float] = (0.00035, 0.00035, 0.00010)
     rate_integral_limit: tuple[float, float, float] = (2.0, 2.0, 1.5)
-    rate_moment_limit_nm: tuple[float, float, float] = (0.28, 0.28, 0.075)
+    rate_moment_limit_nm: tuple[float, float, float] = (0.28, 0.28, 0.14)
 
     integral_reset_accel_mps2: float = 0.5
