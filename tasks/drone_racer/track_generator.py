@@ -12,6 +12,26 @@ import torch
 from isaaclab.assets import RigidObjectCfg, RigidObjectCollectionCfg
 
 
+# Easy curriculum used by the deployment-faithful learned-inertial PPO task.
+#
+# The original expert track remains defined unchanged in DroneRacerSceneCfg.
+# This track is a near-regular heptagon (radius 8 m, centre (0, 8)) with gate 1
+# kept at the validated fixed-start location. Consecutive path headings change
+# by about 51.4 deg, avoiding the expert track's >100 deg hairpins and vertical
+# stacked-gate manoeuvre while the policy first learns perception-aware racing.
+# Gate yaw follows the inbound segment direction so each opening is naturally
+# aligned with the nominal flight path.
+EASY_7_GATE_TRACK_CONFIG = {
+    "1": {"pos": (0.0, 0.0, 1.0), "yaw": -torch.pi / 7.0},
+    "2": {"pos": (6.25465186, 3.01208159, 1.0), "yaw": torch.pi / 7.0},
+    "3": {"pos": (7.79942330, 9.78016747, 1.0), "yaw": 3.0 * torch.pi / 7.0},
+    "4": {"pos": (3.47106991, 15.20775094, 1.0), "yaw": 5.0 * torch.pi / 7.0},
+    "5": {"pos": (-3.47106991, 15.20775094, 1.0), "yaw": torch.pi},
+    "6": {"pos": (-7.79942330, 9.78016747, 1.0), "yaw": -5.0 * torch.pi / 7.0},
+    "7": {"pos": (-6.25465186, 3.01208159, 1.0), "yaw": -3.0 * torch.pi / 7.0},
+}
+
+
 def generate_track(track_config: dict | None) -> RigidObjectCollectionCfg:
     return RigidObjectCollectionCfg(
         rigid_objects={
