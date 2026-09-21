@@ -33,6 +33,36 @@ _STAGE2_GATE_CORNERS_G = tuple(
     tuple(float(v) for v in point)
     for point in load_stage2_gate_geometry().object_points_g.tolist()
 )
+_GT_CAMERA_TENSOR_CACHE: dict[tuple[str, torch.dtype], tuple[torch.Tensor, ...]] = {}
+
+
+def _gt_camera_reward_tensors(
+    device: torch.device,
+    dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Cache tiny calibrated tensors so 4096-env PPO does no CPU->GPU copy per step."""
+    key = (str(device), dtype)
+    cached = _GT_CAMERA_TENSOR_CACHE.get(key)
+    if cached is None:
+        cached = (
+            torch.as_tensor(
+                _STAGE2_GATE_CORNERS_G,
+                dtype=dtype,
+                device=device,
+            ),
+            torch.as_tensor(
+                CAMERA_OFFSET_POS_B,
+                dtype=dtype,
+                device=device,
+            ),
+            torch.as_tensor(
+                CAMERA_TO_BODY_ROTATION,
+                dtype=dtype,
+                device=device,
+            ),
+        )
+        _GT_CAMERA_TENSOR_CACHE[key] = cached
+    return cached
 
 
 def pos_error_l2(
@@ -307,12 +337,11 @@ def gt_next_gate_image_visibility(
     gate_quat_w = gate_quat_all[env_ids, gate_indices]
     gate_R_wg = math_utils.matrix_from_quat(gate_quat_w)
 
-    corners_g = torch.as_tensor(
-        _STAGE2_GATE_CORNERS_G,
-        dtype=dtype,
-        device=device,
+    corners_g_base, camera_offset_b, R_bc = _gt_camera_reward_tensors(
+        device,
+        dtype,
     )
-    corners_g = corners_g.unsqueeze(0).expand(num_envs, -1, -1)
+    corners_g = corners_g_base.unsqueeze(0).expand(num_envs, -1, -1)
     corners_w = gate_pos_w[:, None, :] + torch.einsum(
         "nij,nkj->nki",
         gate_R_wg,
@@ -328,16 +357,6 @@ def gt_next_gate_image_visibility(
         rel_w,
     )
 
-    camera_offset_b = torch.as_tensor(
-        CAMERA_OFFSET_POS_B,
-        dtype=dtype,
-        device=device,
-    )
-    R_bc = torch.as_tensor(
-        CAMERA_TO_BODY_ROTATION,
-        dtype=dtype,
-        device=device,
-    )
     # Row-vector form of p_c = R_cb * (p_b - t_bc): rel_b @ R_bc.
     corners_c = torch.matmul(
         corners_b - camera_offset_b.view(1, 1, 3),
