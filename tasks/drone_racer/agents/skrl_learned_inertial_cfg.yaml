@@ -15,18 +15,19 @@ models:
     clip_mean_actions: False
     clip_log_std: True
     min_log_std: -20.0
-    # log(0.08): exploration is never allowed to grow above 0.08 std.
-    max_log_std: -2.5257286443082556
-    initial_log_std: -2.5257286443082556
+    # log(0.05): keep stochastic exploration small enough that clipping is rare
+    # after the migrated actor has been brought back into the tanh linear region.
+    max_log_std: -2.995732273553991
+    initial_log_std: -2.995732273553991
     network:
       - name: net
         input: STATES
         layers: [256, 256, 256]
         activations: elu
-    # Preserve the exact parameterized output layer used by the legacy
-    # checkpoint, but bound its mean without adding any trainable parameters.
-    # This keeps old checkpoints state-dict compatible.
-    output: 0.8 * tanh(ACTIONS)
+    # Keep the legacy trainable output layer shape for checkpoint compatibility.
+    # A one-time transfer calibration rescales that layer before training so
+    # tanh starts in a useful-gradient region instead of saturating immediately.
+    output: tanh(ACTIONS)
 
   value:
     class: DeterministicMixin
@@ -54,7 +55,8 @@ agent:
   learning_rate: 1.0e-05
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
-    kl_threshold: 0.01
+    kl_threshold: 0.02
+    min_lr: 5.0e-06
     max_lr: 2.0e-05
   state_preprocessor: RunningStandardScaler
   state_preprocessor_kwargs: null
@@ -73,8 +75,8 @@ agent:
   rewards_shaper_scale: 0.6
   time_limit_bootstrap: False
   experiment:
-    directory: "learned_inertial_rl_phase2_bounded"
-    experiment_name: "easy_swift_bounded"
+    directory: "learned_inertial_rl_phase2_transfer"
+    experiment_name: "easy_swift_recalibrated"
     write_interval: auto
     checkpoint_interval: auto
 
