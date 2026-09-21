@@ -40,10 +40,21 @@ import tasks  # noqa: F401,E402
 
 
 def _termination_cause(raw_env) -> str:
+    """Return the termination cause using the IsaacLab public term API.
+
+    IsaacLab 2.1.0 stores current term buffers in a dict and exposes them via
+    TerminationManager.get_term(name). Newer IsaacLab revisions additionally
+    keep _last_episode_dones, but relying on that private attribute breaks
+    2.1.0. ManagerBasedRLEnv.step computes termination terms before auto-reset,
+    and reset() does not clear those term buffers, so get_term() remains valid
+    for identifying the just-finished episode.
+    """
     manager = raw_env.termination_manager
-    names = list(manager.active_terms)
-    row = manager._last_episode_dones[0].detach().cpu().tolist()
-    fired = {name for name, value in zip(names, row) if bool(value)}
+    fired = {
+        name
+        for name in manager.active_terms
+        if bool(manager.get_term(name).reshape(-1)[0].item())
+    }
 
     if "collision" in fired:
         return "collision"
