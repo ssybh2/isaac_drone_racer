@@ -164,3 +164,21 @@ def test_swift_policy0_training_contract():
     assert "source_checkpoint" not in agent.lower()
     assert "gym.spaces.Box" in env
     assert "low=-1.0" in env and "high=1.0" in env
+
+
+
+def test_swift_policy0_train_script_audit():
+    train = _text("scripts/rl/train.py")
+
+    for token in (
+        'SWIFT_CTBR_POLICY0_TASK = "Isaac-Drone-Racer-Swift-CTBR-Train-v0"',
+        "def _audit_swift_ctbr_policy0_cfg",
+        'str(policy_cfg.get("output")) != "tanh(ACTIONS)"',
+        "expected_layers = [128, 128]",
+        'float(agent["learning_rate"]) - 3.0e-4',
+        'float(agent["discount_factor"]) - 0.99',
+        'float(agent["ratio_clip"]) - 0.2',
+        "_audit_swift_ctbr_policy0_cfg(env, agent_cfg)",
+        '"Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0"',
+    ):
+        assert token in train
