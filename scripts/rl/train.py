@@ -61,8 +61,8 @@ parser.add_argument(
     default=False,
     help=(
         "One-time migration for legacy hard-clipped learned-inertial checkpoints: "
-        "rescale the actor output layer into the tanh trainable region, cap stale "
-        "RunningStandardScaler pseudo-counts, and clear stale optimizer moments."
+        "distill the old environment-executed motor actions into a bounded tanh "
+        "actor while preserving hidden layers and normalization by default."
     ),
 )
 parser.add_argument(
