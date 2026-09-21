@@ -148,6 +148,33 @@ class SwiftCTBRGTPerceptionAwareRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
 
 
 @configclass
+class SwiftCTBRGTPerceptionAwareV2RewardsCfg(SwiftCTBRGTRacingRewardsCfg):
+    """Penalty-only camera observability shaping for high-speed GT racing.
+
+    V1 used a small positive visibility reward and the policy mainly learned to
+    race faster. V2 makes camera loss explicitly costly while keeping perfect
+    visibility near zero, so there is no incentive to hover just to accumulate
+    perception reward.
+    """
+
+    camera_observability = RewTerm(
+        func=mdp.gt_next_gate_image_visibility,
+        weight=5.0,
+        params={
+            "command_name": "target",
+            "margin_px": 24.0,
+            "center_sigma": 1.0,
+            "center_weight": 0.20,
+            "coverage_weight": 0.25,
+            "margin_weight": 0.15,
+            "usable_bonus_weight": 0.40,
+            "output_bias": -1.0,
+            "insufficient_visible_penalty": 0.50,
+        },
+    )
+
+
+@configclass
 class SwiftCTBRGTShadowRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
     """GT-racing rewards evaluated against the truth-only shadow mission."""
 
@@ -335,6 +362,17 @@ class DroneRacerSwiftCTBRGTPerceptionAwareEnvCfg(
 
     rewards: SwiftCTBRGTPerceptionAwareRewardsCfg = (
         SwiftCTBRGTPerceptionAwareRewardsCfg()
+    )
+
+
+@configclass
+class DroneRacerSwiftCTBRGTPerceptionAwareV2EnvCfg(
+    DroneRacerSwiftCTBRGTRacingEnvCfg
+):
+    """Matched 37-gate GT task with strong penalty-only camera observability."""
+
+    rewards: SwiftCTBRGTPerceptionAwareV2RewardsCfg = (
+        SwiftCTBRGTPerceptionAwareV2RewardsCfg()
     )
 
 
