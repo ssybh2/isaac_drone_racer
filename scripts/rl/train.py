@@ -56,6 +56,34 @@ parser.add_argument(
 )
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument(
+    "--recalibrate_legacy_actor",
+    action="store_true",
+    default=False,
+    help=(
+        "One-time migration for legacy hard-clipped learned-inertial checkpoints: "
+        "rescale the actor output layer into the tanh trainable region, cap stale "
+        "RunningStandardScaler pseudo-counts, and clear stale optimizer moments."
+    ),
+)
+parser.add_argument(
+    "--legacy_actor_calibration_samples",
+    type=int,
+    default=4096,
+    help="Synthetic standardized samples used for one-time legacy actor calibration.",
+)
+parser.add_argument(
+    "--legacy_actor_target_pretanh_abs",
+    type=float,
+    default=1.25,
+    help="Target representative absolute pre-tanh actor output after migration.",
+)
+parser.add_argument(
+    "--legacy_preprocessor_count_cap",
+    type=float,
+    default=4096.0,
+    help="Maximum retained effective sample count for loaded running scalers during migration.",
+)
+parser.add_argument(
     "--ml_framework",
     type=str,
     default="torch",
@@ -101,6 +129,7 @@ from datetime import datetime
 
 import gymnasium as gym
 import skrl
+import torch
 from packaging import version
 
 # check for minimum supported skrl version
@@ -132,7 +161,12 @@ from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import tasks  # noqa: F401
-from utils.training_overrides import apply_post_load_training_overrides
+from utils.training_overrides import (
+    apply_post_load_training_overrides,
+    cap_running_scaler_count,
+    recalibrate_legacy_actor_output,
+    reset_optimizer_state,
+)
 
 LEARNED_INERTIAL_RL_TASK = "Isaac-Drone-Racer-Learned-Inertial-RL-v0"
 
@@ -152,7 +186,7 @@ def _audit_learned_inertial_bounded_cfg(env, agent_cfg: dict) -> None:
         )
 
     policy_cfg = agent_cfg["models"]["policy"]
-    expected_output = "0.8 * tanh(ACTIONS)"
+    expected_output = "tanh(ACTIONS)"
     if str(policy_cfg.get("output")) != expected_output:
         raise RuntimeError(
             "learned-inertial PPO mean must use the bounded contract "
@@ -162,7 +196,7 @@ def _audit_learned_inertial_bounded_cfg(env, agent_cfg: dict) -> None:
         raise RuntimeError("learned-inertial PPO must clip sampled actions before storage/execution")
 
     max_std = math.exp(float(policy_cfg["max_log_std"]))
-    if max_std > 0.0800001:
+    if max_std > 0.0500001:
         raise RuntimeError(f"configured learned-inertial action std cap is too large: {max_std}")
 
     print("[INFO] Learned-inertial bounded PPO contract:")
@@ -187,6 +221,133 @@ def _audit_loaded_policy_std(agent, max_std: float) -> None:
             f"loaded policy action std {std_max:.6f} exceeds cap {max_std:.6f}"
         )
     print(f"[INFO] Loaded policy action std max: {std_max:.6f}")
+
+
+def _sample_legacy_actor_raw_means(
+    agent,
+    *,
+    samples: int,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Probe the loaded actor on standardized synthetic inputs before migration."""
+    if samples < 32:
+        raise ValueError("--legacy_actor_calibration_samples must be at least 32")
+
+    policy = agent.policy
+    trunk = getattr(policy, "net_container", None)
+    layer = getattr(policy, "policy_layer", None)
+    if trunk is None or not isinstance(layer, torch.nn.Linear):
+        raise RuntimeError(
+            "legacy actor recalibration expects skrl shared net_container + policy_layer"
+        )
+
+    first_linear = next(
+        (module for module in trunk.modules() if isinstance(module, torch.nn.Linear)),
+        None,
+    )
+    if first_linear is None:
+        raise RuntimeError("could not infer actor standardized input dimension")
+
+    generator = torch.Generator(device=layer.weight.device)
+    generator.manual_seed(int(seed))
+    standardized = torch.randn(
+        int(samples),
+        int(first_linear.in_features),
+        generator=generator,
+        device=layer.weight.device,
+        dtype=layer.weight.dtype,
+    ).clamp_(-3.0, 3.0)
+    zero = torch.zeros(
+        1,
+        int(first_linear.in_features),
+        device=layer.weight.device,
+        dtype=layer.weight.dtype,
+    )
+
+    with torch.inference_mode():
+        raw = layer(trunk(standardized))
+        zero_raw = layer(trunk(zero))
+    return raw.detach(), zero_raw.detach()
+
+
+def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
+    """Perform the one-time old-hard-clamp to bounded-tanh transfer."""
+    raw_means, zero_raw = _sample_legacy_actor_raw_means(
+        agent,
+        samples=int(args_cli.legacy_actor_calibration_samples),
+        seed=int(args_cli.seed if args_cli.seed is not None else 1) + 1701,
+    )
+
+    metadata = recalibrate_legacy_actor_output(
+        agent.policy,
+        raw_means,
+        target_pretanh_abs=float(args_cli.legacy_actor_target_pretanh_abs),
+        reference_quantile=0.75,
+    )
+
+    row_scale = torch.tensor(
+        metadata["actor_output_row_scale"],
+        device=zero_raw.device,
+        dtype=zero_raw.dtype,
+    ).view(1, -1)
+    zero_raw_after = zero_raw * row_scale
+    metadata["actor_zero_input_raw_before"] = zero_raw.cpu().reshape(-1).tolist()
+    metadata["actor_zero_input_raw_after"] = zero_raw_after.cpu().reshape(-1).tolist()
+    metadata["actor_zero_input_mean_after"] = (
+        torch.tanh(zero_raw_after).cpu().reshape(-1).tolist()
+    )
+
+    obs_scaler = cap_running_scaler_count(
+        getattr(agent, "_observation_preprocessor", None),
+        float(args_cli.legacy_preprocessor_count_cap),
+    )
+    value_scaler = cap_running_scaler_count(
+        getattr(agent, "_value_preprocessor", None),
+        float(args_cli.legacy_preprocessor_count_cap),
+    )
+    for key, value in obs_scaler.items():
+        metadata[f"observation_{key}"] = value
+    for key, value in value_scaler.items():
+        metadata[f"value_{key}"] = value
+
+    metadata.update(reset_optimizer_state(agent.optimizer))
+
+    print("[INFO] One-time legacy actor transfer calibration:")
+    print(
+        "  raw RMS                   : "
+        f"{metadata['actor_raw_rms_before']:.4f} -> "
+        f"{metadata['actor_raw_rms_after']:.4f}"
+    )
+    print(
+        "  dead tanh derivative frac : "
+        f"{metadata['actor_tanh_dead_fraction_before']:.4f} -> "
+        f"{metadata['actor_tanh_dead_fraction_after']:.4f}"
+    )
+    print(
+        "  mean tanh derivative      : "
+        f"{metadata['actor_tanh_derivative_mean_after']:.4f}"
+    )
+    print(f"  output row scales          : {metadata['actor_output_row_scale']}")
+    print(
+        "  zero-input raw before      : "
+        f"{metadata['actor_zero_input_raw_before']}"
+    )
+    print(
+        "  zero-input mean after      : "
+        f"{metadata['actor_zero_input_mean_after']}"
+    )
+    if "observation_scaler_count_before" in metadata:
+        print(
+            "  observation scaler count   : "
+            f"{metadata['observation_scaler_count_before']:.1f} -> "
+            f"{metadata['observation_scaler_count_after']:.1f}"
+        )
+    print(
+        "  optimizer states reset     : "
+        f"{metadata['optimizer_state_entries_before_reset']} -> "
+        f"{metadata['optimizer_state_entries_after_reset']}"
+    )
+    return metadata
 
 
 # config shortcuts
@@ -281,8 +442,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if (
         args_cli.post_load_learning_rate is not None
         or args_cli.post_load_max_action_std is not None
+        or args_cli.recalibrate_legacy_actor
     ) and resume_path is None:
-        raise ValueError("post-load training overrides require --checkpoint")
+        raise ValueError(
+            "post-load overrides / legacy actor recalibration require --checkpoint"
+        )
+    if args_cli.recalibrate_legacy_actor and args_cli.task != LEARNED_INERTIAL_RL_TASK:
+        raise ValueError(
+            "--recalibrate_legacy_actor is only valid for the learned-inertial RL task"
+        )
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -319,6 +487,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # parameters, so legacy checkpoints remain state-dict compatible.
         runner.agent.load(resume_path)
 
+        migration_metadata = {}
+        if args_cli.recalibrate_legacy_actor:
+            migration_metadata = _migrate_legacy_learned_inertial_checkpoint(
+                runner.agent
+            )
+
         continuation_lr = args_cli.post_load_learning_rate
         continuation_std = args_cli.post_load_max_action_std
         if args_cli.task == LEARNED_INERTIAL_RL_TASK:
@@ -336,9 +510,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         )
         if args_cli.task == LEARNED_INERTIAL_RL_TASK:
             _audit_loaded_policy_std(runner.agent, max_std=continuation_std)
-        if continuation_metadata:
+        if continuation_metadata or migration_metadata:
             continuation_metadata = {
                 "source_checkpoint": resume_path,
+                "legacy_actor_recalibrated": bool(args_cli.recalibrate_legacy_actor),
+                **migration_metadata,
                 **continuation_metadata,
             }
             dump_yaml(
