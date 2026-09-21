@@ -336,3 +336,11 @@ def test_gt_control_estimator_shadow_contract():
         "asset.data.root_pos_w",
     ):
         assert token in obs
+
+
+
+def test_gtshadow_config_is_defined_after_base():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    base = cfg.index("class DroneRacerLearnedInertialSwiftCTBRRLCfg")
+    shadow = cfg.index("class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg")
+    assert base < shadow
