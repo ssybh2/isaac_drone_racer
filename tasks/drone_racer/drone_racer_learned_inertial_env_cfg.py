@@ -9,7 +9,11 @@ from isaaclab.utils import configclass
 
 from . import mdp
 from .drone_racer_env_cfg import ActionsCfg, CommandsCfg
-from .drone_racer_swift_perception_env_cfg import DroneRacerSwiftPerceptionEnvCfg
+from .drone_racer_swift_perception_env_cfg import (
+    DroneRacerSwiftPerceptionEnvCfg,
+    SwiftPerceptionRewardsCfg,
+)
+from .track_generator import EASY_7_GATE_TRACK_CONFIG, generate_track
 
 
 @configclass
@@ -257,8 +261,19 @@ class DroneRacerLearnedInertialRLCfg(DroneRacerLearnedInertialEnvCfg):
     overrides.
     """
 
+    # Make the Swift-2023 perception-aware reward explicit for the PPO task.
+    # The functional form is exp(lambda_3 * delta_cam**4), where delta_cam is
+    # the angle between the calibrated camera optical axis and the next gate.
+    rewards: SwiftPerceptionRewardsCfg = SwiftPerceptionRewardsCfg()
+
     def __post_init__(self) -> None:
         super().__post_init__()
+
+        # Phase-2 curriculum: train the learned-inertial PPO policy on the
+        # easier seven-gate loop. The original expert track remains unchanged
+        # in DroneRacerSceneCfg and is therefore still available to the other
+        # tasks/evaluation profiles.
+        self.scene.track = generate_track(track_config=EASY_7_GATE_TRACK_CONFIG)
 
         # Validated learned inertial model.
         self.learned_motion_checkpoint = (
