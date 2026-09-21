@@ -8,3 +8,5 @@
 
 from .allocation import Allocation  # noqa: F401
 from .motor import Motor  # noqa: F401
+
+from .body_rate_controller import BodyRatePIDController  # noqa: F401
