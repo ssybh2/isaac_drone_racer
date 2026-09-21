@@ -72,16 +72,31 @@ parser.add_argument(
     help="Synthetic standardized samples used for one-time legacy actor calibration.",
 )
 parser.add_argument(
-    "--legacy_actor_target_pretanh_abs",
+    "--legacy_behavior_action_limit",
     type=float,
-    default=1.25,
-    help="Target representative absolute pre-tanh actor output after migration.",
+    default=0.95,
+    help=(
+        "Maximum absolute bounded action used when distilling the old hard-clipped "
+        "policy behavior into the tanh actor."
+    ),
 )
 parser.add_argument(
     "--legacy_preprocessor_count_cap",
     type=float,
-    default=4096.0,
-    help="Maximum retained effective sample count for loaded running scalers during migration.",
+    default=None,
+    help=(
+        "Optional RunningStandardScaler pseudo-count cap during migration. "
+        "Omit by default to preserve the source policy observation coordinates."
+    ),
+)
+parser.add_argument(
+    "--legacy_transfer_only_path",
+    type=str,
+    default=None,
+    help=(
+        "If set, save the migrated checkpoint to this path and exit before PPO training. "
+        "Use this to evaluate transfer quality before committing to a long run."
+    ),
 )
 parser.add_argument(
     "--ml_framework",
@@ -164,8 +179,8 @@ import tasks  # noqa: F401
 from utils.training_overrides import (
     apply_post_load_training_overrides,
     cap_running_scaler_count,
-    recalibrate_legacy_actor_output,
-    reset_optimizer_state,
+    distill_legacy_clamped_actor_output,
+    reset_optimizer_parameter_state,
 )
 
 LEARNED_INERTIAL_RL_TASK = "Isaac-Drone-Racer-Learned-Inertial-RL-v0"
@@ -223,13 +238,13 @@ def _audit_loaded_policy_std(agent, max_std: float) -> None:
     print(f"[INFO] Loaded policy action std max: {std_max:.6f}")
 
 
-def _sample_legacy_actor_raw_means(
+def _sample_legacy_actor_features(
     agent,
     *,
     samples: int,
     seed: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Probe the loaded actor on standardized synthetic inputs before migration."""
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Probe the loaded legacy actor in its standardized observation coordinates."""
     if samples < 32:
         raise ValueError("--legacy_actor_calibration_samples must be at least 32")
 
@@ -265,91 +280,126 @@ def _sample_legacy_actor_raw_means(
     )
 
     with torch.inference_mode():
-        raw = layer(trunk(standardized))
-        zero_raw = layer(trunk(zero))
-    return raw.detach(), zero_raw.detach()
+        hidden = trunk(standardized)
+        raw = layer(hidden)
+        zero_hidden = trunk(zero)
+        zero_raw = layer(zero_hidden)
+    return (
+        hidden.detach(),
+        raw.detach(),
+        zero_hidden.detach(),
+        zero_raw.detach(),
+    )
 
 
 def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
-    """Perform the one-time old-hard-clamp to bounded-tanh transfer."""
-    raw_means, zero_raw = _sample_legacy_actor_raw_means(
+    """Distill old environment-clipped behavior into a trainable tanh actor."""
+    hidden, raw_means, zero_hidden, zero_raw = _sample_legacy_actor_features(
         agent,
         samples=int(args_cli.legacy_actor_calibration_samples),
         seed=int(args_cli.seed if args_cli.seed is not None else 1) + 1701,
     )
 
-    metadata = recalibrate_legacy_actor_output(
+    metadata = distill_legacy_clamped_actor_output(
         agent.policy,
+        hidden,
         raw_means,
+        anchor_hidden=zero_hidden,
         anchor_raw_mean=zero_raw,
-        target_pretanh_abs=float(args_cli.legacy_actor_target_pretanh_abs),
-        reference_quantile=0.75,
+        action_limit=float(args_cli.legacy_behavior_action_limit),
+        ridge=1.0e-4,
+        anchor_repeats=64,
     )
 
-    row_scale = torch.tensor(
-        metadata["actor_output_row_scale"],
-        device=zero_raw.device,
-        dtype=zero_raw.dtype,
-    ).view(1, -1)
-    zero_raw_after = zero_raw * row_scale
-    metadata["actor_zero_input_raw_before"] = zero_raw.cpu().reshape(-1).tolist()
-    metadata["actor_zero_input_raw_after"] = zero_raw_after.cpu().reshape(-1).tolist()
-    metadata["actor_zero_input_mean_after"] = (
-        torch.tanh(zero_raw_after).cpu().reshape(-1).tolist()
+    # Preserve source-policy normalization by default. The source checkpoint
+    # already ran on the Easy curriculum, so changing scaler statistics during
+    # transfer would move the actor input coordinates at the same time as the
+    # output parameterization. A cap remains available as an explicit ablation.
+    if args_cli.legacy_preprocessor_count_cap is not None:
+        if args_cli.legacy_preprocessor_count_cap <= 0.0:
+            raise ValueError("--legacy_preprocessor_count_cap must be positive")
+
+        seen = set()
+        for label, attr in (
+            ("observation", "_observation_preprocessor"),
+            ("state", "_state_preprocessor"),
+            ("value", "_value_preprocessor"),
+        ):
+            preprocessor = getattr(agent, attr, None)
+            if preprocessor is None or id(preprocessor) in seen:
+                continue
+            seen.add(id(preprocessor))
+            scaler_metadata = cap_running_scaler_count(
+                preprocessor,
+                float(args_cli.legacy_preprocessor_count_cap),
+            )
+            for key, value in scaler_metadata.items():
+                metadata[f"{label}_{key}"] = value
+
+    actor_layer = getattr(agent.policy, "policy_layer", None)
+    if not isinstance(actor_layer, torch.nn.Linear):
+        raise RuntimeError("expected skrl policy_layer after behavior distillation")
+
+    reset_parameters = [actor_layer.weight, actor_layer.bias]
+    log_std = getattr(agent.policy, "log_std_parameter", None)
+    if isinstance(log_std, torch.nn.Parameter):
+        reset_parameters.append(log_std)
+
+    metadata.update(
+        reset_optimizer_parameter_state(agent.optimizer, reset_parameters)
     )
 
-    obs_scaler = cap_running_scaler_count(
-        getattr(agent, "_observation_preprocessor", None),
-        float(args_cli.legacy_preprocessor_count_cap),
+    print("[INFO] One-time behavior-preserving legacy actor transfer:")
+    print(
+        "  old executed saturation    : "
+        f"{metadata['legacy_executed_saturation_fraction']:.4f}"
     )
-    value_scaler = cap_running_scaler_count(
-        getattr(agent, "_value_preprocessor", None),
-        float(args_cli.legacy_preprocessor_count_cap),
+    print(
+        "  action behavior MAE/RMSE   : "
+        f"{metadata['distilled_behavior_mae']:.4f} / "
+        f"{metadata['distilled_behavior_rmse']:.4f}"
     )
-    for key, value in obs_scaler.items():
-        metadata[f"observation_{key}"] = value
-    for key, value in value_scaler.items():
-        metadata[f"value_{key}"] = value
+    print(
+        "  action sign agreement      : "
+        f"{metadata['distilled_sign_agreement']:.4f}"
+    )
+    print(
+        "  tanh dead derivative frac  : "
+        f"{metadata['distilled_tanh_dead_fraction']:.4f}"
+    )
+    print(
+        "  mean tanh derivative       : "
+        f"{metadata['distilled_tanh_derivative_mean']:.4f}"
+    )
+    print(
+        "  legacy zero-input executed : "
+        f"{metadata.get('legacy_zero_input_executed_action')}"
+    )
+    print(
+        "  distilled zero-input action: "
+        f"{metadata.get('distilled_zero_input_action')}"
+    )
+    print(
+        "  zero-input behavior MAE    : "
+        f"{metadata.get('distilled_zero_input_mae', float('nan')):.4f}"
+    )
+    print(
+        "  optimizer states cleared   : "
+        f"{metadata['optimizer_parameter_states_cleared']}"
+    )
 
-    metadata.update(reset_optimizer_state(agent.optimizer))
-
-    print("[INFO] One-time legacy actor transfer calibration:")
-    print(
-        "  raw RMS                   : "
-        f"{metadata['actor_raw_rms_before']:.4f} -> "
-        f"{metadata['actor_raw_rms_after']:.4f}"
-    )
-    print(
-        "  dead tanh derivative frac : "
-        f"{metadata['actor_tanh_dead_fraction_before']:.4f} -> "
-        f"{metadata['actor_tanh_dead_fraction_after']:.4f}"
-    )
-    print(
-        "  mean tanh derivative      : "
-        f"{metadata['actor_tanh_derivative_mean_after']:.4f}"
-    )
-    print(f"  output row scales          : {metadata['actor_output_row_scale']}")
-    print(
-        "  zero-input raw before      : "
-        f"{metadata['actor_zero_input_raw_before']}"
-    )
-    print(
-        "  zero-input mean after      : "
-        f"{metadata['actor_zero_input_mean_after']}"
-    )
-    if "observation_scaler_count_before" in metadata:
-        print(
-            "  observation scaler count   : "
-            f"{metadata['observation_scaler_count_before']:.1f} -> "
-            f"{metadata['observation_scaler_count_after']:.1f}"
+    if metadata["distilled_behavior_mae"] > 0.20:
+        raise RuntimeError(
+            "behavior-preserving actor transfer is too inaccurate: "
+            f"MAE={metadata['distilled_behavior_mae']:.4f}"
         )
-    print(
-        "  optimizer states reset     : "
-        f"{metadata['optimizer_state_entries_before_reset']} -> "
-        f"{metadata['optimizer_state_entries_after_reset']}"
-    )
-    return metadata
+    if metadata["distilled_sign_agreement"] < 0.95:
+        raise RuntimeError(
+            "behavior-preserving actor transfer changed too many action signs: "
+            f"agreement={metadata['distilled_sign_agreement']:.4f}"
+        )
 
+    return metadata
 
 # config shortcuts
 algorithm = args_cli.algorithm.lower()
@@ -444,9 +494,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         args_cli.post_load_learning_rate is not None
         or args_cli.post_load_max_action_std is not None
         or args_cli.recalibrate_legacy_actor
+        or args_cli.legacy_transfer_only_path is not None
     ) and resume_path is None:
         raise ValueError(
             "post-load overrides / legacy actor recalibration require --checkpoint"
+        )
+    if args_cli.legacy_transfer_only_path is not None and not args_cli.recalibrate_legacy_actor:
+        raise ValueError(
+            "--legacy_transfer_only_path requires --recalibrate_legacy_actor"
         )
     if args_cli.recalibrate_legacy_actor and args_cli.task != LEARNED_INERTIAL_RL_TASK:
         raise ValueError(
@@ -523,6 +578,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 continuation_metadata,
             )
             print_dict(continuation_metadata, nesting=4)
+
+    if args_cli.legacy_transfer_only_path is not None:
+        output_path = os.path.abspath(
+            os.path.expanduser(args_cli.legacy_transfer_only_path)
+        )
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        runner.agent.save(output_path)
+        print(f"[INFO] Saved transfer-only checkpoint: {output_path}")
+        env.close()
+        return
 
     # run training
     runner.run()
