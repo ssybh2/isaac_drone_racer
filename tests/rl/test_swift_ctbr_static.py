@@ -222,3 +222,57 @@ def test_swift_policy0_evaluator_uses_isaaclab_21_public_termination_api():
 
     assert "manager.get_term(name)" in evaluator
     assert "_last_episode_dones" not in evaluator
+
+
+
+def test_upstream_inspired_gt_racing_contract():
+    registry = _text("tasks/drone_racer/__init__.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    agent = _text("tasks/drone_racer/agents/skrl_swift_ctbr_gt_racing_cfg.yaml")
+    train = _text("scripts/rl/train.py")
+
+    for token in (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0",
+        "DroneRacerSwiftCTBRGTRacingEnvCfg",
+        "skrl_swift_ctbr_gt_racing_cfg.yaml",
+    ):
+        assert token in registry
+
+    for token in (
+        "class SwiftCTBRGTRacingRewardsCfg",
+        "func=mdp.gate_passed",
+        "weight=400.0",
+        "func=mdp.progress",
+        "weight=20.0",
+        "func=mdp.lookat_next_gate",
+        "weight=0.1",
+        "self.scene.num_envs = 4096",
+        "self.episode_length_s = 20.0",
+    ):
+        assert token in cfg
+
+    for token in (
+        "separate: False",
+        "layers: [256, 256, 256]",
+        "activations: elu",
+        "rollouts: 24",
+        "learning_epochs: 5",
+        "mini_batches: 4",
+        "learning_rate: 1.0e-04",
+        "entropy_loss_scale: 0.005",
+        "rewards_shaper_scale: 0.6",
+        "timesteps: 50000",
+        "output: tanh(ACTIONS)",
+    ):
+        assert token in agent
+
+    for token in (
+        'SWIFT_CTBR_GT_RACING_TASK = "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0"',
+        "def _audit_swift_ctbr_gt_racing_cfg",
+        "expected_layers = [256, 256, 256]",
+        '"rollouts": 24',
+        '"learning_epochs": 5',
+        '"mini_batches": 4',
+        "_audit_swift_ctbr_gt_racing_cfg(env, agent_cfg)",
+    ):
+        assert token in train
