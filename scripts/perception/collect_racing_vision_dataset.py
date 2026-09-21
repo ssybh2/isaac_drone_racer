@@ -240,6 +240,12 @@ def main() -> None:
     cfg.scene.tiled_camera.width = int(args_cli.width)
     cfg.scene.tiled_camera.height = int(args_cli.height)
     cfg.scene.collision_sensor.debug_vis = False
+    # PhysX GPU contact forces can stay latched after a real collision when
+    # ContactSensor uses the default history_length=0 and data is only read at
+    # policy rate (this task has decimation=4). A non-zero history forces the
+    # contact sensor to refresh every physics step, preventing one collision
+    # from poisoning all later dataset episodes with a stale force sample.
+    cfg.scene.collision_sensor.history_length = 1
     cfg.commands.target.debug_vis = False
 
     env = gym.make(args_cli.task, cfg=cfg)
