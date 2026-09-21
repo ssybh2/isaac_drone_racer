@@ -202,6 +202,7 @@ SWIFT_CTBR_POLICY0_TASKS = {
     "Isaac-Drone-Racer-Swift-CTBR-Train-v0",
     "Isaac-Drone-Racer-Swift-CTBR-Train-PassState-v0",
 }
+SWIFT_CTBR_GT_RACING_TASK = "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0"
 LEARNED_INERTIAL_SWIFT_CTBR_TASK = (
     "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0"
 )
@@ -304,6 +305,87 @@ def _audit_swift_ctbr_policy0_cfg(env, agent_cfg: dict) -> None:
     print(f"  rollouts                   : {agent['rollouts']}")
     print(f"  learning_rate              : {agent['learning_rate']}")
     print(f"  gamma / PPO clip           : {agent['discount_factor']} / {agent['ratio_clip']}")
+
+
+def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
+    """Fail closed on the upstream-inspired GT racing training contract."""
+    if args_cli.task != SWIFT_CTBR_GT_RACING_TASK:
+        return
+
+    action_space = env.unwrapped.single_action_space
+    low = float(action_space.low.min())
+    high = float(action_space.high.max())
+    if abs(low + 1.0) > 1.0e-6 or abs(high - 1.0) > 1.0e-6:
+        raise RuntimeError(
+            "GT racing requires bounded [-1, 1]^4 CTBR actions; "
+            f"got [{low}, {high}]"
+        )
+    if int(action_space.shape[0]) != 4:
+        raise RuntimeError(
+            f"GT racing requires four CTBR actions, got {action_space.shape}"
+        )
+
+    if int(env.unwrapped.num_envs) != 4096:
+        raise RuntimeError(
+            "GT racing baseline is intentionally fixed at 4096 environments; "
+            f"got {env.unwrapped.num_envs}"
+        )
+
+    models = agent_cfg["models"]
+    policy_cfg = models["policy"]
+    value_cfg = models["value"]
+
+    if bool(models.get("separate", True)):
+        raise RuntimeError(
+            "GT racing baseline must use the upstream-inspired shared model "
+            "(models.separate=False)"
+        )
+    if str(policy_cfg.get("output")) != "tanh(ACTIONS)":
+        raise RuntimeError("GT racing CTBR actor mean must be tanh(ACTIONS)")
+    if not bool(policy_cfg.get("clip_actions", False)):
+        raise RuntimeError("GT racing must clip sampled CTBR actions")
+
+    expected_layers = [256, 256, 256]
+    for name, cfg in (("policy", policy_cfg), ("value", value_cfg)):
+        network = cfg.get("network", [])
+        if len(network) != 1 or list(network[0].get("layers", [])) != expected_layers:
+            raise RuntimeError(
+                f"GT racing {name} must use 256x256x256 hidden layers"
+            )
+        if str(network[0].get("activations")) != "elu":
+            raise RuntimeError(f"GT racing {name} must use ELU activations")
+
+    agent = agent_cfg["agent"]
+    expected = {
+        "rollouts": 24,
+        "learning_epochs": 5,
+        "mini_batches": 4,
+    }
+    for key, value in expected.items():
+        if int(agent[key]) != value:
+            raise RuntimeError(
+                f"GT racing requires {key}={value}, got {agent[key]}"
+            )
+
+    if abs(float(agent["learning_rate"]) - 1.0e-4) > 1.0e-12:
+        raise RuntimeError("GT racing learning rate must be 1e-4")
+    if abs(float(agent["discount_factor"]) - 0.99) > 1.0e-12:
+        raise RuntimeError("GT racing gamma must be 0.99")
+    if abs(float(agent["ratio_clip"]) - 0.2) > 1.0e-12:
+        raise RuntimeError("GT racing PPO ratio clip must be 0.2")
+    if abs(float(agent["rewards_shaper_scale"]) - 0.6) > 1.0e-12:
+        raise RuntimeError("GT racing reward shaper scale must be 0.6")
+
+    print("[INFO] Swift CTBR GT racing contract:")
+    print(f"  num_envs                   : {env.unwrapped.num_envs}")
+    print(f"  action_space               : [{low:.1f}, {high:.1f}]^4")
+    print("  actor / critic             : shared 256x256x256 ELU")
+    print(f"  policy_mean                : {policy_cfg['output']}")
+    print(f"  rollouts                   : {agent['rollouts']}")
+    print(f"  learning_epochs            : {agent['learning_epochs']}")
+    print(f"  mini_batches               : {agent['mini_batches']}")
+    print(f"  learning_rate              : {agent['learning_rate']}")
+    print(f"  reward_shaper              : {agent['rewards_shaper_scale']}")
 
 
 def _audit_loaded_policy_std(agent, max_std: float) -> None:
@@ -701,6 +783,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     _audit_learned_inertial_bounded_cfg(env, agent_cfg)
     _audit_swift_ctbr_policy0_cfg(env, agent_cfg)
+    _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
