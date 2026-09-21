@@ -120,6 +120,28 @@ class SwiftCTBRGTRacingRewardsCfg(RewardsCfg):
 
 
 @configclass
+class SwiftGTShadowPolicyCfg(ObsGroup):
+    """GT-control observation for estimator-shadow racing diagnostics."""
+
+    platform_state = ObsTerm(func=mdp.swift_gt_state)
+    next_gate_corners = ObsTerm(
+        func=mdp.swift_gt_truth_next_gate_corners_relative_w,
+        params={"command_name": "target"},
+    )
+    previous_action = ObsTerm(func=mdp.last_action)
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
+
+@configclass
+class SwiftGTShadowObservationsCfg:
+    policy: SwiftGTShadowPolicyCfg = SwiftGTShadowPolicyCfg()
+    critic = None
+
+
+@configclass
 class LearnedInertialSwiftPolicyCfg(ObsGroup):
     """Swift-style 31D actor observation from estimator + known gate map."""
 
@@ -271,6 +293,27 @@ class DroneRacerSwiftCTBRPassStateTrainEnvCfg(DroneRacerSwiftCTBRTrainEnvCfg):
             forward_speed_range_mps=(1.5, 3.0),
             post_gate_offset_m=1.0,
         )
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg(
+    DroneRacerLearnedInertialSwiftCTBRRLCfg
+):
+    """GT-controlled racing while the learned estimator runs in shadow.
+
+    The actor receives simulator-truth 31D observations and truth-only mission
+    progression, reproducing the successful GT racing trajectory distribution.
+    TCN + IMU + SC-EKF + Stage2 continue running in the background so their
+    errors can be measured without feeding back into the control policy.
+    """
+
+    observations: SwiftGTShadowObservationsCfg = SwiftGTShadowObservationsCfg()
+    rewards: SwiftCTBRGTRacingRewardsCfg = SwiftCTBRGTRacingRewardsCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.episode_length_s = 20.0
 
 
 @configclass
