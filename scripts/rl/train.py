@@ -99,6 +99,16 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--legacy_transfer_dataset",
+    type=str,
+    default=None,
+    help=(
+        "Optional .npz collected by collect_legacy_policy_transfer_dataset.py. "
+        "When supplied, actor-head distillation uses real on-policy standardized "
+        "observations instead of synthetic Gaussian probes."
+    ),
+)
+parser.add_argument(
     "--ml_framework",
     type=str,
     default="torch",
@@ -143,6 +153,7 @@ import random
 from datetime import datetime
 
 import gymnasium as gym
+import numpy as np
 import skrl
 import torch
 from packaging import version
@@ -294,11 +305,106 @@ def _sample_legacy_actor_features(
 
 def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
     """Distill old environment-clipped behavior into a trainable tanh actor."""
-    hidden, raw_means, zero_hidden, zero_raw = _sample_legacy_actor_features(
-        agent,
-        samples=int(args_cli.legacy_actor_calibration_samples),
-        seed=int(args_cli.seed if args_cli.seed is not None else 1) + 1701,
-    )
+    dataset_path = None
+    if args_cli.legacy_transfer_dataset is not None:
+        dataset_path = os.path.abspath(
+            os.path.expanduser(args_cli.legacy_transfer_dataset)
+        )
+        if not os.path.isfile(dataset_path):
+            raise FileNotFoundError(
+                f"legacy transfer dataset not found: {dataset_path}"
+            )
+
+    if dataset_path is None:
+        hidden, raw_means, zero_hidden, zero_raw = _sample_legacy_actor_features(
+            agent,
+            samples=int(args_cli.legacy_actor_calibration_samples),
+            seed=int(args_cli.seed if args_cli.seed is not None else 1) + 1701,
+        )
+        dataset_mode = "synthetic_standardized_gaussian"
+        dataset_samples = int(raw_means.shape[0])
+    else:
+        data = np.load(dataset_path)
+        required = (
+            "standardized_observation",
+            "legacy_raw_mean",
+            "legacy_executed_action",
+        )
+        missing = [key for key in required if key not in data]
+        if missing:
+            raise ValueError(
+                "legacy transfer dataset missing arrays: " + ", ".join(missing)
+            )
+
+        std_obs = torch.as_tensor(
+            data["standardized_observation"],
+            dtype=torch.float32,
+            device=agent.policy.device,
+        )
+        raw_means = torch.as_tensor(
+            data["legacy_raw_mean"],
+            dtype=torch.float32,
+            device=agent.policy.device,
+        )
+        expected_executed = torch.as_tensor(
+            data["legacy_executed_action"],
+            dtype=torch.float32,
+            device=agent.policy.device,
+        )
+        if std_obs.ndim != 2 or raw_means.ndim != 2:
+            raise ValueError(
+                "legacy transfer dataset arrays must be rank-2"
+            )
+        if std_obs.shape[0] != raw_means.shape[0]:
+            raise ValueError(
+                "legacy standardized observations/raw means have different sample counts"
+            )
+        if expected_executed.shape != raw_means.shape:
+            raise ValueError(
+                "legacy executed action shape does not match raw mean shape"
+            )
+
+        reconstructed = raw_means.clamp(-1.0, 1.0)
+        reconstruction_mae = float(
+            (reconstructed - expected_executed).abs().mean().item()
+        )
+        if reconstruction_mae > 1.0e-6:
+            raise RuntimeError(
+                "legacy transfer dataset executed-action semantics are inconsistent: "
+                f"MAE={reconstruction_mae:.8f}"
+            )
+
+        trunk = getattr(agent.policy, "net_container", None)
+        layer = getattr(agent.policy, "policy_layer", None)
+        if trunk is None or not isinstance(layer, torch.nn.Linear):
+            raise RuntimeError(
+                "behavior transfer expects skrl net_container + policy_layer"
+            )
+        with torch.inference_mode():
+            hidden = trunk(std_obs)
+            first_linear = next(
+                (
+                    module
+                    for module in trunk.modules()
+                    if isinstance(module, torch.nn.Linear)
+                ),
+                None,
+            )
+            if first_linear is None:
+                raise RuntimeError(
+                    "could not infer actor standardized input dimension"
+                )
+            zero_std = torch.zeros(
+                1,
+                int(first_linear.in_features),
+                dtype=std_obs.dtype,
+                device=std_obs.device,
+            )
+            zero_hidden = trunk(zero_std)
+            zero_raw = layer(zero_hidden)
+
+        dataset_mode = "real_on_policy_legacy_trajectory"
+        dataset_samples = int(raw_means.shape[0])
 
     metadata = distill_legacy_clamped_actor_output(
         agent.policy,
@@ -310,6 +416,10 @@ def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
         ridge=1.0e-4,
         anchor_repeats=64,
     )
+    metadata["legacy_transfer_dataset_mode"] = dataset_mode
+    metadata["legacy_transfer_dataset_samples"] = dataset_samples
+    if dataset_path is not None:
+        metadata["legacy_transfer_dataset_path"] = dataset_path
 
     # Preserve source-policy normalization by default. The source checkpoint
     # already ran on the Easy curriculum, so changing scaler statistics during
@@ -321,8 +431,8 @@ def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
 
         seen = set()
         for label, attr in (
-            ("observation", "_observation_preprocessor"),
             ("state", "_state_preprocessor"),
+            ("observation", "_observation_preprocessor"),
             ("value", "_value_preprocessor"),
         ):
             preprocessor = getattr(agent, attr, None)
@@ -350,6 +460,8 @@ def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
     )
 
     print("[INFO] One-time behavior-preserving legacy actor transfer:")
+    print(f"  dataset mode                : {dataset_mode}")
+    print(f"  dataset samples             : {dataset_samples}")
     print(
         "  old executed saturation    : "
         f"{metadata['legacy_executed_saturation_fraction']:.4f}"
@@ -388,12 +500,14 @@ def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
         f"{metadata['optimizer_parameter_states_cleared']}"
     )
 
-    if metadata["distilled_behavior_mae"] > 0.20:
+    max_mae = 0.20 if dataset_mode == "synthetic_standardized_gaussian" else 0.12
+    if metadata["distilled_behavior_mae"] > max_mae:
         raise RuntimeError(
             "behavior-preserving actor transfer is too inaccurate: "
-            f"MAE={metadata['distilled_behavior_mae']:.4f}"
+            f"MAE={metadata['distilled_behavior_mae']:.4f} "
+            f"(limit={max_mae:.4f}, mode={dataset_mode})"
         )
-    if metadata["distilled_sign_agreement"] < 0.95:
+    if metadata["distilled_sign_agreement"] < 0.97:
         raise RuntimeError(
             "behavior-preserving actor transfer changed too many action signs: "
             f"agreement={metadata['distilled_sign_agreement']:.4f}"
@@ -495,9 +609,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         or args_cli.post_load_max_action_std is not None
         or args_cli.recalibrate_legacy_actor
         or args_cli.legacy_transfer_only_path is not None
+        or args_cli.legacy_transfer_dataset is not None
     ) and resume_path is None:
         raise ValueError(
             "post-load overrides / legacy actor recalibration require --checkpoint"
+        )
+    if args_cli.legacy_transfer_dataset is not None and not args_cli.recalibrate_legacy_actor:
+        raise ValueError(
+            "--legacy_transfer_dataset requires --recalibrate_legacy_actor"
         )
     if args_cli.legacy_transfer_only_path is not None and not args_cli.recalibrate_legacy_actor:
         raise ValueError(
