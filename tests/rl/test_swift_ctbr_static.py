@@ -221,7 +221,7 @@ def test_swift_policy0_evaluator_uses_isaaclab_21_public_termination_api():
     evaluator = _text("scripts/rl/evaluate_swift_ctbr_policy0.py")
 
     assert "manager.get_term(name)" in evaluator
-    assert "_last_episode_dones" not in evaluator
+    assert "manager._last_episode_dones" not in evaluator
 
 
 
