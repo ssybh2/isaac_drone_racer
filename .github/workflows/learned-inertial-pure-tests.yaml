@@ -35,6 +35,7 @@ jobs:
           python -m py_compile scripts/rl/evaluate_learned_inertial_policy.py
           python -m py_compile scripts/rl/smoke_swift_ctbr_control.py
           python -m py_compile scripts/rl/smoke_swift_ctbr_gate_flight.py
+          python -m py_compile scripts/rl/smoke_swift_ctbr_policy0_task.py
           python -m py_compile scripts/estimation/diagnose_learned_inertial.py
           python -m py_compile scripts/estimation/sweep_learned_update_rate.py
           python -m py_compile scripts/estimation/sweep_learned_covariance_multiplier.py
