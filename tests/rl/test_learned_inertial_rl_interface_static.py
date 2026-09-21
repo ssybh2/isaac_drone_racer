@@ -146,7 +146,7 @@ def test_legacy_evaluation_and_on_policy_transfer_collection():
         "--legacy_hard_clip_policy",
         'policy_cfg["output"] = "ACTIONS"',
         'policy_cfg["clip_actions"] = False',
-        "legacy_raw_mean_environment_hard_clip",
+        "legacy_explicit_hard_clip_then_scale",
     ):
         assert token in evaluator
 
