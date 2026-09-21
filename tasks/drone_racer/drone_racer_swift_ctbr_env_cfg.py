@@ -175,9 +175,26 @@ class DroneRacerSwiftCTBRTrainEnvCfg(DroneRacerEnvCfg):
         # deployment stack, but keep training fully vectorized and sensor-free.
         self.scene.track = generate_track(track_config=EASY_7_GATE_TRACK_CONFIG)
 
-        # Swift-style training starts near a state that has just passed a
-        # random predecessor gate, with through-gate momentum rather than from
-        # rest. This prevents the stop-and-go local optimum seen in policy-0 v1.
+        # Preserve the original policy-0 v1 reset semantics for checkpoint
+        # reproducibility: random predecessor gate, but zero initial velocity.
+        self.commands.target.randomise_start = True
+        self.commands.target.debug_vis = False
+
+        # No random external pushes in policy-0. Swift's first-stage training
+        # uses the nominal simulator; empirical residuals are introduced only
+        # during the later fine-tuning stage.
+        self.events.push_robot = None
+
+
+
+
+
+@configclass
+class DroneRacerSwiftCTBRPassStateTrainEnvCfg(DroneRacerSwiftCTBRTrainEnvCfg):
+    """Policy-0 v2: Swift-like through-gate momentum reset curriculum."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
         self.commands.target = mdp.SwiftPassStateGateTargetingCommandCfg(
             asset_name="robot",
             track_name="track",
@@ -188,11 +205,6 @@ class DroneRacerSwiftCTBRTrainEnvCfg(DroneRacerEnvCfg):
             forward_speed_range_mps=(1.5, 3.0),
             post_gate_offset_m=1.0,
         )
-
-        # No random external pushes in policy-0. Swift's first-stage training
-        # uses the nominal simulator; empirical residuals are introduced only
-        # during the later fine-tuning stage.
-        self.events.push_robot = None
 
 
 @configclass
