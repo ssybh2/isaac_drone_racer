@@ -87,6 +87,38 @@ class SwiftCTBRTrainingRewardsCfg(RewardsCfg):
     gate_passed = None
 
 
+
+
+
+@configclass
+class SwiftCTBRGTRacingRewardsCfg(RewardsCfg):
+    """GT-racing reward adapted from kousheekc/isaac_drone_racer.
+
+    The important difference from policy-0 v1/v2 is that gate crossing is an
+    explicit objective again. mdp.gate_passed returns +1 for a valid pass and
+    -1 for crossing the gate plane outside the opening, so weight=400 supplies
+    both a strong pass reward and a strong miss penalty.
+    """
+
+    terminating = RewTerm(func=mdp.is_terminated, weight=-500.0)
+    ang_vel_l2 = RewTerm(func=mdp.ang_vel_l2, weight=-0.0001)
+    progress = RewTerm(
+        func=mdp.progress,
+        weight=20.0,
+        params={"command_name": "target"},
+    )
+    gate_passed = RewTerm(
+        func=mdp.gate_passed,
+        weight=400.0,
+        params={"command_name": "target"},
+    )
+    lookat_next = RewTerm(
+        func=mdp.lookat_next_gate,
+        weight=0.1,
+        params={"command_name": "target", "std": 0.5},
+    )
+
+
 @configclass
 class LearnedInertialSwiftPolicyCfg(ObsGroup):
     """Swift-style 31D actor observation from estimator + known gate map."""
@@ -187,6 +219,40 @@ class DroneRacerSwiftCTBRTrainEnvCfg(DroneRacerEnvCfg):
 
 
 
+
+
+
+
+
+@configclass
+class DroneRacerSwiftCTBRGTRacingEnvCfg(DroneRacerSwiftCTBRTrainEnvCfg):
+    """Massively parallel GT racing task inspired by kousheekc's baseline.
+
+    This stage deliberately uses simulator GT for the 31D actor observation.
+    Its job is only to learn a strong racing policy. The final deployment task
+    later swaps the GT state source for the learned-inertial / visual estimator
+    while preserving the same policy interface and CTBR action semantics.
+    """
+
+    rewards: SwiftCTBRGTRacingRewardsCfg = SwiftCTBRGTRacingRewardsCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        # Match the original Isaac Drone Racer massively-parallel regime.
+        self.scene.num_envs = 4096
+        self.episode_length_s = 20.0
+
+        # Keep the current Easy-7 curriculum geometry while learning the GT
+        # racing policy. We can promote the trained policy to the Expert track
+        # after it demonstrates consistent multi-gate / full-lap behavior.
+        self.scene.track = generate_track(track_config=EASY_7_GATE_TRACK_CONFIG)
+
+        # Match the original baseline's random-gate reset behavior. No camera,
+        # IMU, VIO or EKF is used by the actor during this GT racing stage.
+        self.commands.target.randomise_start = True
+        self.commands.target.debug_vis = False
+        self.events.push_robot = None
 
 
 @configclass
