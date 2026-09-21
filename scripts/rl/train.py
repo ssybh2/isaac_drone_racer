@@ -131,7 +131,10 @@ args_cli, hydra_args = parser.parse_known_args()
 # The deployment-faithful learned-inertial task always requires its onboard
 # RTX camera even in headless training. Keep this task-specific requirement
 # explicit so forgetting --enable_cameras cannot silently disable perception.
-if args_cli.task == "Isaac-Drone-Racer-Learned-Inertial-RL-v0":
+if args_cli.task in (
+    "Isaac-Drone-Racer-Learned-Inertial-RL-v0",
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0",
+):
     args_cli.enable_cameras = True
 
 # always enable cameras to record video
@@ -195,6 +198,10 @@ from utils.training_overrides import (
 )
 
 LEARNED_INERTIAL_RL_TASK = "Isaac-Drone-Racer-Learned-Inertial-RL-v0"
+SWIFT_CTBR_POLICY0_TASK = "Isaac-Drone-Racer-Swift-CTBR-Train-v0"
+LEARNED_INERTIAL_SWIFT_CTBR_TASK = (
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0"
+)
 
 
 def _audit_learned_inertial_bounded_cfg(env, agent_cfg: dict) -> None:
@@ -234,6 +241,66 @@ def _audit_learned_inertial_bounded_cfg(env, agent_cfg: dict) -> None:
     print(f"  mini_batches               : {agent_cfg['agent']['mini_batches']}")
     print(f"  configured_learning_rate   : {agent_cfg['agent']['learning_rate']}")
     print(f"  entropy_loss_scale         : {agent_cfg['agent']['entropy_loss_scale']}")
+
+
+def _audit_swift_ctbr_policy0_cfg(env, agent_cfg: dict) -> None:
+    """Fail closed if the fresh Swift policy-0 contract drifts."""
+    if args_cli.task != SWIFT_CTBR_POLICY0_TASK:
+        return
+
+    action_space = env.unwrapped.single_action_space
+    low = float(action_space.low.min())
+    high = float(action_space.high.max())
+    if abs(low + 1.0) > 1.0e-6 or abs(high - 1.0) > 1.0e-6:
+        raise RuntimeError(
+            "Swift CTBR policy-0 requires finite [-1, 1]^4 actions; "
+            f"got [{low}, {high}]"
+        )
+    if int(action_space.shape[0]) != 4:
+        raise RuntimeError(
+            f"Swift CTBR policy-0 requires 4 actions, got {action_space.shape}"
+        )
+
+    models = agent_cfg["models"]
+    policy_cfg = models["policy"]
+    value_cfg = models["value"]
+
+    if not bool(models.get("separate", False)):
+        raise RuntimeError("Swift policy-0 requires separate actor and critic")
+    if str(policy_cfg.get("output")) != "tanh(ACTIONS)":
+        raise RuntimeError("Swift policy-0 actor mean must be tanh(ACTIONS)")
+    if not bool(policy_cfg.get("clip_actions", False)):
+        raise RuntimeError("Swift policy-0 must clip sampled CTBR actions")
+
+    expected_layers = [128, 128]
+    for name, cfg in (("policy", policy_cfg), ("value", value_cfg)):
+        network = cfg.get("network", [])
+        if len(network) != 1 or list(network[0].get("layers", [])) != expected_layers:
+            raise RuntimeError(
+                f"Swift {name} network must use 2x128 hidden layers"
+            )
+        if str(network[0].get("activations")) != "leaky_relu":
+            raise RuntimeError(
+                f"Swift {name} network must use leaky_relu activations"
+            )
+
+    agent = agent_cfg["agent"]
+    if abs(float(agent["learning_rate"]) - 3.0e-4) > 1.0e-12:
+        raise RuntimeError("Swift policy-0 learning rate must start at 3e-4")
+    if abs(float(agent["discount_factor"]) - 0.99) > 1.0e-12:
+        raise RuntimeError("Swift policy-0 gamma must be 0.99")
+    if abs(float(agent["ratio_clip"]) - 0.2) > 1.0e-12:
+        raise RuntimeError("Swift policy-0 PPO ratio clip must be 0.2")
+
+    print("[INFO] Swift CTBR policy-0 contract:")
+    print(f"  num_envs                   : {env.unwrapped.num_envs}")
+    print(f"  action_space               : [{low:.1f}, {high:.1f}]^4")
+    print("  actor / critic             : separate 2x128 leaky_relu")
+    print(f"  policy_mean                : {policy_cfg['output']}")
+    print(f"  sampled_action_clipping    : {policy_cfg['clip_actions']}")
+    print(f"  rollouts                   : {agent['rollouts']}")
+    print(f"  learning_rate              : {agent['learning_rate']}")
+    print(f"  gamma / PPO clip           : {agent['discount_factor']} / {agent['ratio_clip']}")
 
 
 def _audit_loaded_policy_std(agent, max_std: float) -> None:
@@ -630,6 +697,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     _audit_learned_inertial_bounded_cfg(env, agent_cfg)
+    _audit_swift_ctbr_policy0_cfg(env, agent_cfg)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
