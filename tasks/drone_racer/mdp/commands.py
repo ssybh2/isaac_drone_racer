@@ -436,6 +436,142 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
         self._prev_estimated_pos_w = estimated_pos_w.clone()
         self.prev_robot_pos_w = current_gt_pos_w.clone()
 
+class SwiftPassStateGateTargetingCommand(GateTargetingCommand):
+    """Swift-style random-gate initialization with through-gate momentum.
+
+    Swift initializes each training episode near a state previously observed
+    while passing a random gate. We approximate that policy-0 curriculum here
+    without requiring a prerecorded trajectory: place the vehicle just after
+    the previous gate, point it toward the next gate, and initialize it with a
+    non-zero forward velocity plus bounded pose/rate perturbations.
+
+    This command is training-only. Deployment continues to use the
+    estimator-driven mission command.
+    """
+
+    cfg: "SwiftPassStateGateTargetingCommandCfg"
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        if self.cfg.randomise_start is None:
+            return super()._resample_command(env_ids)
+
+        ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        if ids.numel() == 0:
+            return
+
+        if self.cfg.randomise_start:
+            self.next_gate_idx[ids] = torch.randint(
+                low=0,
+                high=self.num_gates,
+                size=(ids.numel(),),
+                device=self.device,
+                dtype=torch.int32,
+            )
+        else:
+            self.next_gate_idx[ids] = 1
+
+        prev_idx = (self.next_gate_idx[ids] - 1) % self.num_gates
+        next_idx = self.next_gate_idx[ids]
+
+        prev_pos = self.track.data.object_com_pos_w[ids, prev_idx]
+        prev_quat = self.track.data.object_quat_w[ids, prev_idx]
+        next_pos = self.track.data.object_com_pos_w[ids, next_idx]
+
+        prev_normal_b = torch.tensor(
+            [1.0, 0.0, 0.0],
+            dtype=prev_pos.dtype,
+            device=self.device,
+        ).expand(ids.numel(), 3)
+        prev_normal_w = math_utils.quat_apply(prev_quat, prev_normal_b)
+
+        # Start just after the previously passed gate.
+        base_pos = prev_pos + float(self.cfg.post_gate_offset_m) * prev_normal_w
+
+        pos_jitter = torch.empty(
+            ids.numel(), 3, device=self.device, dtype=prev_pos.dtype
+        )
+        pos_jitter[:, 0].uniform_(
+            -float(self.cfg.position_jitter_m[0]),
+            float(self.cfg.position_jitter_m[0]),
+        )
+        pos_jitter[:, 1].uniform_(
+            -float(self.cfg.position_jitter_m[1]),
+            float(self.cfg.position_jitter_m[1]),
+        )
+        pos_jitter[:, 2].uniform_(
+            -float(self.cfg.position_jitter_m[2]),
+            float(self.cfg.position_jitter_m[2]),
+        )
+        start_pos = base_pos + pos_jitter
+
+        to_next = next_pos - start_pos
+        horizontal = to_next.clone()
+        horizontal[:, 2] = 0.0
+        horizontal_norm = torch.linalg.norm(horizontal, dim=1, keepdim=True)
+        fallback = prev_normal_w.clone()
+        fallback[:, 2] = 0.0
+        fallback = fallback / torch.clamp(
+            torch.linalg.norm(fallback, dim=1, keepdim=True),
+            min=1.0e-6,
+        )
+        heading = torch.where(
+            horizontal_norm > 1.0e-6,
+            horizontal / torch.clamp(horizontal_norm, min=1.0e-6),
+            fallback,
+        )
+
+        base_yaw = torch.atan2(heading[:, 1], heading[:, 0])
+        yaw_jitter = torch.empty(
+            ids.numel(), device=self.device, dtype=prev_pos.dtype
+        ).uniform_(
+            -float(self.cfg.yaw_jitter_rad),
+            float(self.cfg.yaw_jitter_rad),
+        )
+        roll = torch.empty_like(base_yaw).uniform_(
+            -float(self.cfg.roll_pitch_jitter_rad),
+            float(self.cfg.roll_pitch_jitter_rad),
+        )
+        pitch = torch.empty_like(base_yaw).uniform_(
+            -float(self.cfg.roll_pitch_jitter_rad),
+            float(self.cfg.roll_pitch_jitter_rad),
+        )
+        yaw = base_yaw + yaw_jitter
+        quat = math_utils.quat_from_euler_xyz(roll, pitch, yaw)
+
+        speed = torch.empty(
+            ids.numel(), 1, device=self.device, dtype=prev_pos.dtype
+        ).uniform_(
+            float(self.cfg.forward_speed_range_mps[0]),
+            float(self.cfg.forward_speed_range_mps[1]),
+        )
+        velocity_w = heading * speed
+        velocity_w[:, 2] += torch.empty(
+            ids.numel(), device=self.device, dtype=prev_pos.dtype
+        ).uniform_(
+            -float(self.cfg.vertical_speed_jitter_mps),
+            float(self.cfg.vertical_speed_jitter_mps),
+        )
+
+        angular_velocity = torch.empty(
+            ids.numel(), 3, device=self.device, dtype=prev_pos.dtype
+        ).uniform_(
+            -float(self.cfg.body_rate_jitter_radps),
+            float(self.cfg.body_rate_jitter_radps),
+        )
+
+        self.robot.write_root_pose_to_sim(
+            torch.cat((start_pos, quat), dim=-1),
+            env_ids=ids,
+        )
+        self.robot.write_root_velocity_to_sim(
+            torch.cat((velocity_w, angular_velocity), dim=-1),
+            env_ids=ids,
+        )
+
+        # Keep progress bookkeeping synchronized with the reset pose.
+        self.prev_robot_pos_w = self.robot.data.root_pos_w.clone()
+
+
 @configclass
 class GateTargetingCommandCfg(CommandTermCfg):
     """Configuration for gate targeting command generator."""
@@ -466,6 +602,24 @@ class GateTargetingCommandCfg(CommandTermCfg):
     # Set the scale of the visualization markers to (0.1, 0.1, 0.1)
     target_visualizer_cfg.markers["frame"].scale = (0.0001, 0.0001, 0.0001)
     drone_visualizer_cfg.markers["frame"].scale = (0.0001, 0.0001, 0.0001)
+
+
+
+
+
+@configclass
+class SwiftPassStateGateTargetingCommandCfg(GateTargetingCommandCfg):
+    """Training-only approximation of Swift's gate-pass state initialization."""
+
+    class_type: type = SwiftPassStateGateTargetingCommand
+
+    post_gate_offset_m: float = 1.0
+    position_jitter_m: tuple[float, float, float] = (0.35, 0.35, 0.25)
+    forward_speed_range_mps: tuple[float, float] = (1.5, 3.0)
+    vertical_speed_jitter_mps: float = 0.35
+    yaw_jitter_rad: float = 0.35
+    roll_pitch_jitter_rad: float = 0.20
+    body_rate_jitter_radps: float = 0.5
 
 
 @configclass
