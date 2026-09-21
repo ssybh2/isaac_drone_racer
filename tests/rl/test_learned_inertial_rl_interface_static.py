@@ -77,3 +77,32 @@ def test_scripted_controller_action_has_no_simulator_truth_access():
     )
     for token in forbidden:
         assert token not in block
+
+def test_learned_inertial_rl_uses_bounded_policy_profile():
+    registry = _text("tasks/drone_racer/__init__.py")
+    cfg = _text("tasks/drone_racer/agents/skrl_learned_inertial_cfg.yaml")
+    runtime = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+
+    assert "skrl_learned_inertial_cfg.yaml" in registry
+
+    expected_cfg = (
+        "clip_actions: True",
+        "max_log_std: -2.5257286443082556",
+        "initial_log_std: -2.5257286443082556",
+        "output: 0.8 * tanh(ACTIONS)",
+        "rollouts: 1024",
+        "mini_batches: 8",
+        "learning_rate: 1.0e-05",
+        "max_lr: 2.0e-05",
+        "entropy_loss_scale: 0.0",
+    )
+    for token in expected_cfg:
+        assert token in cfg
+
+    # IsaacLab 2.1 manager-based environments otherwise advertise an
+    # unbounded Box. The learned-inertial runtime must publish the controller's
+    # real normalized motor-action contract so skrl clipping is effective.
+    assert "self.single_action_space = gym.spaces.Box(" in runtime
+    assert "low=-1.0" in runtime
+    assert "high=1.0" in runtime
+
