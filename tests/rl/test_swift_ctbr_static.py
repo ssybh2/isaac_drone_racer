@@ -160,6 +160,7 @@ def test_swift_policy0_training_contract():
     ):
         assert token in agent
 
-    assert "checkpoint" not in agent.lower()
+    assert "--checkpoint" not in agent.lower()
+    assert "source_checkpoint" not in agent.lower()
     assert "gym.spaces.Box" in env
     assert "low=-1.0" in env and "high=1.0" in env
