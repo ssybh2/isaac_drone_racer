@@ -181,3 +181,23 @@ gym.register(
     },
 )
 
+
+
+gym.register(
+    id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-GTPolicy-v0",
+    entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerLearnedInertialSwiftCTBRRLCfg"
+        ),
+        # Deliberately use the exact same 256x256x256 shared-model definition
+        # and RunningStandardScaler modules as the successful GT racing
+        # checkpoint. Only the 31D observation source changes from simulator
+        # truth to the estimator-backed deployment observation.
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_racing_cfg.yaml"
+        ),
+    },
+)
