@@ -18,6 +18,7 @@ def test_racing_vision_collector_keeps_control_gt_only():
     assert "--min-gates" in text
     assert "if keep:" in text
     assert "IsaacStage2DatasetCollector" in text
+    assert "obs, _ = wrapped.reset()" in text
     assert "learned_inertial" not in text.lower()
 
 
