@@ -94,6 +94,7 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import math
 import os
 import random
 from datetime import datetime
@@ -132,6 +133,61 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import tasks  # noqa: F401
 from utils.training_overrides import apply_post_load_training_overrides
+
+LEARNED_INERTIAL_RL_TASK = "Isaac-Drone-Racer-Learned-Inertial-RL-v0"
+
+
+def _audit_learned_inertial_bounded_cfg(env, agent_cfg: dict) -> None:
+    """Fail closed if the PPO/action contract regresses to the old unbounded path."""
+    if args_cli.task != LEARNED_INERTIAL_RL_TASK:
+        return
+
+    action_space = env.unwrapped.single_action_space
+    low = float(action_space.low.min())
+    high = float(action_space.high.max())
+    if abs(low + 1.0) > 1.0e-6 or abs(high - 1.0) > 1.0e-6:
+        raise RuntimeError(
+            "learned-inertial PPO requires a finite [-1, 1] action space; "
+            f"got [{low}, {high}]"
+        )
+
+    policy_cfg = agent_cfg["models"]["policy"]
+    expected_output = "0.8 * tanh(ACTIONS)"
+    if str(policy_cfg.get("output")) != expected_output:
+        raise RuntimeError(
+            "learned-inertial PPO mean must use the bounded contract "
+            f"{expected_output!r}"
+        )
+    if not bool(policy_cfg.get("clip_actions", False)):
+        raise RuntimeError("learned-inertial PPO must clip sampled actions before storage/execution")
+
+    max_std = math.exp(float(policy_cfg["max_log_std"]))
+    if max_std > 0.0800001:
+        raise RuntimeError(f"configured learned-inertial action std cap is too large: {max_std}")
+
+    print("[INFO] Learned-inertial bounded PPO contract:")
+    print(f"  action_space               : [{low:.1f}, {high:.1f}]")
+    print(f"  policy_mean                : {expected_output}")
+    print(f"  sampled_action_clipping    : {policy_cfg['clip_actions']}")
+    print(f"  configured_std_cap         : {max_std:.6f}")
+    print(f"  rollouts                   : {agent_cfg['agent']['rollouts']}")
+    print(f"  mini_batches               : {agent_cfg['agent']['mini_batches']}")
+    print(f"  configured_learning_rate   : {agent_cfg['agent']['learning_rate']}")
+    print(f"  entropy_loss_scale         : {agent_cfg['agent']['entropy_loss_scale']}")
+
+
+def _audit_loaded_policy_std(agent, max_std: float) -> None:
+    log_std = getattr(agent.policy, "log_std_parameter", None)
+    if log_std is None:
+        raise RuntimeError("learned-inertial Gaussian policy has no log_std_parameter")
+    std = log_std.detach().exp()
+    std_max = float(std.max().item())
+    if std_max > float(max_std) + 1.0e-6:
+        raise RuntimeError(
+            f"loaded policy action std {std_max:.6f} exceeds cap {max_std:.6f}"
+        )
+    print(f"[INFO] Loaded policy action std max: {std_max:.6f}")
+
 
 # config shortcuts
 algorithm = args_cli.algorithm.lower()
@@ -230,6 +286,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    _audit_learned_inertial_bounded_cfg(env, agent_cfg)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
@@ -257,12 +314,28 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # load checkpoint (if specified)
     if resume_path:
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
+        # runner.agent.load is intentionally strict with the model state. The
+        # 0.8*tanh mean changes only the forward expression and adds no trainable
+        # parameters, so legacy checkpoints remain state-dict compatible.
         runner.agent.load(resume_path)
+
+        continuation_lr = args_cli.post_load_learning_rate
+        continuation_std = args_cli.post_load_max_action_std
+        if args_cli.task == LEARNED_INERTIAL_RL_TASK:
+            if continuation_lr is None:
+                continuation_lr = float(agent_cfg["agent"]["learning_rate"])
+            if continuation_std is None:
+                continuation_std = math.exp(
+                    float(agent_cfg["models"]["policy"]["max_log_std"])
+                )
+
         continuation_metadata = apply_post_load_training_overrides(
             runner.agent,
-            learning_rate=args_cli.post_load_learning_rate,
-            max_action_std=args_cli.post_load_max_action_std,
+            learning_rate=continuation_lr,
+            max_action_std=continuation_std,
         )
+        if args_cli.task == LEARNED_INERTIAL_RL_TASK:
+            _audit_loaded_policy_std(runner.agent, max_std=continuation_std)
         if continuation_metadata:
             continuation_metadata = {
                 "source_checkpoint": resume_path,
