@@ -201,3 +201,19 @@ gym.register(
         ),
     },
 )
+
+
+gym.register(
+    id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-GTShadow-v0",
+    entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerLearnedInertialSwiftCTBRGTShadowCfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_racing_cfg.yaml"
+        ),
+    },
+)
