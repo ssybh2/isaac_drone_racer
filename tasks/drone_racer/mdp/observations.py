@@ -204,3 +204,52 @@ def swift_gt_next_gate_corners_relative_w(
     relative_w = corners_w - asset.data.root_pos_w.unsqueeze(1)
     return relative_w.reshape(env.num_envs, 12)
 
+
+def swift_gt_truth_next_gate_corners_relative_w(
+    env: ManagerBasedRLEnv,
+    command_name: str = "target",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """GT next-gate corners driven by the truth-only gate index.
+
+    This term is used only by the estimator-shadow diagnostic task. The actor
+    follows the successful GT racing policy using simulator truth, while the
+    learned-inertial estimator and estimator-driven mission progression run in
+    parallel without affecting control. That cleanly separates estimator
+    failure from policy sensitivity to estimation error.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+
+    if not hasattr(command, "gt_next_gate_idx"):
+        raise AttributeError(
+            "shadow GT observation requires a command with gt_next_gate_idx"
+        )
+
+    gate_indices = command.gt_next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(env.num_envs, device=asset.device)
+    gate_center_w = command.track.data.object_com_pos_w[env_ids, gate_indices]
+    gate_quat_w = command.track.data.object_quat_w[env_ids, gate_indices]
+    half = float(command.gate_size) / 2.0
+
+    local_corners = torch.tensor(
+        [
+            [0.0, -half, -half],
+            [0.0, +half, -half],
+            [0.0, +half, +half],
+            [0.0, -half, +half],
+        ],
+        dtype=asset.data.root_pos_w.dtype,
+        device=asset.device,
+    ).unsqueeze(0).expand(env.num_envs, -1, -1)
+
+    q = gate_quat_w.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 4)
+    corners_w = math_utils.quat_apply(
+        q,
+        local_corners.reshape(-1, 3),
+    ).reshape(env.num_envs, 4, 3)
+    corners_w = corners_w + gate_center_w.unsqueeze(1)
+
+    relative_w = corners_w - asset.data.root_pos_w.unsqueeze(1)
+    return relative_w.reshape(env.num_envs, 12)
+
