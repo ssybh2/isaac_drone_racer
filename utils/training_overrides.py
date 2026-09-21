@@ -181,3 +181,145 @@ def reset_optimizer_state(optimizer: Any) -> dict[str, Any]:
         "optimizer_state_entries_after_reset": int(len(optimizer.state)),
     }
 
+def distill_legacy_clamped_actor_output(
+    policy: Any,
+    hidden_features: torch.Tensor,
+    raw_means: torch.Tensor,
+    *,
+    anchor_hidden: torch.Tensor | None = None,
+    anchor_raw_mean: torch.Tensor | None = None,
+    action_limit: float = 0.95,
+    ridge: float = 1.0e-4,
+    anchor_repeats: int = 64,
+) -> dict[str, Any]:
+    """Fit the bounded tanh actor head to the legacy environment-executed action.
+
+    The legacy policy was trained with an unbounded Gaussian mean while the
+    environment hard-clamped actions to [-1, 1]. Directly rescaling output rows
+    changes the motor behavior. Instead, this migration reconstructs the old
+    executed action, clips only to action_limit to keep finite atanh targets,
+    and refits only the final actor Linear layer by ridge regression.
+
+    Hidden layers and observation coordinates are preserved exactly.
+    """
+    if hidden_features.ndim != 2 or raw_means.ndim != 2:
+        raise ValueError("hidden_features/raw_means must both be rank-2")
+    if hidden_features.shape[0] != raw_means.shape[0]:
+        raise ValueError("hidden_features and raw_means must share sample count")
+    if not (0.0 < action_limit < 1.0):
+        raise ValueError("action_limit must be in (0, 1)")
+    if ridge < 0.0:
+        raise ValueError("ridge must be non-negative")
+    if anchor_repeats < 0:
+        raise ValueError("anchor_repeats must be non-negative")
+
+    layer = _policy_output_layer(policy)
+    if layer.in_features != hidden_features.shape[1]:
+        raise ValueError(
+            "hidden feature dimension does not match actor output layer: "
+            f"{hidden_features.shape[1]} vs {layer.in_features}"
+        )
+    if layer.out_features != raw_means.shape[1]:
+        raise ValueError(
+            "raw action dimension does not match actor output layer: "
+            f"{raw_means.shape[1]} vs {layer.out_features}"
+        )
+
+    device = layer.weight.device
+    dtype = layer.weight.dtype
+    hidden = hidden_features.detach().to(device=device, dtype=dtype)
+    raw = raw_means.detach().to(device=device, dtype=dtype)
+
+    old_executed = raw.clamp(-1.0, 1.0)
+    bounded_target = old_executed.clamp(-float(action_limit), float(action_limit))
+    pretanh_target = torch.atanh(bounded_target)
+
+    fit_hidden = hidden
+    fit_target = pretanh_target
+
+    if anchor_hidden is not None and anchor_raw_mean is not None and anchor_repeats > 0:
+        ah = anchor_hidden.detach().to(device=device, dtype=dtype).reshape(1, -1)
+        ar = anchor_raw_mean.detach().to(device=device, dtype=dtype).reshape(1, -1)
+        anchor_exec = ar.clamp(-1.0, 1.0)
+        anchor_target = torch.atanh(
+            anchor_exec.clamp(-float(action_limit), float(action_limit))
+        )
+        fit_hidden = torch.cat((fit_hidden, ah.expand(int(anchor_repeats), -1)), dim=0)
+        fit_target = torch.cat((fit_target, anchor_target.expand(int(anchor_repeats), -1)), dim=0)
+
+    x = fit_hidden.detach().cpu().to(torch.float64)
+    y = fit_target.detach().cpu().to(torch.float64)
+    ones = torch.ones((x.shape[0], 1), dtype=x.dtype)
+    xa = torch.cat((x, ones), dim=1)
+    gram = xa.T @ xa
+    reg = torch.eye(gram.shape[0], dtype=gram.dtype) * float(ridge)
+    reg[-1, -1] = 0.0
+    beta = torch.linalg.solve(gram + reg, xa.T @ y)
+
+    new_weight = beta[:-1].T.to(device=device, dtype=dtype)
+    new_bias = beta[-1].to(device=device, dtype=dtype)
+
+    with torch.no_grad():
+        layer.weight.copy_(new_weight)
+        if layer.bias is None:
+            raise ValueError("behavior-preserving actor distillation requires a bias")
+        layer.bias.copy_(new_bias)
+
+    with torch.inference_mode():
+        new_raw = layer(hidden)
+        new_action = torch.tanh(new_raw)
+        derivative = 1.0 - new_action.square()
+        old_zero = None
+        new_zero = None
+        if anchor_hidden is not None and anchor_raw_mean is not None:
+            ah = anchor_hidden.detach().to(device=device, dtype=dtype).reshape(1, -1)
+            ar = anchor_raw_mean.detach().to(device=device, dtype=dtype).reshape(1, -1)
+            old_zero = ar.clamp(-1.0, 1.0)
+            new_zero = torch.tanh(layer(ah))
+
+    behavior_error = new_action - old_executed
+    sign_mask = old_executed.abs() > 0.1
+    sign_agreement = torch.ones_like(old_executed, dtype=torch.bool)
+    sign_agreement[sign_mask] = (
+        torch.sign(new_action[sign_mask]) == torch.sign(old_executed[sign_mask])
+    )
+
+    metadata: dict[str, Any] = {
+        "legacy_behavior_action_limit": float(action_limit),
+        "legacy_behavior_ridge": float(ridge),
+        "legacy_behavior_anchor_repeats": int(anchor_repeats),
+        "legacy_raw_rms": float(torch.sqrt(torch.mean(raw.square())).item()),
+        "legacy_executed_abs_mean": float(old_executed.abs().mean().item()),
+        "legacy_executed_saturation_fraction": float((old_executed.abs() > 0.999).float().mean().item()),
+        "distilled_action_abs_mean": float(new_action.abs().mean().item()),
+        "distilled_behavior_mae": float(behavior_error.abs().mean().item()),
+        "distilled_behavior_rmse": float(torch.sqrt(torch.mean(behavior_error.square())).item()),
+        "distilled_sign_agreement": float(sign_agreement.float().mean().item()),
+        "distilled_tanh_dead_fraction": float((derivative < 1.0e-3).float().mean().item()),
+        "distilled_tanh_derivative_mean": float(derivative.mean().item()),
+    }
+
+    if old_zero is not None and new_zero is not None:
+        metadata["legacy_zero_input_executed_action"] = old_zero.detach().cpu().reshape(-1).tolist()
+        metadata["distilled_zero_input_action"] = new_zero.detach().cpu().reshape(-1).tolist()
+        metadata["distilled_zero_input_mae"] = float((new_zero - old_zero).abs().mean().item())
+
+    return metadata
+
+
+def reset_optimizer_parameter_state(
+    optimizer: Any,
+    parameters: list[torch.nn.Parameter],
+) -> dict[str, Any]:
+    """Clear Adam moments only for deliberately reparameterized tensors."""
+    before = len(optimizer.state)
+    cleared = 0
+    for parameter in parameters:
+        if parameter in optimizer.state:
+            del optimizer.state[parameter]
+            cleared += 1
+    return {
+        "optimizer_state_entries_before_selective_reset": int(before),
+        "optimizer_parameter_states_cleared": int(cleared),
+        "optimizer_state_entries_after_selective_reset": int(len(optimizer.state)),
+    }
