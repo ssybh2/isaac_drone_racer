@@ -1887,6 +1887,21 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 except (AttributeError, KeyError, RuntimeError, ValueError):
                     return False
 
+            reject_reason_counts: dict[str, int] = {}
+            reject_stage_counts: dict[str, int] = {}
+            accepted_gate_measurements = 0
+            for item in self._gate_diagnostics:
+                if bool(item.get("accepted", False)):
+                    accepted_gate_measurements += 1
+                reason = item.get("reject_reason")
+                stage = item.get("reject_stage")
+                if reason:
+                    key = str(reason)
+                    reject_reason_counts[key] = reject_reason_counts.get(key, 0) + 1
+                if stage:
+                    key = str(stage)
+                    reject_stage_counts[key] = reject_stage_counts.get(key, 0) + 1
+
             self.last_episode_diagnostic = {
                 "steps": int(self.episode_length_buf[0].item()),
                 "duration_s": float(self.episode_length_buf[0].item() * self.step_dt),
@@ -1911,6 +1926,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "gate_attempts": int(self._gate_attempt_count),
                 "gate_updates": int(self._gate_update_count),
                 "gate_rejects": int(self._gate_reject_count),
+                "gate_acceptance_rate": (
+                    float(self._gate_update_count / self._gate_attempt_count)
+                    if self._gate_attempt_count > 0
+                    else 0.0
+                ),
+                "gate_accepted_diagnostics": int(accepted_gate_measurements),
+                "gate_reject_reason_counts": reject_reason_counts,
+                "gate_reject_stage_counts": reject_stage_counts,
                 "learned_updates": int(self._learned_update_count),
                 "learned_fusions": int(self._learned_fusion_count),
                 "learned_update_skips": int(self._learned_update_skip_count),
