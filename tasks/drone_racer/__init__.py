@@ -145,7 +145,7 @@ gym.register(
             "DroneRacerSwiftCTBRPassStateTrainEnvCfg"
         ),
         "skrl_cfg_entry_point": (
-            f"{agents.__name__}:skrl_swift_ctbr_cfg.yaml"
+            f"{agents.__name__}:skrl_swift_ctbr_passstate_cfg.yaml"
         ),
     },
 )
