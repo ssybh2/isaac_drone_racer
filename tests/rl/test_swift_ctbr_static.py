@@ -113,3 +113,53 @@ def test_ctbr_gate_flight_smoke_is_estimator_driven():
         '"controller_uses_simulator_root_state": False',
     ):
         assert token in smoke
+
+
+
+def test_swift_policy0_training_contract():
+    registry = _text("tasks/drone_racer/__init__.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    agent = _text("tasks/drone_racer/agents/skrl_swift_ctbr_cfg.yaml")
+    rewards = _text("tasks/drone_racer/mdp/rewards.py")
+    env = _text("tasks/drone_racer/swift_ctbr_racing_env.py")
+
+    for token in (
+        "Isaac-Drone-Racer-Swift-CTBR-Train-v0",
+        "SwiftCTBRRacingEnv",
+        "skrl_swift_ctbr_cfg.yaml",
+    ):
+        assert token in registry
+
+    for token in (
+        "class SwiftGTPolicyCfg",
+        "class SwiftCTBRTrainingRewardsCfg",
+        "self.scene.num_envs = 100",
+        "self.episode_length_s = 15.0",
+        "weight=100.0",
+        "weight=2.0",
+        "weight=-0.02",
+        "weight=-0.01",
+        "weight=-500.0",
+    ):
+        assert token in cfg
+
+    for token in (
+        "def swift_ctbr_body_rate_command_l2",
+        "def swift_ctbr_command_delta_l2",
+    ):
+        assert token in rewards
+
+    for token in (
+        "separate: True",
+        "layers: [128, 128]",
+        "learning_rate: 3.0e-04",
+        "discount_factor: 0.99",
+        "ratio_clip: 0.2",
+        "output: tanh(ACTIONS)",
+        "rewards_shaper_scale: 1.0",
+    ):
+        assert token in agent
+
+    assert "checkpoint" not in agent.lower()
+    assert "gym.spaces.Box" in env
+    assert "low=-1.0" in env and "high=1.0" in env
