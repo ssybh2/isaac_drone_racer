@@ -84,6 +84,31 @@ def progress(
     return prev_distance - current_distance
 
 
+def progress_truth_gate(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """GTShadow-only progress reward toward the truth mission gate."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+
+    if not hasattr(command, "gt_next_gate_idx"):
+        raise AttributeError(
+            "progress_truth_gate requires a command exposing gt_next_gate_idx"
+        )
+
+    gate_indices = command.gt_next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(env.num_envs, device=asset.device)
+    target_pos = command.track.data.object_com_pos_w[env_ids, gate_indices]
+    previous_pos = command.previous_pos
+    current_pos = asset.data.root_pos_w
+
+    prev_distance = torch.norm(previous_pos - target_pos, dim=1)
+    current_distance = torch.norm(current_pos - target_pos, dim=1)
+    return prev_distance - current_distance
+
+
 def gate_passed(
     env: ManagerBasedRLEnv,
     command_name: str | None = None,
@@ -111,6 +136,41 @@ def lookat_next_gate(
     vec_to_gate = math_utils.normalize(next_gate_pos - drone_pos)
 
     x_axis = torch.tensor([1.0, 0.0, 0.0], device=asset.device).expand(env.num_envs, 3)
+    drone_x_axis = math_utils.normalize(math_utils.quat_apply(drone_att, x_axis))
+
+    dot = (drone_x_axis * vec_to_gate).sum(dim=1).clamp(-1.0, 1.0)
+    angle = torch.acos(dot)
+    return torch.exp(-angle / std)
+
+
+def lookat_truth_gate(
+    env: ManagerBasedRLEnv,
+    std: float,
+    command_name: str | None = None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """GTShadow-only look-at reward using the truth mission gate."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+
+    if not hasattr(command, "gt_next_gate_idx"):
+        raise AttributeError(
+            "lookat_truth_gate requires a command exposing gt_next_gate_idx"
+        )
+
+    gate_indices = command.gt_next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(env.num_envs, device=asset.device)
+    next_gate_pos = command.track.data.object_com_pos_w[env_ids, gate_indices]
+
+    drone_pos = asset.data.root_pos_w
+    drone_att = asset.data.root_quat_w
+    vec_to_gate = math_utils.normalize(next_gate_pos - drone_pos)
+
+    x_axis = torch.tensor(
+        [1.0, 0.0, 0.0],
+        dtype=drone_pos.dtype,
+        device=asset.device,
+    ).expand(env.num_envs, 3)
     drone_x_axis = math_utils.normalize(math_utils.quat_apply(drone_att, x_axis))
 
     dot = (drone_x_axis * vec_to_gate).sum(dim=1).clamp(-1.0, 1.0)

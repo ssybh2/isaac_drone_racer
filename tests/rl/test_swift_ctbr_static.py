@@ -374,3 +374,21 @@ def test_gtshadow_truth_progression_matches_gt_training_semantics():
     assert "euler_xyz_from_quat" in estimated
     assert "absolute_offset_w = torch.abs(current_pos_w - gate_pose_w[:, :3])" in estimated
     assert "self._legacy_gt_gate_crossing(" in estimated
+
+
+def test_gtshadow_rewards_use_truth_gate():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    rewards = _text("tasks/drone_racer/mdp/rewards.py")
+
+    assert "def progress_truth_gate(" in rewards
+    assert "def lookat_truth_gate(" in rewards
+    assert "class SwiftCTBRGTShadowRewardsCfg" in cfg
+
+    shadow_start = cfg.index(
+        "class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg"
+    )
+    shadow = cfg[shadow_start:]
+    assert (
+        "rewards: SwiftCTBRGTShadowRewardsCfg = "
+        "SwiftCTBRGTShadowRewardsCfg()"
+    ) in shadow

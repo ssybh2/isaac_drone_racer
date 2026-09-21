@@ -121,6 +121,22 @@ class SwiftCTBRGTRacingRewardsCfg(RewardsCfg):
 
 
 @configclass
+class SwiftCTBRGTShadowRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
+    """GT-racing rewards evaluated against the truth-only shadow mission."""
+
+    progress = RewTerm(
+        func=mdp.progress_truth_gate,
+        weight=20.0,
+        params={"command_name": "target"},
+    )
+    lookat_next = RewTerm(
+        func=mdp.lookat_truth_gate,
+        weight=0.1,
+        params={"command_name": "target", "std": 0.5},
+    )
+
+
+@configclass
 class SwiftGTShadowPolicyCfg(ObsGroup):
     """GT-control observation for estimator-shadow racing diagnostics."""
 
@@ -323,7 +339,7 @@ class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg(
     """
 
     observations: SwiftGTShadowObservationsCfg = SwiftGTShadowObservationsCfg()
-    rewards: SwiftCTBRGTRacingRewardsCfg = SwiftCTBRGTRacingRewardsCfg()
+    rewards: SwiftCTBRGTShadowRewardsCfg = SwiftCTBRGTShadowRewardsCfg()
 
     def __post_init__(self) -> None:
         super().__post_init__()
