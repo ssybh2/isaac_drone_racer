@@ -15,8 +15,24 @@ import torch
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
 
+from perception.stage2_calibration import (
+    CAMERA_OFFSET_POS_B,
+    CAMERA_TO_BODY_ROTATION,
+    OPENVINS_CAMERA_INTRINSICS,
+    OPENVINS_CAMERA_RESOLUTION,
+    load_stage2_gate_geometry,
+)
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+
+
+# Loaded once at module import. The reward runs at 100 Hz over 4096 environments,
+# so the calibrated gate geometry must not be re-read from disk every step.
+_STAGE2_GATE_CORNERS_G = tuple(
+    tuple(float(v) for v in point)
+    for point in load_stage2_gate_geometry().object_points_g.tolist()
+)
 
 
 def pos_error_l2(
@@ -220,6 +236,183 @@ def swift_perception_awareness(
     delta_cam = torch.acos(dot)
     return torch.exp(float(lambda_3) * torch.pow(delta_cam, 4))
 
+
+
+def gt_next_gate_image_visibility(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    margin_px: float = 24.0,
+    center_sigma: float = 1.0,
+    min_depth_m: float = 0.05,
+    center_weight: float = 0.25,
+    coverage_weight: float = 0.25,
+    margin_weight: float = 0.20,
+    usable_bonus_weight: float = 0.30,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward keeping the active GT gate usable in the calibrated camera image.
+
+    This is a training-only GT shaping term. It analytically projects the four
+    calibrated gate-opening corners into the same 256x256 Stage2 pinhole camera
+    used by the estimator. No rendered image or detector output is required, so
+    the 4096-environment GT PPO training stage remains sensor-free and fast.
+
+    The returned score is in [0, 1] and combines:
+      * a smooth gate-center term that still gives shaping just outside the FOV;
+      * the fraction of the four semantic corners actually inside the image;
+      * image-border margin for visible corners;
+      * an explicit bonus when >=2 corners are visible, matching the production
+        direct-reprojection minimum measurement requirement.
+    """
+    if margin_px <= 0.0:
+        raise ValueError("margin_px must be positive")
+    if center_sigma <= 0.0:
+        raise ValueError("center_sigma must be positive")
+
+    weights = (
+        float(center_weight),
+        float(coverage_weight),
+        float(margin_weight),
+        float(usable_bonus_weight),
+    )
+    if any(value < 0.0 for value in weights):
+        raise ValueError("image-visibility reward weights must be non-negative")
+    weight_sum = sum(weights)
+    if weight_sum <= 0.0:
+        raise ValueError("image-visibility reward weights must sum to > 0")
+
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+    device = asset.device
+    dtype = asset.data.root_pos_w.dtype
+    num_envs = env.num_envs
+
+    gate_indices = command.next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(num_envs, device=device)
+
+    # IMPORTANT: calibrated corners are in the gate actor frame, not the COM
+    # frame. Match Stage2 truth labeling exactly.
+    track_data = command.track.data
+    gate_pos_all = getattr(track_data, "object_pos_w", None)
+    gate_quat_all = getattr(track_data, "object_quat_w", None)
+    if gate_pos_all is None or gate_quat_all is None:
+        gate_pos_all = getattr(track_data, "object_link_pos_w", None)
+        gate_quat_all = getattr(track_data, "object_link_quat_w", None)
+    if gate_pos_all is None or gate_quat_all is None:
+        raise RuntimeError(
+            "GT camera-visibility reward requires actor/link gate pose"
+        )
+
+    gate_pos_w = gate_pos_all[env_ids, gate_indices]
+    gate_quat_w = gate_quat_all[env_ids, gate_indices]
+    gate_R_wg = math_utils.matrix_from_quat(gate_quat_w)
+
+    corners_g = torch.as_tensor(
+        _STAGE2_GATE_CORNERS_G,
+        dtype=dtype,
+        device=device,
+    )
+    corners_g = corners_g.unsqueeze(0).expand(num_envs, -1, -1)
+    corners_w = gate_pos_w[:, None, :] + torch.einsum(
+        "nij,nkj->nki",
+        gate_R_wg,
+        corners_g,
+    )
+
+    body_pos_w = asset.data.root_pos_w
+    body_R_wb = math_utils.matrix_from_quat(asset.data.root_quat_w)
+    rel_w = corners_w - body_pos_w[:, None, :]
+    corners_b = torch.einsum(
+        "nji,nkj->nki",
+        body_R_wb,
+        rel_w,
+    )
+
+    camera_offset_b = torch.as_tensor(
+        CAMERA_OFFSET_POS_B,
+        dtype=dtype,
+        device=device,
+    )
+    R_bc = torch.as_tensor(
+        CAMERA_TO_BODY_ROTATION,
+        dtype=dtype,
+        device=device,
+    )
+    # Row-vector form of p_c = R_cb * (p_b - t_bc): rel_b @ R_bc.
+    corners_c = torch.matmul(
+        corners_b - camera_offset_b.view(1, 1, 3),
+        R_bc,
+    )
+
+    fx, fy, cx, cy = (float(v) for v in OPENVINS_CAMERA_INTRINSICS)
+    image_width, image_height = (
+        int(OPENVINS_CAMERA_RESOLUTION[0]),
+        int(OPENVINS_CAMERA_RESOLUTION[1]),
+    )
+
+    z = corners_c[..., 2]
+    safe_z = torch.where(
+        z > float(min_depth_m),
+        z,
+        torch.ones_like(z),
+    )
+    u = fx * corners_c[..., 0] / safe_z + cx
+    v = fy * corners_c[..., 1] / safe_z + cy
+
+    forward = z > float(min_depth_m)
+    visible = (
+        forward
+        & (u >= 0.0)
+        & (u < float(image_width))
+        & (v >= 0.0)
+        & (v < float(image_height))
+    )
+
+    coverage = visible.to(dtype).mean(dim=1)
+    usable_bonus = (visible.sum(dim=1) >= 2).to(dtype)
+
+    edge_distance = torch.minimum(
+        torch.minimum(u, float(image_width - 1) - u),
+        torch.minimum(v, float(image_height - 1) - v),
+    )
+    per_corner_margin = torch.clamp(
+        edge_distance / float(margin_px),
+        min=0.0,
+        max=1.0,
+    )
+    margin_score = (
+        per_corner_margin * visible.to(dtype)
+    ).mean(dim=1)
+
+    # A smooth center term provides a recovery signal even when all four
+    # corners are just outside the image but the gate remains in front.
+    center_c = corners_c.mean(dim=1)
+    center_z = center_c[:, 2]
+    center_safe_z = torch.where(
+        center_z > float(min_depth_m),
+        center_z,
+        torch.ones_like(center_z),
+    )
+    center_u = fx * center_c[:, 0] / center_safe_z + cx
+    center_v = fy * center_c[:, 1] / center_safe_z + cy
+    norm_u = (center_u - cx) / (0.5 * float(image_width))
+    norm_v = (center_v - cy) / (0.5 * float(image_height))
+    center_score = torch.exp(
+        -0.5
+        * (torch.square(norm_u) + torch.square(norm_v))
+        / float(center_sigma * center_sigma)
+    )
+    center_score = center_score * (
+        center_z > float(min_depth_m)
+    ).to(dtype)
+
+    score = (
+        weights[0] * center_score
+        + weights[1] * coverage
+        + weights[2] * margin_score
+        + weights[3] * usable_bonus
+    ) / weight_sum
+    return torch.clamp(score, min=0.0, max=1.0)
 
 def ang_vel_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize base angular velocity using L2 squared kernel."""
