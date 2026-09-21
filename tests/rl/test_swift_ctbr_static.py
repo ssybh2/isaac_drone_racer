@@ -76,3 +76,40 @@ def test_ctbr_smoke_covers_hover_roll_pitch_yaw():
         "z_drift_m",
     ):
         assert token in smoke
+
+
+
+def test_swift_31d_observation_contract():
+    obs = _text("tasks/drone_racer/mdp/learned_inertial_observations.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+
+    for token in (
+        "def learned_inertial_swift_state",
+        "R_wb = math_utils.matrix_from_quat",
+        "return torch.cat((p_w, v_w, R_wb), dim=-1)",
+        "def learned_next_gate_corners_relative_w",
+        "relative_w.reshape(env.num_envs, 12)",
+    ):
+        assert token in obs
+
+    for token in (
+        "class LearnedInertialSwiftPolicyCfg",
+        "platform_state = ObsTerm(func=mdp.learned_inertial_swift_state)",
+        "next_gate_corners = ObsTerm(",
+        "previous_action = ObsTerm(func=mdp.last_action)",
+    ):
+        assert token in cfg
+
+
+def test_ctbr_gate_flight_smoke_is_estimator_driven():
+    smoke = _text("scripts/rl/smoke_swift_ctbr_gate_flight.py")
+
+    for token in (
+        "raw_env.learned_inertial_state",
+        "desired_body_rate",
+        "_physical_ctbr_to_normalized",
+        "mission_gate_passes",
+        "truth_gate_passes",
+        '"controller_uses_simulator_root_state": False',
+    ):
+        assert token in smoke
