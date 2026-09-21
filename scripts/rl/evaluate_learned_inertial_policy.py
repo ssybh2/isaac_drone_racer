@@ -31,8 +31,17 @@ parser.add_argument(
     default=False,
     help=(
         "Evaluate a legacy checkpoint with its original unbounded Gaussian mean "
-        "(output ACTIONS, clip_actions=False). The environment then performs the "
-        "historical [-1, 1] hard clamp in ControlAction."
+        "(output ACTIONS, clip_actions=False)."
+    ),
+)
+parser.add_argument(
+    "--legacy_executed_action_scale",
+    type=float,
+    default=1.0,
+    help=(
+        "Diagnostic scale applied after reproducing the legacy environment clamp. "
+        "Only valid with --legacy_hard_clip_policy. 1.0 reproduces the historical "
+        "behavior exactly; e.g. 0.95 tests sensitivity to a 5%% motor-action margin."
     ),
 )
 parser.add_argument("--output-dir", type=Path, required=True)
@@ -75,6 +84,15 @@ def _mean(values):
 def main() -> None:
     torch.manual_seed(int(args_cli.seed))
     np.random.seed(int(args_cli.seed))
+    if not (0.0 < float(args_cli.legacy_executed_action_scale) <= 1.0):
+        raise ValueError("--legacy_executed_action_scale must be in (0, 1]")
+    if (
+        float(args_cli.legacy_executed_action_scale) != 1.0
+        and not args_cli.legacy_hard_clip_policy
+    ):
+        raise ValueError(
+            "--legacy_executed_action_scale requires --legacy_hard_clip_policy"
+        )
 
     env_cfg = parse_env_cfg(
         args_cli.task,
@@ -139,6 +157,14 @@ def main() -> None:
             with torch.inference_mode():
                 outputs = runner.agent.act(obs, timestep=0, timesteps=0)
                 actions = outputs[-1].get("mean_actions", outputs[0])
+                if args_cli.legacy_hard_clip_policy:
+                    # Reproduce the historical environment-executed command
+                    # explicitly so action-scale sensitivity can be tested
+                    # independently of actor distillation.
+                    actions = actions.clamp(-1.0, 1.0)
+                    actions = actions * float(
+                        args_cli.legacy_executed_action_scale
+                    )
                 obs, reward, terminated, truncated, _ = wrapped.step(actions)
 
             episode_return += float(reward.reshape(-1)[0].item())
@@ -216,9 +242,14 @@ def main() -> None:
         summary = {
             "checkpoint": checkpoint,
             "action_semantics": (
-                "legacy_raw_mean_environment_hard_clip"
+                "legacy_explicit_hard_clip_then_scale"
                 if args_cli.legacy_hard_clip_policy
                 else "current_registered_policy"
+            ),
+            "legacy_executed_action_scale": (
+                float(args_cli.legacy_executed_action_scale)
+                if args_cli.legacy_hard_clip_policy
+                else None
             ),
             "episodes": len(records),
             "num_gates": num_gates,
