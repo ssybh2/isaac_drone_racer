@@ -268,6 +268,70 @@ def swift_perception_awareness(
 
 
 
+
+def gt_next_gate_camera_angle_l2(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Dense squared angle from calibrated camera boresight to next gate center.
+
+    Unlike a binary in-FOV test, this stays informative even when the gate is
+    completely outside the image. It gives PPO a directional shaping signal for
+    recovering camera observability during aggressive turns.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+    device = asset.device
+    dtype = asset.data.root_pos_w.dtype
+    num_envs = env.num_envs
+
+    gate_indices = command.next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(num_envs, device=device)
+    track_data = command.track.data
+    gate_pos_all = getattr(track_data, "object_pos_w", None)
+    gate_quat_all = getattr(track_data, "object_quat_w", None)
+    if gate_pos_all is None or gate_quat_all is None:
+        gate_pos_all = getattr(track_data, "object_link_pos_w", None)
+        gate_quat_all = getattr(track_data, "object_link_quat_w", None)
+    if gate_pos_all is None or gate_quat_all is None:
+        raise RuntimeError(
+            "GT camera-angle reward requires actor/link gate pose"
+        )
+
+    gate_pos_w = gate_pos_all[env_ids, gate_indices]
+    gate_quat_w = gate_quat_all[env_ids, gate_indices]
+    gate_R_wg = math_utils.matrix_from_quat(gate_quat_w)
+
+    corners_g, camera_offset_b, R_bc = _gt_camera_reward_tensors(
+        device,
+        dtype,
+    )
+    gate_center_g = corners_g.mean(dim=0)
+    gate_center_w = gate_pos_w + torch.einsum(
+        "nij,j->ni",
+        gate_R_wg,
+        gate_center_g,
+    )
+
+    body_pos_w = asset.data.root_pos_w
+    body_quat_w = asset.data.root_quat_w
+    camera_pos_w = body_pos_w + math_utils.quat_apply(
+        body_quat_w,
+        camera_offset_b.view(1, 3).expand(num_envs, -1),
+    )
+
+    # Camera optical +Z expressed in body coordinates is column 2 of R_bc.
+    optical_axis_b = R_bc[:, 2].view(1, 3).expand(num_envs, -1)
+    optical_axis_w = math_utils.normalize(
+        math_utils.quat_apply(body_quat_w, optical_axis_b)
+    )
+    to_gate_w = math_utils.normalize(gate_center_w - camera_pos_w)
+
+    dot = torch.sum(optical_axis_w * to_gate_w, dim=1).clamp(-1.0, 1.0)
+    angle = torch.acos(dot)
+    return torch.square(angle)
+
 def gt_next_gate_image_visibility(
     env: ManagerBasedRLEnv,
     command_name: str,
