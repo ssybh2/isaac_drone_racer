@@ -135,3 +135,36 @@ def test_legacy_actor_transfer_has_behavior_preserving_path():
     )
     for token in expected_overrides:
         assert token in overrides
+
+
+def test_legacy_evaluation_and_on_policy_transfer_collection():
+    evaluator = _text("scripts/rl/evaluate_learned_inertial_policy.py")
+    collector = _text("scripts/rl/collect_legacy_policy_transfer_dataset.py")
+    train = _text("scripts/rl/train.py")
+
+    for token in (
+        "--legacy_hard_clip_policy",
+        'policy_cfg["output"] = "ACTIONS"',
+        'policy_cfg["clip_actions"] = False',
+        "legacy_raw_mean_environment_hard_clip",
+    ):
+        assert token in evaluator
+
+    for token in (
+        'policy_cfg["output"] = "ACTIONS"',
+        'policy_cfg["clip_actions"] = False',
+        "runner.agent._state_preprocessor(obs)",
+        "legacy_raw_mean",
+        "legacy_executed_action",
+        "standardized_observation",
+    ):
+        assert token in collector
+
+    for token in (
+        "--legacy_transfer_dataset",
+        "real_on_policy_legacy_trajectory",
+        'data["standardized_observation"]',
+        'data["legacy_raw_mean"]',
+        'data["legacy_executed_action"]',
+    ):
+        assert token in train
