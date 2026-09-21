@@ -276,3 +276,34 @@ def test_upstream_inspired_gt_racing_contract():
         "_audit_swift_ctbr_gt_racing_cfg(env, agent_cfg)",
     ):
         assert token in train
+
+
+
+def test_estimated_state_gt_policy_deployment_contract():
+    registry = _text("tasks/drone_racer/__init__.py")
+    obs = _text("tasks/drone_racer/mdp/learned_inertial_observations.py")
+    audit = _text("scripts/rl/audit_swift_ctbr_estimated_state_no_gt.py")
+
+    for token in (
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-GTPolicy-v0",
+        "DroneRacerLearnedInertialSwiftCTBRRLCfg",
+        "skrl_swift_ctbr_gt_racing_cfg.yaml",
+    ):
+        assert token in registry
+
+    platform_start = obs.index("def learned_inertial_swift_state")
+    gate_start = obs.index("def learned_next_gate_corners_relative_w")
+    platform_block = obs[platform_start:gate_start]
+    gate_block = obs[gate_start:]
+
+    for token in ("root_pos_w", "root_lin_vel_w", "root_quat_w", "root_state_w"):
+        assert token not in platform_block
+        assert token not in gate_block
+
+    for token in (
+        "EstimatedStateGateTargetingCommand",
+        "actor_reads_runtime_simulator_gt",
+        "mission_progression_reads_runtime_simulator_gt",
+        "self.next_gate_idx[self._mission_gate_passed] += 1",
+    ):
+        assert token in audit
