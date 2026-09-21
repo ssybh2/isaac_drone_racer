@@ -87,12 +87,13 @@ def test_learned_inertial_rl_uses_bounded_policy_profile():
 
     expected_cfg = (
         "clip_actions: True",
-        "max_log_std: -2.5257286443082556",
-        "initial_log_std: -2.5257286443082556",
-        "output: 0.8 * tanh(ACTIONS)",
+        "max_log_std: -2.995732273553991",
+        "initial_log_std: -2.995732273553991",
+        "output: tanh(ACTIONS)",
         "rollouts: 1024",
         "mini_batches: 8",
         "learning_rate: 1.0e-05",
+        "min_lr: 5.0e-06",
         "max_lr: 2.0e-05",
         "entropy_loss_scale: 0.0",
     )
@@ -106,3 +107,29 @@ def test_learned_inertial_rl_uses_bounded_policy_profile():
     assert "low=-1.0" in runtime
     assert "high=1.0" in runtime
 
+
+
+def test_legacy_actor_transfer_has_explicit_recalibration_path():
+    train = _text("scripts/rl/train.py")
+    overrides = _text("utils/training_overrides.py")
+
+    expected_train = (
+        "--recalibrate_legacy_actor",
+        "--legacy_actor_calibration_samples",
+        "--legacy_actor_target_pretanh_abs",
+        "--legacy_preprocessor_count_cap",
+        "_migrate_legacy_learned_inertial_checkpoint",
+        "_sample_legacy_actor_raw_means",
+    )
+    for token in expected_train:
+        assert token in train
+
+    expected_overrides = (
+        "def recalibrate_legacy_actor_output(",
+        "reference_quantile: float = 0.75",
+        "target_pretanh_abs: float = 1.25",
+        "def cap_running_scaler_count(",
+        "def reset_optimizer_state(",
+    )
+    for token in expected_overrides:
+        assert token in overrides
