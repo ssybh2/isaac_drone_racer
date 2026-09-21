@@ -506,3 +506,43 @@ def test_perception_aware_gt_racing_v2_contract():
         assert token in agent
 
     assert '"Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV2-v0"' in train
+
+
+def test_perception_aware_gt_racing_v3_contract():
+    registry = _text("tasks/drone_racer/__init__.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    rewards = _text("tasks/drone_racer/mdp/rewards.py")
+    agent = _text(
+        "tasks/drone_racer/agents/skrl_swift_ctbr_gt_perception_v3_cfg.yaml"
+    )
+    train = _text("scripts/rl/train.py")
+
+    assert "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV3-v0" in registry
+    assert "DroneRacerSwiftCTBRGTPerceptionAwareV3EnvCfg" in registry
+    assert "skrl_swift_ctbr_gt_perception_v3_cfg.yaml" in registry
+
+    assert "class SwiftCTBRGTPerceptionAwareV3RewardsCfg" in cfg
+    assert "func=mdp.gt_next_gate_camera_angle_l2" in cfg
+    assert "weight=-8.0" in cfg
+    assert "camera_observability = RewTerm(" in cfg
+    assert "weight=2.0" in cfg
+
+    for token in (
+        "def gt_next_gate_camera_angle_l2(",
+        "camera_offset_b",
+        "optical_axis_b",
+        "torch.acos",
+        "torch.square(angle)",
+    ):
+        assert token in rewards
+
+    for token in (
+        "rollouts: 24",
+        "learning_epochs: 5",
+        "mini_batches: 4",
+        "learning_rate: 1.0e-04",
+        "timesteps: 50000",
+    ):
+        assert token in agent
+
+    assert '"Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV3-v0"' in train
