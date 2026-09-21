@@ -19,14 +19,16 @@ def test_swift_ctbr_action_contract_is_explicit():
         "allocate_wrench_rate_priority",
         "vehicle_mass_kg: float = 0.6076",
         "body_rate_max_radps: tuple[float, float, float] = (10.0, 10.0, 6.0)",
+        "rate_kp: tuple[float, float, float] = (0.025, 0.025, 0.030)",
     )
     for token in expected:
         assert token in action
 
     # Zero thrust-channel action must map to hover acceleration instead of
     # directly representing a raw motor command.
-    assert "float(self.cfg.gravity_mps2)" in action
-    assert "+ normalized[:, 0] * thrust_span" in action
+    assert "thrust_action >= 0.0" in action
+    assert "gravity + thrust_action * gravity" in action
+    assert "thrust_action * (self._max_collective_accel - gravity)" in action
 
 
 def test_rate_controller_uses_betaflight_style_d_term():
