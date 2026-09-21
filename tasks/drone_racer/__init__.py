@@ -134,6 +134,22 @@ gym.register(
     },
 )
 
+
+gym.register(
+    id="Isaac-Drone-Racer-Swift-CTBR-Train-PassState-v0",
+    entry_point=f"{__name__}.swift_ctbr_racing_env:SwiftCTBRRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerSwiftCTBRPassStateTrainEnvCfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_cfg.yaml"
+        ),
+    },
+)
+
 gym.register(
     id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0",
     entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
