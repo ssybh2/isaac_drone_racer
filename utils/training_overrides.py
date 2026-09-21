@@ -70,6 +70,7 @@ def recalibrate_legacy_actor_output(
     policy: Any,
     raw_means: torch.Tensor,
     *,
+    anchor_raw_mean: torch.Tensor | None = None,
     target_pretanh_abs: float = 1.25,
     reference_quantile: float = 0.75,
     min_reference_abs: float = 0.25,
@@ -106,6 +107,12 @@ def recalibrate_legacy_actor_output(
 
     raw = raw_means.detach().to(device=layer.weight.device, dtype=layer.weight.dtype)
     reference_abs = torch.quantile(raw.abs(), reference_quantile, dim=0)
+    if anchor_raw_mean is not None:
+        anchor = anchor_raw_mean.detach().to(
+            device=layer.weight.device, dtype=layer.weight.dtype
+        ).reshape(-1, raw.shape[1])
+        anchor_abs = anchor.abs().amax(dim=0)
+        reference_abs = torch.maximum(reference_abs, anchor_abs)
     safe_reference = reference_abs.clamp_min(float(min_reference_abs))
     scale = (float(target_pretanh_abs) / safe_reference).clamp(
         min=float(min_scale), max=float(max_scale)
