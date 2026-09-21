@@ -267,7 +267,7 @@ def test_upstream_inspired_gt_racing_contract():
         assert token in agent
 
     for token in (
-        'SWIFT_CTBR_GT_RACING_TASK = "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0"',
+        "SWIFT_CTBR_GT_RACING_TASKS = {",
         "def _audit_swift_ctbr_gt_racing_cfg",
         "expected_layers = [256, 256, 256]",
         '"rollouts": 24',
@@ -405,3 +405,70 @@ def test_gt_fixed_start_reference_task_contract():
     assert "self.events.reset_base = EventTerm(" in fixed
     assert "load_stage2_gate_geometry().center_g" in fixed
     assert "Isaac-Drone-Racer-Swift-CTBR-GT-FixedStart-v0" in registry
+
+
+def test_perception_aware_gt_racing_contract():
+    registry = _text("tasks/drone_racer/__init__.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    rewards = _text("tasks/drone_racer/mdp/rewards.py")
+    baseline_agent = _text(
+        "tasks/drone_racer/agents/skrl_swift_ctbr_gt_racing_cfg.yaml"
+    )
+    perception_agent = _text(
+        "tasks/drone_racer/agents/skrl_swift_ctbr_gt_perception_cfg.yaml"
+    )
+    train = _text("scripts/rl/train.py")
+
+    assert "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0" in registry
+    assert "DroneRacerSwiftCTBRGTPerceptionAwareEnvCfg" in registry
+    assert "skrl_swift_ctbr_gt_perception_cfg.yaml" in registry
+
+    assert "class SwiftCTBRGTPerceptionAwareRewardsCfg" in cfg
+    assert "func=mdp.gt_next_gate_image_visibility" in cfg
+    assert "weight=2.0" in cfg
+    assert '"usable_bonus_weight": 0.30' in cfg
+    assert (
+        "class DroneRacerSwiftCTBRGTPerceptionAwareEnvCfg"
+        in cfg
+    )
+    assert "DroneRacerSwiftCTBRGTRacingEnvCfg" in cfg
+
+    for token in (
+        "def gt_next_gate_image_visibility(",
+        "OPENVINS_CAMERA_INTRINSICS",
+        "OPENVINS_CAMERA_RESOLUTION",
+        "CAMERA_TO_BODY_ROTATION",
+        "object_pos_w",
+        "visible.sum(dim=1) >= 2",
+        "margin_score",
+        "center_score",
+    ):
+        assert token in rewards
+
+    # Training hyperparameters must remain identical to the successful
+    # 37-gate baseline. Only logging metadata is allowed to differ.
+    normalized_baseline = baseline_agent.replace(
+        'directory: "swift_ctbr_gt_racing"',
+        'directory: "LOGDIR"',
+    ).replace(
+        'experiment_name: "easy7_4096env_roll24_256x3_gt"',
+        'experiment_name: "EXPERIMENT"',
+    ).replace(
+        "# GT racing PPO profile.",
+        "# PROFILE",
+    )
+    normalized_perception = perception_agent.replace(
+        'directory: "swift_ctbr_gt_perception"',
+        'directory: "LOGDIR"',
+    ).replace(
+        'experiment_name: "easy7_4096env_roll24_256x3_gt_perception"',
+        'experiment_name: "EXPERIMENT"',
+    )
+    assert "rollouts: 24" in normalized_perception
+    assert "learning_epochs: 5" in normalized_perception
+    assert "mini_batches: 4" in normalized_perception
+    assert "learning_rate: 1.0e-04" in normalized_perception
+    assert "timesteps: 50000" in normalized_perception
+
+    assert "SWIFT_CTBR_GT_RACING_TASKS = {" in train
+    assert '"Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0"' in train
