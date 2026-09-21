@@ -148,6 +148,37 @@ The smoke goal is not detector performance yet. It is to confirm that:
 - speed/body-rate metadata is non-zero and racing-like;
 - the visible-corner histogram contains useful 2/3/4-corner frames.
 
+
+## 5.1 Reset robustness after a real collision
+
+The first full collection attempt exposed a dataset-runner issue rather than a
+policy issue:
+
+```text
+attempt 1-4 : 36/37/37/37 gates, ~499 frames each
+attempt 5   : collision after 141 steps
+attempt 6+  : immediate one-step collision repeatedly
+```
+
+The collector had been relying on the environment's in-step auto-reset. After
+a real contact termination, the next step could still observe stale
+contact/derived sensor state and immediately terminate again.
+
+The collector now performs an explicit `wrapped.reset()` after every episode
+(timeout, collision, flyaway or other) before the next attempt. This makes
+dataset episode boundaries use the full reset path and prevents a single
+collision from poisoning all later attempts.
+
+When updating from an earlier racing-vision branch revision, sync to a commit
+containing:
+
+```text
+fix(perception): hard reset racing collector after each episode
+```
+
+Then restart the dataset collection from a clean output directory.
+
+
 ## 6. Main racing dataset
 
 After the smoke passes, collect several successful episodes.
