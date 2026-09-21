@@ -202,7 +202,10 @@ SWIFT_CTBR_POLICY0_TASKS = {
     "Isaac-Drone-Racer-Swift-CTBR-Train-v0",
     "Isaac-Drone-Racer-Swift-CTBR-Train-PassState-v0",
 }
-SWIFT_CTBR_GT_RACING_TASK = "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0"
+SWIFT_CTBR_GT_RACING_TASKS = {
+    "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0",
+    "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0",
+}
 LEARNED_INERTIAL_SWIFT_CTBR_TASK = (
     "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0"
 )
@@ -309,7 +312,7 @@ def _audit_swift_ctbr_policy0_cfg(env, agent_cfg: dict) -> None:
 
 def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
     """Fail closed on the upstream-inspired GT racing training contract."""
-    if args_cli.task != SWIFT_CTBR_GT_RACING_TASK:
+    if args_cli.task not in SWIFT_CTBR_GT_RACING_TASKS:
         return
 
     action_space = env.unwrapped.single_action_space
