@@ -15,6 +15,7 @@ def test_racing_vision_collector_keeps_control_gt_only():
     assert "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0" in text
     assert "stage2_reference_camera_cfg()" in text
     assert 'args_cli.enable_cameras = True' in text
+    assert "cfg.scene.collision_sensor.history_length = 1" in text
     assert "--min-gates" in text
     assert "if keep:" in text
     assert "IsaacStage2DatasetCollector" in text
