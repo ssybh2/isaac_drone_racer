@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import gymnasium as gym
 import numpy as np
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
@@ -97,6 +98,29 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._debug_truth_motion_history = {}
         self.last_episode_diagnostic: dict[str, object] | None = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
+
+        # IsaacLab 2.1 exposes manager-based action spaces as unbounded even
+        # when an ActionTerm has a physical normalized-action contract.  The
+        # motor controller below expects exactly four commands in [-1, 1], so
+        # publish that real contract to Gym/skrl.  This makes Gaussian policy
+        # clipping happen before PPO stores/log-probs the action rather than
+        # only inside ControlAction at the very end of the environment path.
+        action_dim = int(self.action_manager.total_action_dim)
+        if action_dim != 4:
+            raise ValueError(
+                f"LearnedInertialRacingEnv expects 4 motor actions, got {action_dim}"
+            )
+        self.single_action_space = gym.spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(action_dim,),
+            dtype=np.float32,
+        )
+        self.action_space = gym.vector.utils.batch_space(
+            self.single_action_space,
+            self.num_envs,
+        )
+
         if self.num_envs != 1:
             raise ValueError("LearnedInertialRacingEnv currently requires num_envs=1")
 
