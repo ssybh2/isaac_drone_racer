@@ -2,7 +2,7 @@ name: learned inertial pure checks
 
 on:
   push:
-    branches: ["feature/learned-inertial-racing", "feature/v6.2-uzh-stochastic-cloning", "feature/v6.3-gate-pnp-diagnostics", "feature/v6.4-direct-gate-reprojection", "feature/v6.5-perception-robustness", "feature/v6.6-latency-compensated-reprojection", "feature/rl-integration-estimated-state"]
+    branches: ["feature/learned-inertial-racing", "feature/v6.2-uzh-stochastic-cloning", "feature/v6.3-gate-pnp-diagnostics", "feature/v6.4-direct-gate-reprojection", "feature/v6.5-perception-robustness", "feature/v6.6-latency-compensated-reprojection", "feature/rl-integration-estimated-state", "feature/swift-ctbr-rl"]
   pull_request:
     branches: ["debug/openvins-imu-convention-isolation", master]
 
@@ -33,12 +33,17 @@ jobs:
           python -m py_compile scripts/rl/train.py
           python -m py_compile scripts/rl/play.py
           python -m py_compile scripts/rl/evaluate_learned_inertial_policy.py
+          python -m py_compile scripts/rl/smoke_swift_ctbr_control.py
           python -m py_compile scripts/estimation/diagnose_learned_inertial.py
           python -m py_compile scripts/estimation/sweep_learned_update_rate.py
           python -m py_compile scripts/estimation/sweep_learned_covariance_multiplier.py
           python -m py_compile tasks/drone_racer/mdp/learned_inertial_observations.py
           python -m py_compile tasks/drone_racer/mdp/commands.py
+          python -m py_compile dynamics/body_rate_controller.py
+          python -m py_compile dynamics/allocation.py
+          python -m py_compile tasks/drone_racer/mdp/swift_ctbr_action.py
           python -m py_compile tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py
+          python -m py_compile tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py
           python -m py_compile tasks/drone_racer/learned_inertial_racing_env.py
       - name: Run pure estimator tests
         env:
@@ -47,4 +52,5 @@ jobs:
           pytest -q tests/estimation/test_learned_inertial_odometry.py \
             tests/estimation/test_learned_motion.py \
             tests/estimation/test_learned_motion_dataset.py \
-            tests/rl/test_learned_inertial_rl_interface_static.py
+            tests/rl/test_learned_inertial_rl_interface_static.py \
+            tests/rl/test_swift_ctbr_static.py
