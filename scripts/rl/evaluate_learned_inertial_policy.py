@@ -25,6 +25,16 @@ parser.add_argument(
 parser.add_argument("--checkpoint", required=True)
 parser.add_argument("--episodes", type=int, default=20)
 parser.add_argument("--seed", type=int, default=1)
+parser.add_argument(
+    "--legacy_hard_clip_policy",
+    action="store_true",
+    default=False,
+    help=(
+        "Evaluate a legacy checkpoint with its original unbounded Gaussian mean "
+        "(output ACTIONS, clip_actions=False). The environment then performs the "
+        "historical [-1, 1] hard clamp in ControlAction."
+    ),
+)
 parser.add_argument("--output-dir", type=Path, required=True)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -75,6 +85,20 @@ def main() -> None:
     env_cfg.seed = int(args_cli.seed)
 
     agent_cfg = load_cfg_from_registry(args_cli.task, "skrl_cfg_entry_point")
+    if args_cli.legacy_hard_clip_policy:
+        policy_cfg = agent_cfg["models"]["policy"]
+        policy_cfg["clip_actions"] = False
+        policy_cfg["clip_mean_actions"] = False
+        policy_cfg["clip_log_std"] = True
+        policy_cfg["min_log_std"] = -20.0
+        policy_cfg["max_log_std"] = 2.0
+        policy_cfg["initial_log_std"] = 0.0
+        policy_cfg["output"] = "ACTIONS"
+        print(
+            "[eval] legacy action semantics enabled: "
+            "raw Gaussian mean -> environment hard clamp[-1, 1]",
+            flush=True,
+        )
     agent_cfg["seed"] = int(args_cli.seed)
     agent_cfg["trainer"]["close_environment_at_exit"] = False
     agent_cfg["agent"]["experiment"]["write_interval"] = 0
@@ -191,6 +215,11 @@ def main() -> None:
 
         summary = {
             "checkpoint": checkpoint,
+            "action_semantics": (
+                "legacy_raw_mean_environment_hard_clip"
+                if args_cli.legacy_hard_clip_policy
+                else "current_registered_policy"
+            ),
             "episodes": len(records),
             "num_gates": num_gates,
             "full_lap_completion_rate": float(
