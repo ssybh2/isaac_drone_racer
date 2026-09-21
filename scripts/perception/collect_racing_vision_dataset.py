@@ -398,6 +398,18 @@ def main() -> None:
                     )
 
                 episode_rows.append(row)
+
+                # Do not rely on ManagerBasedRLEnv.step()'s in-step auto-reset
+                # as the sole initialization path for the next dataset episode.
+                # A real contact termination can leave contact-sensor / derived
+                # scene state stale for the first post-reset step, which then
+                # appears as an endless sequence of one-step collisions.
+                #
+                # The explicit reset path performs a full scene/manager reset
+                # before the next policy action and is also consistent after
+                # timeouts, so every accepted/rejected episode starts from the
+                # same clean contract.
+                obs, _ = wrapped.reset()
                 prev_gate_idx = int(command.next_gate_idx[0].item())
                 break
 
