@@ -165,3 +165,33 @@ def ang_vel_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCf
     """Penalize base angular velocity using L2 squared kernel."""
     asset: RigidObject = env.scene[asset_cfg.name]
     return torch.sum(torch.square(asset.data.root_ang_vel_b), dim=1)
+
+
+def swift_ctbr_body_rate_command_l2(
+    env: ManagerBasedRLEnv,
+    action_name: str = "control_action",
+) -> torch.Tensor:
+    """Squared physical body-rate command used by Swift's r_cmd term."""
+    term = env.action_manager.get_term(action_name)
+    command = getattr(term, "ctbr_command", None)
+    if command is None:
+        raise AttributeError(
+            f"action term {action_name!r} does not expose ctbr_command"
+        )
+    return torch.sum(torch.square(command[:, 1:4]), dim=1)
+
+
+def swift_ctbr_command_delta_l2(
+    env: ManagerBasedRLEnv,
+    action_name: str = "control_action",
+) -> torch.Tensor:
+    """Squared physical CTBR command increment ||a_t - a_{t-1}||^2."""
+    term = env.action_manager.get_term(action_name)
+    command = getattr(term, "ctbr_command", None)
+    previous = getattr(term, "previous_ctbr_command", None)
+    if command is None or previous is None:
+        raise AttributeError(
+            f"action term {action_name!r} does not expose CTBR command history"
+        )
+    return torch.sum(torch.square(command - previous), dim=1)
+
