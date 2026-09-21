@@ -296,6 +296,20 @@ class DroneRacerSwiftCTBRPassStateTrainEnvCfg(DroneRacerSwiftCTBRTrainEnvCfg):
 
 
 @configclass
+class DroneRacerLearnedInertialSwiftCTBRRLCfg(DroneRacerLearnedInertialRLCfg):
+    """Full sensor-faithful learned-inertial stack with Swift CTBR actuation."""
+
+    observations: LearnedInertialSwiftObservationsCfg = LearnedInertialSwiftObservationsCfg()
+    actions: SwiftCTBRActionsCfg = SwiftCTBRActionsCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Keep one sensor-faithful environment for final closed-loop validation.
+        # PPO training will later use a separate vectorized residual/noise task.
+        self.scene.num_envs = 1
+
+
+@configclass
 class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg(
     DroneRacerLearnedInertialSwiftCTBRRLCfg
 ):
@@ -316,15 +330,3 @@ class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg(
         self.episode_length_s = 20.0
 
 
-@configclass
-class DroneRacerLearnedInertialSwiftCTBRRLCfg(DroneRacerLearnedInertialRLCfg):
-    """Full sensor-faithful learned-inertial stack with Swift CTBR actuation."""
-
-    observations: LearnedInertialSwiftObservationsCfg = LearnedInertialSwiftObservationsCfg()
-    actions: SwiftCTBRActionsCfg = SwiftCTBRActionsCfg()
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        # Keep one sensor-faithful environment for final closed-loop validation.
-        # PPO training will later use a separate vectorized residual/noise task.
-        self.scene.num_envs = 1
