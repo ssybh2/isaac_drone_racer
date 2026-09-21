@@ -205,6 +205,7 @@ SWIFT_CTBR_POLICY0_TASKS = {
 SWIFT_CTBR_GT_RACING_TASKS = {
     "Isaac-Drone-Racer-Swift-CTBR-GT-Racing-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0",
+    "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV2-v0",
 }
 LEARNED_INERTIAL_SWIFT_CTBR_TASK = (
     "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0"
