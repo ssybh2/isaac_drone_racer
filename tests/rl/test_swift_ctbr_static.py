@@ -344,3 +344,21 @@ def test_gtshadow_config_is_defined_after_base():
     base = cfg.index("class DroneRacerLearnedInertialSwiftCTBRRLCfg")
     shadow = cfg.index("class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg")
     assert base < shadow
+
+
+def test_gtshadow_flyaway_uses_truth_gate():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    terminations = _text("tasks/drone_racer/mdp/terminations.py")
+
+    truth_start = terminations.index("def flyaway_truth_gate(")
+    truth_block = terminations[truth_start:]
+    assert "gt_next_gate_idx" in truth_block
+    assert "command.track.data.object_com_pos_w" in truth_block
+    assert "command.command" not in truth_block
+
+    shadow_start = cfg.index(
+        "class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg"
+    )
+    shadow_block = cfg[shadow_start:]
+    assert "self.terminations.flyaway = DoneTerm(" in shadow_block
+    assert "func=mdp.flyaway_truth_gate" in shadow_block

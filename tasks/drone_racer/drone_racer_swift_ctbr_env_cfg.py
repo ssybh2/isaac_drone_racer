@@ -12,6 +12,7 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 
 from . import mdp
@@ -328,5 +329,10 @@ class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg(
         super().__post_init__()
         self.scene.num_envs = 1
         self.episode_length_s = 20.0
+
+        self.terminations.flyaway = DoneTerm(
+            func=mdp.flyaway_truth_gate,
+            params={"command_name": "target", "distance": 20.0},
+        )
 
 

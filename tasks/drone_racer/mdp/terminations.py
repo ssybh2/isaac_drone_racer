@@ -42,3 +42,34 @@ def flyaway(
     # Compute distance
     distance_tensor = torch.linalg.norm(asset.data.root_pos_w - target_pos_tensor, dim=1)
     return distance_tensor > distance
+
+
+def flyaway_truth_gate(
+    env: ManagerBasedRLEnv,
+    distance: float,
+    command_name: str = "target",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Terminate GTShadow only when truth state is far from the truth mission gate.
+
+    The estimator-driven mission index is intentionally ignored here. This keeps
+    estimator divergence from terminating a GT-controlled shadow rollout and
+    preserves GTShadow as a policy/estimator isolation benchmark.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_term(command_name)
+
+    if not hasattr(command, "gt_next_gate_idx"):
+        raise AttributeError(
+            "flyaway_truth_gate requires a command exposing gt_next_gate_idx"
+        )
+
+    gate_indices = command.gt_next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(env.num_envs, device=asset.device)
+    target_pos_w = command.track.data.object_com_pos_w[env_ids, gate_indices]
+
+    distance_tensor = torch.linalg.norm(
+        asset.data.root_pos_w - target_pos_w,
+        dim=1,
+    )
+    return distance_tensor > float(distance)
