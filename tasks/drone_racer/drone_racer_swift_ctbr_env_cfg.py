@@ -123,6 +123,31 @@ class SwiftCTBRGTRacingRewardsCfg(RewardsCfg):
 
 
 @configclass
+class SwiftCTBRGTPerceptionAwareRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
+    """Keep the successful GT racing objective and add camera observability.
+
+    The policy observation remains exactly the same 31-D GT vector. This reward
+    is training-only privileged information: calibrated gate corners are
+    projected analytically into the production 256x256 camera image and the
+    policy is rewarded for keeping the next gate usable by perception.
+    """
+
+    camera_visibility = RewTerm(
+        func=mdp.gt_next_gate_image_visibility,
+        weight=2.0,
+        params={
+            "command_name": "target",
+            "margin_px": 24.0,
+            "center_sigma": 1.0,
+            "center_weight": 0.25,
+            "coverage_weight": 0.25,
+            "margin_weight": 0.20,
+            "usable_bonus_weight": 0.30,
+        },
+    )
+
+
+@configclass
 class SwiftCTBRGTShadowRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
     """GT-racing rewards evaluated against the truth-only shadow mission."""
 
@@ -294,6 +319,23 @@ class DroneRacerSwiftCTBRGTRacingEnvCfg(DroneRacerSwiftCTBRTrainEnvCfg):
         self.commands.target.randomise_start = True
         self.commands.target.debug_vis = False
         self.events.push_robot = None
+
+
+@configclass
+class DroneRacerSwiftCTBRGTPerceptionAwareEnvCfg(
+    DroneRacerSwiftCTBRGTRacingEnvCfg
+):
+    """37-gate GT racing curriculum with explicit image-space visibility reward.
+
+    Every training specification inherited from the successful GT racing task
+    stays unchanged: Easy-7, 4096 environments, 20 s episodes, the same 31-D
+    GT observation, CTBR action semantics and PPO configuration. Only the
+    reward adds the calibrated camera-observability term.
+    """
+
+    rewards: SwiftCTBRGTPerceptionAwareRewardsCfg = (
+        SwiftCTBRGTPerceptionAwareRewardsCfg()
+    )
 
 
 @configclass
