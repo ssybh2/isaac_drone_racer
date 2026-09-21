@@ -281,6 +281,7 @@ def _migrate_legacy_learned_inertial_checkpoint(agent) -> dict:
     metadata = recalibrate_legacy_actor_output(
         agent.policy,
         raw_means,
+        anchor_raw_mean=zero_raw,
         target_pretanh_abs=float(args_cli.legacy_actor_target_pretanh_abs),
         reference_quantile=0.75,
     )
@@ -483,7 +484,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if resume_path:
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
         # runner.agent.load is intentionally strict with the model state. The
-        # 0.8*tanh mean changes only the forward expression and adds no trainable
+        # tanh mean changes only the forward expression and adds no trainable
         # parameters, so legacy checkpoints remain state-dict compatible.
         runner.agent.load(resume_path)
 
