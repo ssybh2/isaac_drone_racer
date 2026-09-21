@@ -175,11 +175,19 @@ class DroneRacerSwiftCTBRTrainEnvCfg(DroneRacerEnvCfg):
         # deployment stack, but keep training fully vectorized and sensor-free.
         self.scene.track = generate_track(track_config=EASY_7_GATE_TRACK_CONFIG)
 
-        # GateTargetingCommand randomizes the active gate and resets just after
-        # its predecessor. This supplies diverse gate-to-gate starts without
-        # leaking a fixed-start bias into policy-0.
-        self.commands.target.randomise_start = True
-        self.commands.target.debug_vis = False
+        # Swift-style training starts near a state that has just passed a
+        # random predecessor gate, with through-gate momentum rather than from
+        # rest. This prevents the stop-and-go local optimum seen in policy-0 v1.
+        self.commands.target = mdp.SwiftPassStateGateTargetingCommandCfg(
+            asset_name="robot",
+            track_name="track",
+            randomise_start=True,
+            record_fpv=False,
+            resampling_time_range=(1.0e9, 1.0e9),
+            debug_vis=False,
+            forward_speed_range_mps=(1.5, 3.0),
+            post_gate_offset_m=1.0,
+        )
 
         # No random external pushes in policy-0. Swift's first-stage training
         # uses the nominal simulator; empirical residuals are introduced only
