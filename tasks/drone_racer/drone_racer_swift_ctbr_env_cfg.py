@@ -9,11 +9,38 @@ but swaps the old direct-motor action for the new CTBR low-level controller.
 from __future__ import annotations
 
 from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils import configclass
 
 from . import mdp
 from .drone_racer_env_cfg import DroneRacerEnvCfg_PLAY
 from .drone_racer_learned_inertial_env_cfg import DroneRacerLearnedInertialRLCfg
+
+
+
+
+
+@configclass
+class LearnedInertialSwiftPolicyCfg(ObsGroup):
+    """Swift-style 31D actor observation from estimator + known gate map."""
+
+    platform_state = ObsTerm(func=mdp.learned_inertial_swift_state)
+    next_gate_corners = ObsTerm(
+        func=mdp.learned_next_gate_corners_relative_w,
+        params={"command_name": "target"},
+    )
+    previous_action = ObsTerm(func=mdp.last_action)
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
+
+@configclass
+class LearnedInertialSwiftObservationsCfg:
+    policy: LearnedInertialSwiftPolicyCfg = LearnedInertialSwiftPolicyCfg()
+    critic = None
 
 
 @configclass
@@ -64,6 +91,7 @@ class DroneRacerSwiftCTBRControlEnvCfg(DroneRacerEnvCfg_PLAY):
 class DroneRacerLearnedInertialSwiftCTBRRLCfg(DroneRacerLearnedInertialRLCfg):
     """Full sensor-faithful learned-inertial stack with Swift CTBR actuation."""
 
+    observations: LearnedInertialSwiftObservationsCfg = LearnedInertialSwiftObservationsCfg()
     actions: SwiftCTBRActionsCfg = SwiftCTBRActionsCfg()
 
     def __post_init__(self) -> None:
