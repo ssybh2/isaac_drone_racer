@@ -392,3 +392,16 @@ def test_gtshadow_rewards_use_truth_gate():
         "rewards: SwiftCTBRGTShadowRewardsCfg = "
         "SwiftCTBRGTShadowRewardsCfg()"
     ) in shadow
+
+
+def test_gt_fixed_start_reference_task_contract():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    start = cfg.index("class DroneRacerSwiftCTBRGTFixedStartEnvCfg")
+    fixed = cfg[start:]
+    assert "DroneRacerSwiftCTBRGTRacingEnvCfg" in fixed
+    assert "self.commands.target.randomise_start = None" in fixed
+    assert "self.events.reset_base = EventTerm(" in fixed
+    assert "load_stage2_gate_geometry().center_g" in fixed
+    assert "Isaac-Drone-Racer-Swift-CTBR-GT-FixedStart-v0" in registry

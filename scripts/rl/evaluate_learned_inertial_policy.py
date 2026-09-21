@@ -131,6 +131,7 @@ def main() -> None:
     print(f"[eval] loading checkpoint: {checkpoint}", flush=True)
     runner.agent.load(checkpoint)
     runner.agent.set_running_mode("eval")
+    runner.agent.set_mode("eval")
 
     output_dir = args_cli.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
