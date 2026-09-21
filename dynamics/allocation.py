@@ -52,6 +52,7 @@ class Allocation:
             device=device,
         )
         self._allocation_matrix = A.unsqueeze(0).repeat(num_envs, 1, 1)
+        self._inverse_allocation_matrix = torch.linalg.inv(A).unsqueeze(0).repeat(num_envs, 1, 1)
         self._thrust_coeff = thrust_coeff
 
     def compute(self, omega):
@@ -67,3 +68,81 @@ class Allocation:
         thrusts_ref = self._thrust_coeff * omega**2
         thrust_torque = torch.bmm(self._allocation_matrix, thrusts_ref.unsqueeze(-1)).squeeze(-1)
         return thrust_torque
+
+    def allocate_wrench_rate_priority(self, wrench, omega_max):
+        """Allocate [collective thrust, body moments] to bounded rotor speeds.
+
+        The allocation mirrors the saturation behavior used by low-level racing
+        controllers: body-moment authority is preserved before collective
+        thrust whenever possible. The requested moment contribution is solved
+        independently, scaled only if its rotor-thrust span is infeasible, then
+        a common collective offset is chosen as close as possible to the
+        requested collective thrust.
+
+        Parameters
+        ----------
+        wrench:
+            Tensor of shape (num_envs, 4), ordered [T, tau_x, tau_y, tau_z].
+        omega_max:
+            Maximum rotor speed in rad/s.
+
+        Returns
+        -------
+        omega_ref, rotor_thrusts:
+            Bounded rotor-speed references and their corresponding thrusts.
+        """
+        if wrench.ndim != 2 or wrench.shape[1] != 4:
+            raise ValueError("wrench must have shape (num_envs, 4)")
+        if wrench.shape[0] != self._allocation_matrix.shape[0]:
+            raise ValueError("wrench batch size does not match allocator")
+        if omega_max <= 0.0:
+            raise ValueError("omega_max must be positive")
+
+        dtype = wrench.dtype
+        device = wrench.device
+        inverse = self._inverse_allocation_matrix.to(device=device, dtype=dtype)
+
+        # Moment-only rotor contribution. Its sum is zero by construction.
+        moment_wrench = torch.zeros_like(wrench)
+        moment_wrench[:, 1:] = wrench[:, 1:]
+        moment_rotor = torch.bmm(
+            inverse, moment_wrench.unsqueeze(-1)
+        ).squeeze(-1)
+
+        max_rotor_thrust = torch.as_tensor(
+            self._thrust_coeff * float(omega_max) ** 2,
+            dtype=dtype,
+            device=device,
+        )
+
+        # If requested moments alone exceed the available rotor-thrust span,
+        # scale all moments proportionally. This preserves their direction.
+        moment_min = moment_rotor.amin(dim=1, keepdim=True)
+        moment_max = moment_rotor.amax(dim=1, keepdim=True)
+        span = moment_max - moment_min
+        moment_scale = torch.clamp(
+            max_rotor_thrust / torch.clamp(span, min=1.0e-9),
+            max=1.0,
+        )
+        moment_rotor = moment_rotor * moment_scale
+
+        # With the feasible moment distribution fixed, choose a shared
+        # collective contribution. Clamp the requested T/4 to the interval
+        # that keeps every rotor inside [0, max_rotor_thrust].
+        lower = -moment_rotor.amin(dim=1, keepdim=True)
+        upper = max_rotor_thrust - moment_rotor.amax(dim=1, keepdim=True)
+        requested_collective_per_rotor = wrench[:, :1] / 4.0
+        collective = torch.minimum(
+            torch.maximum(requested_collective_per_rotor, lower),
+            upper,
+        )
+
+        rotor_thrusts = torch.clamp(
+            moment_rotor + collective,
+            min=0.0,
+            max=max_rotor_thrust,
+        )
+        omega_ref = torch.sqrt(
+            rotor_thrusts / float(self._thrust_coeff)
+        )
+        return omega_ref, rotor_thrusts
