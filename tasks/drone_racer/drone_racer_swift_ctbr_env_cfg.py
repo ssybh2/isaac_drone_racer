@@ -835,3 +835,50 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7Calibrated
             "artifacts/imo_tcn/model_v7_circular12_racing.pt."
             "fusion_calibration.json"
         )
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowMultiGateVisionCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7ImuOnlyCfg
+):
+    """GT-shadow Circular-12 estimator with IMU propagation + new multi-gate vision."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.swift_detector_checkpoint = (
+            "artifacts/racing_vision/circular12_multigate/"
+            "torchvision_keypointrcnn_multigate_best.pt"
+        )
+        self.swift_visibility_checkpoint = None
+        self.swift_detection_threshold = 0.35
+        self.swift_keypoint_confidence_threshold = 0.35
+        self.gate_measurement_model = "direct_reprojection"
+        self.gate_reprojection_use_checkpoint_sigma = True
+        self.gate_reprojection_min_visible_corners = 2
+        self.gate_reprojection_association_max_rmse_px = 80.0
+        self.gate_reprojection_huber_delta_sigma = 2.5
+        self.gate_reprojection_max_normalized_nis = 25.0
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVisionCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyV7Cfg
+):
+    """Estimator-driven frozen GT policy using IMU + multi-gate reprojection only."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_apply_displacement_updates = False
+        self.swift_detector_checkpoint = (
+            "artifacts/racing_vision/circular12_multigate/"
+            "torchvision_keypointrcnn_multigate_best.pt"
+        )
+        self.swift_visibility_checkpoint = None
+        self.swift_detection_threshold = 0.35
+        self.swift_keypoint_confidence_threshold = 0.35
+        self.gate_measurement_model = "direct_reprojection"
+        self.gate_reprojection_use_checkpoint_sigma = True
+        self.gate_reprojection_min_visible_corners = 2
+        self.gate_reprojection_association_max_rmse_px = 80.0
+        self.gate_reprojection_huber_delta_sigma = 2.5
+        self.gate_reprojection_max_normalized_nis = 25.0
