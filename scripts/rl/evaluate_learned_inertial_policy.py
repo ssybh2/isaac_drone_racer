@@ -64,16 +64,25 @@ from isaaclab_tasks.utils import load_cfg_from_registry, parse_env_cfg  # noqa: 
 import tasks  # noqa: F401,E402
 
 
-def _estimator_truth_error(raw_env) -> tuple[float, float]:
+def _estimator_truth_error(raw_env) -> tuple[float, float, float]:
     robot = raw_env.scene["robot"]
     gt_p = robot.data.root_pos_w[0].detach().cpu().numpy().astype(np.float64)
     gt_v = robot.data.root_lin_vel_w[0].detach().cpu().numpy().astype(np.float64)
+    gt_q = robot.data.root_quat_w[0].detach().cpu().numpy().astype(np.float64)
     state = raw_env.learned_inertial_state
     est_p = np.asarray(state.position_w_b, dtype=np.float64)
     est_v = np.asarray(state.linear_velocity_w_b, dtype=np.float64)
+    est_q = np.asarray(state.orientation_w_b_wxyz, dtype=np.float64)
+
+    gt_q /= np.linalg.norm(gt_q)
+    est_q /= np.linalg.norm(est_q)
+    q_dot = float(np.clip(abs(np.dot(gt_q, est_q)), 0.0, 1.0))
+    orientation_error_deg = float(np.degrees(2.0 * np.arccos(q_dot)))
+
     return (
         float(np.linalg.norm(est_p - gt_p)),
         float(np.linalg.norm(est_v - gt_v)),
+        orientation_error_deg,
     )
 
 
@@ -142,18 +151,22 @@ def main() -> None:
     episode_return = 0.0
     position_sq_sum = 0.0
     velocity_sq_sum = 0.0
+    orientation_sq_sum = 0.0
     error_samples = 0
     max_position_error = 0.0
     max_velocity_error = 0.0
+    max_orientation_error = 0.0
 
     try:
         while len(records) < int(args_cli.episodes):
-            p_err, v_err = _estimator_truth_error(raw_env)
+            p_err, v_err, r_err = _estimator_truth_error(raw_env)
             position_sq_sum += p_err * p_err
             velocity_sq_sum += v_err * v_err
+            orientation_sq_sum += r_err * r_err
             error_samples += 1
             max_position_error = max(max_position_error, p_err)
             max_velocity_error = max(max_velocity_error, v_err)
+            max_orientation_error = max(max_orientation_error, r_err)
 
             with torch.inference_mode():
                 outputs = runner.agent.act(obs, timestep=0, timesteps=0)
@@ -192,8 +205,12 @@ def main() -> None:
                 "velocity_rmse_mps": float(
                     np.sqrt(velocity_sq_sum / sample_count)
                 ),
+                "orientation_rmse_deg": float(
+                    np.sqrt(orientation_sq_sum / sample_count)
+                ),
                 "position_max_error_m": float(max_position_error),
                 "velocity_max_error_mps": float(max_velocity_error),
+                "orientation_max_error_deg": float(max_orientation_error),
             }
             records.append(row)
 
@@ -215,6 +232,8 @@ def main() -> None:
                 f"cause={cause} "
                 f"return={row['return']:.3f} "
                 f"p_rmse={row['position_rmse_m']:.3f}m "
+                f"v_rmse={row['velocity_rmse_mps']:.3f}m/s "
+                f"R_rmse={row['orientation_rmse_deg']:.2f}deg "
                 f"visual={row['gate_updates']}/{row['gate_attempts']}",
                 flush=True,
             )
@@ -222,9 +241,11 @@ def main() -> None:
             episode_return = 0.0
             position_sq_sum = 0.0
             velocity_sq_sum = 0.0
+            orientation_sq_sum = 0.0
             error_samples = 0
             max_position_error = 0.0
             max_velocity_error = 0.0
+            max_orientation_error = 0.0
 
         csv_path = output_dir / "episodes.csv"
         with csv_path.open("w", newline="") as stream:
@@ -239,6 +260,7 @@ def main() -> None:
         returns = [float(r["return"]) for r in records]
         p_rmse = [float(r["position_rmse_m"]) for r in records]
         v_rmse = [float(r["velocity_rmse_mps"]) for r in records]
+        r_rmse = [float(r["orientation_rmse_deg"]) for r in records]
 
         summary = {
             "checkpoint": checkpoint,
