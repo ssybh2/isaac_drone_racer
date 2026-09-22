@@ -70,6 +70,22 @@ CIRCULAR_12_GATE_TRACK_CONFIG = {
 }
 
 
+# Deterministic deployment start chosen from the exact support of the GT
+# Circular-12 training reset distribution.  GT training with randomise_start=True
+# places the vehicle 1 m after the predecessor gate, with zero-mean world-frame
+# position jitter and an identity-centered attitude perturbation.  For mission
+# gate 1, the predecessor is gate 12 at yaw=-30 deg, so the zero-jitter sample is:
+#   p0 = p_gate12 + Rz(-30 deg) * [1, 0, 0]
+# This avoids the four-metres-before-gate state used by older perception
+# diagnostics, which the racing policy never saw during training.
+CIRCULAR_12_KNOWN_START_POS_W = (
+    -5.133974596215562,
+    1.10769515,
+    1.0,
+)
+CIRCULAR_12_KNOWN_START_ROT_WXYZ = (1.0, 0.0, 0.0, 0.0)
+
+
 def generate_track(track_config: dict | None) -> RigidObjectCollectionCfg:
     return RigidObjectCollectionCfg(
         rigid_objects={
