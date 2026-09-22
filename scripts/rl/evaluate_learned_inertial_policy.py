@@ -344,6 +344,18 @@ def main() -> None:
                 "gate_rejects_mean": _mean(
                     [int(r["gate_rejects"]) for r in records]
                 ),
+                "detected_instances_mean": _mean(
+                    [int(r.get("gate_detected_instances", 0)) for r in records]
+                ),
+                "usable_instances_mean": _mean(
+                    [int(r.get("gate_usable_instances", 0)) for r in records]
+                ),
+                "multigate_detection_frames_mean": _mean(
+                    [
+                        int(r.get("gate_multigate_detection_frames", 0))
+                        for r in records
+                    ]
+                ),
             },
             "learned_motion": {
                 "updates_mean": _mean(
