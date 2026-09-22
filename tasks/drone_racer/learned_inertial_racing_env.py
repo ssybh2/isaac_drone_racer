@@ -96,6 +96,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_imu_accel_b_meas = None
         self._last_imu_gyro_b_meas = None
         self._debug_truth_motion_history = {}
+        self._debug_truth_rotation_history = {}
+        self._online_tcn_truth_count = 0
+        self._online_tcn_truth_sq_sum = np.zeros(3, dtype=np.float64)
+        self._online_tcn_truth_bias_sum = np.zeros(3, dtype=np.float64)
+        self._online_tcn_truth_nse_sum = np.zeros(3, dtype=np.float64)
+        self._online_tcn_truth_one_sigma_count = np.zeros(3, dtype=np.int64)
+        self._online_tcn_truth_two_sigma_count = np.zeros(3, dtype=np.int64)
+        self._online_tcn_truth_max_norm = 0.0
         self.last_episode_diagnostic: dict[str, object] | None = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
 
@@ -290,6 +298,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_imu_accel_b_meas = None
         self._last_imu_gyro_b_meas = None
         self._debug_truth_motion_history = {}
+        self._debug_truth_rotation_history = {}
+        self._online_tcn_truth_count = 0
+        self._online_tcn_truth_sq_sum = np.zeros(3, dtype=np.float64)
+        self._online_tcn_truth_bias_sum = np.zeros(3, dtype=np.float64)
+        self._online_tcn_truth_nse_sum = np.zeros(3, dtype=np.float64)
+        self._online_tcn_truth_one_sigma_count = np.zeros(3, dtype=np.int64)
+        self._online_tcn_truth_two_sigma_count = np.zeros(3, dtype=np.int64)
+        self._online_tcn_truth_max_norm = 0.0
         # Anchor the learned fixed-lag schedule on the first valid 100 Hz
         # motion sample, rather than inventing a thrust sample at reset.
         self._learned_epoch_start_s = None
@@ -511,6 +527,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             or bool(self.cfg.learned_debug_oracle_second_difference_fusion)
             or bool(self.cfg.learned_debug_oracle_delta_velocity_fusion)
             or bool(self.cfg.learned_debug_oracle_body_end_delta_velocity_fusion)
+            or bool(self.cfg.learned_debug_online_truth_audit)
         ):
             robot = self.scene["robot"]
             key = round(float(timestamp_s), 9)
@@ -518,10 +535,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 _np(robot.data.root_pos_w[0]).astype(np.float64).copy(),
                 _np(robot.data.root_lin_vel_w[0]).astype(np.float64).copy(),
             )
+            self._debug_truth_rotation_history[key] = quat_wxyz_to_rotmat(
+                _np(robot.data.root_quat_w[0]).astype(np.float64)
+            )
             cutoff = float(timestamp_s) - 2.0 * float(self.cfg.learned_window_time_s)
             for old_key in list(self._debug_truth_motion_history):
                 if old_key < cutoff:
                     del self._debug_truth_motion_history[old_key]
+                    self._debug_truth_rotation_history.pop(old_key, None)
 
     def _maybe_update_learned_displacement(self) -> None:
         """Run 0.5 s overlapping TCN constraints at the configured update rate."""
@@ -585,6 +606,56 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         target_mode = str(
             getattr(self._motion_predictor, "target_mode", "displacement")
         )
+
+        if bool(self.cfg.learned_debug_online_truth_audit):
+            if target_mode != "delta_velocity_body_end_gyro_aligned":
+                raise RuntimeError(
+                    "online TCN truth audit currently requires "
+                    "target_mode='delta_velocity_body_end_gyro_aligned'"
+                )
+            start_key = round(float(start_s), 9)
+            end_key = round(float(scheduled_end_s), 9)
+            if (
+                start_key not in self._debug_truth_motion_history
+                or end_key not in self._debug_truth_motion_history
+                or end_key not in self._debug_truth_rotation_history
+            ):
+                raise RuntimeError(
+                    "online TCN truth audit is missing GT history for window"
+                )
+            _, v_start_gt = self._debug_truth_motion_history[start_key]
+            _, v_end_gt = self._debug_truth_motion_history[end_key]
+            R_end_gt = self._debug_truth_rotation_history[end_key]
+            window_dt = float(scheduled_end_s - start_s)
+            target_truth_b = R_end_gt.T @ (
+                v_end_gt - v_start_gt - self._lio.gravity_w * window_dt
+            )
+            prediction_b = np.asarray(
+                prediction.displacement_w, dtype=np.float64
+            ).reshape(3)
+            residual_truth_b = prediction_b - target_truth_b
+            variance_b = np.maximum(
+                np.diag(
+                    np.asarray(prediction.covariance_w, dtype=np.float64)
+                ),
+                1.0e-12,
+            )
+            sigma_b = np.sqrt(variance_b)
+            self._online_tcn_truth_count += 1
+            self._online_tcn_truth_sq_sum += residual_truth_b**2
+            self._online_tcn_truth_bias_sum += residual_truth_b
+            self._online_tcn_truth_nse_sum += residual_truth_b**2 / variance_b
+            self._online_tcn_truth_one_sigma_count += (
+                np.abs(residual_truth_b) <= sigma_b
+            ).astype(np.int64)
+            self._online_tcn_truth_two_sigma_count += (
+                np.abs(residual_truth_b) <= 2.0 * sigma_b
+            ).astype(np.int64)
+            self._online_tcn_truth_max_norm = max(
+                self._online_tcn_truth_max_norm,
+                float(np.linalg.norm(residual_truth_b)),
+            )
+
         sigma_floor = (
             self.cfg.learned_delta_velocity_sigma_floor_xyz_mps
             if target_mode in (
@@ -1993,6 +2064,38 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "learned_updates": int(self._learned_update_count),
                 "learned_fusions": int(self._learned_fusion_count),
                 "learned_update_skips": int(self._learned_update_skip_count),
+                "online_tcn_truth_samples": int(self._online_tcn_truth_count),
+                "online_tcn_truth_axis_rmse_mps": (
+                    np.sqrt(
+                        self._online_tcn_truth_sq_sum
+                        / max(1, self._online_tcn_truth_count)
+                    ).tolist()
+                ),
+                "online_tcn_truth_norm_rmse_mps": float(
+                    np.sqrt(
+                        np.sum(self._online_tcn_truth_sq_sum)
+                        / max(1, self._online_tcn_truth_count)
+                    )
+                ),
+                "online_tcn_truth_axis_bias_mps": (
+                    self._online_tcn_truth_bias_sum
+                    / max(1, self._online_tcn_truth_count)
+                ).tolist(),
+                "online_tcn_truth_nse_norm": float(
+                    np.sum(self._online_tcn_truth_nse_sum)
+                    / max(1, self._online_tcn_truth_count)
+                ),
+                "online_tcn_truth_one_sigma_axis": (
+                    self._online_tcn_truth_one_sigma_count
+                    / max(1, self._online_tcn_truth_count)
+                ).tolist(),
+                "online_tcn_truth_two_sigma_axis": (
+                    self._online_tcn_truth_two_sigma_count
+                    / max(1, self._online_tcn_truth_count)
+                ).tolist(),
+                "online_tcn_truth_max_norm_error_mps": float(
+                    self._online_tcn_truth_max_norm
+                ),
             }
 
         if len(self.recorder_manager.active_terms) > 0:
