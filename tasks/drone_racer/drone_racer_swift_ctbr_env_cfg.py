@@ -20,7 +20,7 @@ from perception.stage2_calibration import load_stage2_gate_geometry
 from . import mdp
 from .drone_racer_env_cfg import DroneRacerEnvCfg, DroneRacerEnvCfg_PLAY, RewardsCfg
 from .drone_racer_learned_inertial_env_cfg import DroneRacerLearnedInertialRLCfg
-from .track_generator import CIRCULAR_12_GATE_TRACK_CONFIG, EASY_7_GATE_TRACK_CONFIG, generate_track
+from .track_generator import CIRCULAR_12_GATE_TRACK_CONFIG, CIRCULAR_12_KNOWN_START_POS_W, CIRCULAR_12_KNOWN_START_ROT_WXYZ, EASY_7_GATE_TRACK_CONFIG, generate_track
 
 
 
@@ -485,6 +485,52 @@ class DroneRacerSwiftCTBRGTCircular12FixedStartEnvCfg(
 
 
 @configclass
+class DroneRacerSwiftCTBRGTCircular12KnownStartEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12RacingEnvCfg
+):
+    """GT Circular-12 benchmark from an exact training-support known start.
+
+    Unlike the older four-metres-before-gate diagnostic start, this initial
+    state is the zero-jitter sample of the same predecessor-gate reset used by
+    GT training.  It is therefore suitable for a controlled GT-vs-estimator
+    comparison without introducing a separate policy distribution shift.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.episode_length_s = 20.0
+        self.scene.robot.init_state.pos = CIRCULAR_12_KNOWN_START_POS_W
+        self.scene.robot.init_state.rot = CIRCULAR_12_KNOWN_START_ROT_WXYZ
+        self.commands.target.randomise_start = None
+        self.commands.target.debug_vis = False
+        self.events.push_robot = None
+
+        self.events.reset_base = EventTerm(
+            func=mdp.reset_root_state_uniform,
+            mode="reset",
+            params={
+                "pose_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+                "velocity_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+            },
+        )
+
+
+@configclass
 class DroneRacerSwiftCTBRGTFixedStartEnvCfg(DroneRacerSwiftCTBRGTRacingEnvCfg):
     """Pure-GT fixed-start reference for GTShadow policy-isolation tests.
 
@@ -584,6 +630,19 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12GTPolicyCfg(
         self.scene.track = generate_track(
             track_config=CIRCULAR_12_GATE_TRACK_CONFIG
         )
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12GTPolicyCfg
+):
+    """Estimator-driven Circular-12 task from the matched known GT start."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.robot.init_state.pos = CIRCULAR_12_KNOWN_START_POS_W
+        self.scene.robot.init_state.rot = CIRCULAR_12_KNOWN_START_ROT_WXYZ
+        self.commands.target.randomise_start = None
 
 
 @configclass
