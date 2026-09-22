@@ -606,14 +606,17 @@ def test_circular12_fixed_start_and_estimator_replacement_contract():
         assert token in registry
 
 
-def test_direct_reprojection_associates_over_all_mapped_gates():
+def test_direct_reprojection_associates_all_instances_over_all_mapped_gates():
     env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
 
+    # Multi-instance runtime must score every usable detector instance against
+    # every mapped gate, then select one global best observation<->map pairing.
     for token in (
+        "for observation_index, observation in enumerate(observations):",
         "for gate_index in range(self._gate_track_layout.num_gates):",
-        "candidates.append((score, gate_index, points_w))",
-        "candidates.sort(key=lambda item: item[0])",
-        "association_rmse, gate_index, points_w = candidates[0]",
+        "pair_candidates.append(",
+        "pair_candidates.sort(key=lambda item: item[0])",
+        'diagnostic["selected_observation_index"] = int(observation_index)',
         'diagnostic["selected_gate_index"] = int(gate_index)',
     ):
         assert token in env
