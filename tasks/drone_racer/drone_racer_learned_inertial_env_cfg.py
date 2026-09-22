@@ -111,6 +111,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
         0.0,
         0.0,
     )
+    # Optional validation-only fusion calibration artifact. When provided, the
+    # runtime loads the body-end delta-velocity mean residual
+    # E[prediction-truth] from this JSON and subtracts it before fusion. This
+    # avoids fitting calibration on evaluation/test trajectories.
+    learned_delta_velocity_calibration_path: str | None = None
     # Runtime fusion parameterization for endpoint-body delta-velocity
     # checkpoints. "body_end" preserves the original nonlinear measurement
     # h=R_end^T[(v_end-v_start)-g*dt]. "world_nominal" rotates the network
