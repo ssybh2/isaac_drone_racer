@@ -805,3 +805,33 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProje
     def __post_init__(self) -> None:
         super().__post_init__()
         self.learned_delta_velocity_gain_mode = "freeze_attitude_bias"
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7CalibratedFreezeAttBiasCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProjectedCfg
+):
+    """Validation-bias calibrated V7 with attitude/bias protected from learned DV."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_delta_velocity_gain_mode = "freeze_attitude_bias"
+        self.learned_delta_velocity_calibration_path = (
+            "artifacts/imo_tcn/model_v7_circular12_racing.pt."
+            "fusion_calibration.json"
+        )
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7CalibratedVelocityOnlyCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProjectedCfg
+):
+    """Validation-bias calibrated V7 with learned DV restricted to velocity states."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_delta_velocity_gain_mode = "freeze_position_attitude_bias"
+        self.learned_delta_velocity_calibration_path = (
+            "artifacts/imo_tcn/model_v7_circular12_racing.pt."
+            "fusion_calibration.json"
+        )
