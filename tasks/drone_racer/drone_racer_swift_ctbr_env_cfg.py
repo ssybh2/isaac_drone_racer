@@ -20,6 +20,7 @@ from perception.stage2_calibration import load_stage2_gate_geometry
 from . import mdp
 from .drone_racer_env_cfg import DroneRacerEnvCfg, DroneRacerEnvCfg_PLAY, RewardsCfg
 from .drone_racer_learned_inertial_env_cfg import DroneRacerLearnedInertialRLCfg
+from .drone_racer_stage2_env_cfg import stage2_reference_camera_cfg
 from .track_generator import CIRCULAR_12_GATE_TRACK_CONFIG, CIRCULAR_12_KNOWN_START_POS_W, CIRCULAR_12_KNOWN_START_ROT_WXYZ, EASY_7_GATE_TRACK_CONFIG, generate_track
 
 
@@ -845,8 +846,12 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowMultiGateVis
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        self.scene.tiled_camera = stage2_reference_camera_cfg(
+            pitch_up_deg=40.0
+        )
+        self.gate_camera_pitch_up_deg = 40.0
         self.swift_detector_checkpoint = (
-            "artifacts/racing_vision/circular12_multigate/"
+            "artifacts/racing_vision/circular12_pitch40_multigate/"
             "torchvision_keypointrcnn_multigate_best.pt"
         )
         self.swift_visibility_checkpoint = None
