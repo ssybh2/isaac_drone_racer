@@ -1649,3 +1649,42 @@ def test_delayed_gate_reprojection_updates_current_state_through_clone_cross_cov
     assert est.last_update_diagnostics["measurement_age_s"] == pytest.approx(0.10)
     assert np.linalg.norm(est.p - before) > 0.0
     assert np.linalg.eigvalsh(est.P).min() > -1.0e-10
+
+
+def test_delta_velocity_factor_can_freeze_attitude_and_bias_gain():
+    est = lio.LearnedInertialOdometry(max_position_clones=11)
+    est.reset(
+        linear_velocity_w_b=(1.0, -0.2, 0.1),
+        initial_covariance=np.eye(15) * 0.05,
+    )
+    est.clone_current_position()
+    for k in range(1, 51):
+        est.propagate(
+            gyro_b=(0.02, -0.01, 0.06),
+            accel_b=(0.30, -0.10, 9.76),
+            timestamp_s=k * 0.01,
+        )
+    est.clone_current_position()
+
+    predicted = est.predicted_clone_delta_velocity_gravity_compensated(
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+    )
+    est.update_learned_clone_delta_velocity_gravity_compensated(
+        predicted + np.array([0.03, -0.02, 0.01]),
+        np.eye(3) * 0.05**2,
+        start_timestamp_s=0.0,
+        end_timestamp_s=0.5,
+        clone_tolerance_s=1e-9,
+        marginalize_start_clone=False,
+        gain_mode="freeze_attitude_bias",
+    )
+
+    d = est.last_update_diagnostics
+    assert d["kalman_gain_mode"] == "freeze_attitude_bias"
+    assert d["kalman_gain_theta_norm"] == 0.0
+    assert d["kalman_gain_accel_bias_norm"] == 0.0
+    assert d["kalman_gain_gyro_bias_norm"] == 0.0
+    assert d["kalman_gain_clone_orientation_norm"] == 0.0
+    assert d["kalman_gain_velocity_norm"] > 0.0
