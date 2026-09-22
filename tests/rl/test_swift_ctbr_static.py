@@ -840,3 +840,21 @@ def test_calibrated_v7_fusion_candidates_are_wired():
         "GTShadow-V7-CalibratedVelocityOnly-v0",
     ):
         assert token in registry
+
+
+def test_online_truth_audit_compares_imu_and_tcn_on_same_windows():
+    env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+    evaluator = _text("scripts/rl/evaluate_learned_inertial_policy.py")
+    for token in (
+        "imu_residual_truth_b",
+        "_online_imu_truth_sq_sum",
+        "online_imu_truth_norm_rmse_mps",
+        "online_imu_truth_axis_bias_mps",
+    ):
+        assert token in env
+    for token in (
+        "imu_truth_rmse=",
+        '"online_imu_truth_audit":',
+        "online_imu_truth_axis_rmse_mps",
+    ):
+        assert token in evaluator
