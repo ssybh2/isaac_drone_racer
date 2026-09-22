@@ -14,6 +14,7 @@ collection scripts.
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import gymnasium as gym
 import numpy as np
@@ -97,6 +98,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._last_imu_gyro_b_meas = None
         self._debug_truth_motion_history = {}
         self._debug_truth_rotation_history = {}
+        self._learned_delta_velocity_network_bias_mps = np.asarray(
+            cfg.learned_delta_velocity_network_bias_mps,
+            dtype=np.float64,
+        ).reshape(3)
+        self._learned_delta_velocity_bias_source = "config"
         self._online_tcn_truth_count = 0
         self._online_tcn_truth_sq_sum = np.zeros(3, dtype=np.float64)
         self._online_tcn_truth_bias_sum = np.zeros(3, dtype=np.float64)
@@ -282,6 +288,54 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 checkpoint,
                 device=cfg.learned_motion_device,
             )
+            calibration_path_raw = getattr(
+                cfg,
+                "learned_delta_velocity_calibration_path",
+                None,
+            )
+            if calibration_path_raw is not None:
+                calibration_path = Path(
+                    calibration_path_raw
+                ).expanduser().resolve()
+                if not calibration_path.exists():
+                    raise FileNotFoundError(
+                        "learned delta-velocity calibration not found: "
+                        f"{calibration_path}"
+                    )
+                calibration = json.loads(
+                    calibration_path.read_text(encoding="utf-8")
+                )
+                expected_schema = (
+                    "isaac_drone_racer."
+                    "learned_delta_velocity_fusion_calibration.v1"
+                )
+                if calibration.get("schema") != expected_schema:
+                    raise ValueError(
+                        "unsupported learned delta-velocity calibration "
+                        f"schema: {calibration.get('schema')!r}"
+                    )
+                if calibration.get("split") != "val":
+                    raise ValueError(
+                        "learned delta-velocity calibration must come from "
+                        "the validation split"
+                    )
+                if calibration.get("target_mode") != (
+                    "delta_velocity_body_end_gyro_aligned"
+                ):
+                    raise ValueError(
+                        "learned delta-velocity calibration target mode "
+                        "does not match V7 body-end delta velocity"
+                    )
+                calibrated_bias = np.asarray(
+                    calibration["bias_body_end_mps"],
+                    dtype=np.float64,
+                ).reshape(3)
+                if not np.all(np.isfinite(calibrated_bias)):
+                    raise ValueError(
+                        "learned delta-velocity calibration bias must be finite"
+                    )
+                self._learned_delta_velocity_network_bias_mps = calibrated_bias
+                self._learned_delta_velocity_bias_source = str(calibration_path)
         self._initialize_detector_and_gate_builder()
         self._reset_estimator_from_known_start()
 
@@ -826,7 +880,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 )
             network_bias = np.asarray(
                 (
-                    self.cfg.learned_delta_velocity_network_bias_mps
+                    self._learned_delta_velocity_network_bias_mps
                     if target_mode in (
                         "delta_velocity_gravity_compensated",
                         "delta_velocity_body_end_gyro_aligned",
@@ -2082,6 +2136,18 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "learned_updates": int(self._learned_update_count),
                 "learned_fusions": int(self._learned_fusion_count),
                 "learned_update_skips": int(self._learned_update_skip_count),
+                "learned_delta_velocity_bias_body_end_mps": (
+                    self._learned_delta_velocity_network_bias_mps.tolist()
+                ),
+                "learned_delta_velocity_bias_source": str(
+                    self._learned_delta_velocity_bias_source
+                ),
+                "learned_delta_velocity_gain_mode": str(
+                    self.cfg.learned_delta_velocity_gain_mode
+                ),
+                "learned_delta_velocity_fusion_frame": str(
+                    self.cfg.learned_delta_velocity_body_end_fusion_frame
+                ),
                 "online_tcn_truth_samples": int(self._online_tcn_truth_count),
                 "online_tcn_truth_axis_rmse_mps": (
                     np.sqrt(
