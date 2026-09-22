@@ -656,3 +656,24 @@ def test_learned_inertial_evaluator_reports_orientation_error():
         "state.orientation_w_b_wxyz",
     ):
         assert token in evaluator
+
+
+def test_circular12_v7_shadow_and_closed_loop_only_swap_tcn_checkpoint():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    for token in (
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyV7Cfg",
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7Cfg",
+        "artifacts/imo_tcn/model_v7_circular12_racing.pt",
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyCfg",
+        "DroneRacerLearnedInertialSwiftCTBRGTShadowCfg",
+    ):
+        assert token in cfg
+
+    for token in (
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTPolicy-V7-v0",
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTShadow-V7-v0",
+        "skrl_swift_ctbr_gt_circular12_cfg.yaml",
+    ):
+        assert token in registry
