@@ -671,3 +671,43 @@ class DroneRacerLearnedInertialSwiftCTBRGTShadowCfg(
         )
 
 
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyV7Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyCfg
+):
+    """Circular-12 estimator-driven GT-policy task with only the TCN upgraded to V7."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Controlled ablation: preserve camera, EKF, fusion cadence, covariance
+        # protection, CTBR, map and policy checkpoint.  Change only the learned
+        # motion checkpoint from the mild-motion V6.2 model to the racing V7 model.
+        self.learned_motion_checkpoint = (
+            "artifacts/imo_tcn/model_v7_circular12_racing.pt"
+        )
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7Cfg(
+    DroneRacerLearnedInertialSwiftCTBRGTShadowCfg
+):
+    """GT-controlled Circular-12 shadow run using the V7 racing TCN.
+
+    The actor stays on simulator truth while the full production estimator runs
+    in the background.  This isolates estimator integration from closed-loop
+    feedback before V7 is allowed to drive the frozen GT racing policy.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.track = generate_track(
+            track_config=CIRCULAR_12_GATE_TRACK_CONFIG
+        )
+        self.scene.robot.init_state.pos = CIRCULAR_12_KNOWN_START_POS_W
+        self.scene.robot.init_state.rot = CIRCULAR_12_KNOWN_START_ROT_WXYZ
+        self.commands.target.randomise_start = None
+        self.learned_motion_checkpoint = (
+            "artifacts/imo_tcn/model_v7_circular12_racing.pt"
+        )
