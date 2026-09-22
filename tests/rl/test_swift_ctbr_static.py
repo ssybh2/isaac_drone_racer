@@ -546,3 +546,37 @@ def test_perception_aware_gt_racing_v3_contract():
         assert token in agent
 
     assert '"Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV3-v0"' in train
+
+
+def test_circular12_gt_estimator_validation_track_contract():
+    track = _text("tasks/drone_racer/track_generator.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+    agent = _text("tasks/drone_racer/agents/skrl_swift_ctbr_gt_circular12_cfg.yaml")
+    train = _text("scripts/rl/train.py")
+
+    assert "CIRCULAR_12_GATE_TRACK_CONFIG" in track
+    for gate_id in range(1, 13):
+        assert f'"{gate_id}"' in track
+    assert '"1":  {"pos": (0.0, 0.0, 1.0), "yaw": 0.0}' in track
+    assert '"4":  {"pos": (12.0, 12.0, 1.0), "yaw": torch.pi / 2.0}' in track
+    assert '"7":  {"pos": (0.0, 24.0, 1.0), "yaw": torch.pi}' in track
+    assert '"10": {"pos": (-12.0, 12.0, 1.0), "yaw": -torch.pi / 2.0}' in track
+
+    assert "class DroneRacerSwiftCTBRGTCircular12RacingEnvCfg" in cfg
+    assert "track_config=CIRCULAR_12_GATE_TRACK_CONFIG" in cfg
+    assert "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-v0" in registry
+    assert "skrl_swift_ctbr_gt_circular12_cfg.yaml" in registry
+    assert '"Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-v0"' in train
+
+    for token in (
+        "layers: [256, 256, 256]",
+        "rollouts: 24",
+        "learning_epochs: 5",
+        "mini_batches: 4",
+        "learning_rate: 1.0e-04",
+        "timesteps: 50000",
+        'directory: "swift_ctbr_gt_circular12"',
+        'experiment_name: "circular12_r12_4096env_roll24_256x3_gt"',
+    ):
+        assert token in agent
