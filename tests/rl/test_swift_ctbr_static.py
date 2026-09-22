@@ -779,3 +779,23 @@ def test_v7_online_truth_audit_task_and_metrics_are_wired():
         "online_tcn_truth_one_sigma_axis",
     ):
         assert token in evaluator
+
+
+def test_v7_world_projected_freeze_attitude_bias_task_is_registered():
+    learned_cfg = _text("tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py")
+    env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    assert 'learned_delta_velocity_gain_mode: str = "full"' in learned_cfg
+    assert "gain_mode=str(self.cfg.learned_delta_velocity_gain_mode)" in env
+    assert (
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProjectedFreezeAttBiasCfg"
+        in cfg
+    )
+    assert 'self.learned_delta_velocity_gain_mode = "freeze_attitude_bias"' in cfg
+    assert (
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-"
+        "GTShadow-V7-WorldProjected-FreezeAttBias-v0"
+        in registry
+    )
