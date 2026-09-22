@@ -37,12 +37,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-root",
         type=Path,
-        default=Path("artifacts/racing_estimator/circular12_v1"),
+        default=Path("artifacts/racing_estimator/circular12_pitch40_v1"),
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("artifacts/racing_vision/circular12_multigate"),
+        default=Path("artifacts/racing_vision/circular12_pitch40_multigate"),
     )
     parser.add_argument(
         "--warm-start",
