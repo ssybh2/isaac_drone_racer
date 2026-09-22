@@ -20,7 +20,7 @@ from perception.stage2_calibration import load_stage2_gate_geometry
 from . import mdp
 from .drone_racer_env_cfg import DroneRacerEnvCfg, DroneRacerEnvCfg_PLAY, RewardsCfg
 from .drone_racer_learned_inertial_env_cfg import DroneRacerLearnedInertialRLCfg
-from .track_generator import EASY_7_GATE_TRACK_CONFIG, generate_track
+from .track_generator import CIRCULAR_12_GATE_TRACK_CONFIG, EASY_7_GATE_TRACK_CONFIG, generate_track
 
 
 
@@ -377,6 +377,26 @@ class DroneRacerSwiftCTBRGTRacingEnvCfg(DroneRacerSwiftCTBRTrainEnvCfg):
         self.commands.target.randomise_start = True
         self.commands.target.debug_vis = False
         self.events.push_robot = None
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12RacingEnvCfg(
+    DroneRacerSwiftCTBRGTRacingEnvCfg
+):
+    """GT-only upper-bound racing task on the camera-compatible 12-gate loop.
+
+    The 31-D actor observation, CTBR action interface, PPO profile and racing
+    reward remain identical to the successful GT baseline.  Only the known
+    track geometry changes.  This deliberately avoids perception-aware reward
+    shaping while we establish whether the denser circular map naturally gives
+    the production camera enough gate-corner observability.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.track = generate_track(
+            track_config=CIRCULAR_12_GATE_TRACK_CONFIG
+        )
 
 
 @configclass
