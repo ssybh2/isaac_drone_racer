@@ -235,7 +235,8 @@ def main() -> None:
                 f"v_rmse={row['velocity_rmse_mps']:.3f}m/s "
                 f"R_rmse={row['orientation_rmse_deg']:.2f}deg "
                 f"visual={row['gate_updates']}/{row['gate_attempts']} "
-                f"tcn_truth_rmse={float(row.get('online_tcn_truth_norm_rmse_mps', 0.0)):.4f}m/s",
+                f"tcn_truth_rmse={float(row.get('online_tcn_truth_norm_rmse_mps', 0.0)):.4f}m/s "
+                f"imu_truth_rmse={float(row.get('online_imu_truth_norm_rmse_mps', 0.0)):.4f}m/s",
                 flush=True,
             )
 
@@ -353,6 +354,44 @@ def main() -> None:
                 ),
                 "skips_mean": _mean(
                     [int(r["learned_update_skips"]) for r in records]
+                ),
+            },
+            "online_imu_truth_audit": {
+                "norm_rmse_mean_mps": _mean(
+                    [
+                        float(r.get("online_imu_truth_norm_rmse_mps", 0.0))
+                        for r in records
+                    ]
+                ),
+                "max_norm_error_across_episodes_mps": float(
+                    max(
+                        float(r.get("online_imu_truth_max_norm_error_mps", 0.0))
+                        for r in records
+                    )
+                ),
+                "axis_rmse_mps": (
+                    np.mean(
+                        np.asarray(
+                            [
+                                r.get("online_imu_truth_axis_rmse_mps", [0.0, 0.0, 0.0])
+                                for r in records
+                            ],
+                            dtype=np.float64,
+                        ),
+                        axis=0,
+                    ).tolist()
+                ),
+                "axis_bias_mps": (
+                    np.mean(
+                        np.asarray(
+                            [
+                                r.get("online_imu_truth_axis_bias_mps", [0.0, 0.0, 0.0])
+                                for r in records
+                            ],
+                            dtype=np.float64,
+                        ),
+                        axis=0,
+                    ).tolist()
                 ),
             },
             "online_tcn_truth_audit": {
