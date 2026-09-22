@@ -677,3 +677,25 @@ def test_circular12_v7_shadow_and_closed_loop_only_swap_tcn_checkpoint():
         "skrl_swift_ctbr_gt_circular12_cfg.yaml",
     ):
         assert token in registry
+
+
+def test_circular12_v7_isolation_tasks_cover_imu_network_and_oracle_paths():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    for token in (
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7NoVisionCfg",
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7ImuOnlyCfg",
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OracleDVCfg",
+        "self.swift_detector_checkpoint = None",
+        "self.learned_apply_displacement_updates = False",
+        "self.learned_debug_oracle_body_end_delta_velocity_fusion = True",
+    ):
+        assert token in cfg
+
+    for token in (
+        "GTShadow-V7-NoVision-v0",
+        "GTShadow-V7-IMUOnly-v0",
+        "GTShadow-V7-OracleDV-v0",
+    ):
+        assert token in registry
