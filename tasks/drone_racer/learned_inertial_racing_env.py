@@ -445,7 +445,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             model="pinhole",
         )
         geometry = load_stage2_gate_geometry()
-        T_bc = stage2_camera_to_body()
+        T_bc = stage2_camera_to_body(
+            pitch_up_deg=float(self.cfg.gate_camera_pitch_up_deg)
+        )
         track_layout = track_layout_from_isaac(self, env_id=0)
         self._gate_geometry = geometry
         self._gate_camera_calibration = calibration
