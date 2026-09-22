@@ -881,9 +881,9 @@ def test_circular12_multigate_vision_pipeline_is_wired():
         "circular12_multigate_keypointrcnn.v1",
         "instance_recall",
         "recommended_pixel_sigma_px",
-        "vision/train",
-        "vision/val",
-        "vision/test",
+        'train_root = root / "vision" / "train"',
+        'val_root = root / "vision" / "val"',
+        'test_root = root / "vision" / "test"',
     ):
         assert token in trainer
 
