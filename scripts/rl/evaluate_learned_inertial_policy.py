@@ -321,11 +321,15 @@ def main() -> None:
             "estimator": {
                 "position_rmse_mean_m": _mean(p_rmse),
                 "velocity_rmse_mean_mps": _mean(v_rmse),
+                "orientation_rmse_mean_deg": _mean(r_rmse),
                 "position_max_error_across_episodes_m": float(
                     max(float(r["position_max_error_m"]) for r in records)
                 ),
                 "velocity_max_error_across_episodes_mps": float(
                     max(float(r["velocity_max_error_mps"]) for r in records)
+                ),
+                "orientation_max_error_across_episodes_deg": float(
+                    max(float(r["orientation_max_error_deg"]) for r in records)
                 ),
             },
             "perception": {
