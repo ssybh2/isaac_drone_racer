@@ -1228,15 +1228,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         return now - self._last_camera_timestamp_s >= (1.0 / 30.0) - 1.0e-9
 
     def _maybe_gate_reprojection_update(self) -> None:
-        """Fuse 2-D gate corners directly against the known 3-D gate map.
+        """Fuse the best multi-instance gate observation against the known map.
 
-        V6.4 deliberately does not call IPPE/PnP on this path. Gate identity is
-        selected by projecting every mapped gate through the current inertial
-        state and choosing the smallest semantic-corner pixel residual.
-
-        V6.5 can inject deterministic frame loss, burst dropout, corner erasure,
-        pixel noise and uncompensated processing latency before this update.
-        All stress hooks are neutral by default.
+        The detector may return several gate instances from one racing frame.
+        Every usable instance is scored against every mapped gate using the
+        current inertial state. The globally best observation-to-map pairing is
+        fused with the direct pixel reprojection factor. At most one gate is
+        fused per camera frame, which avoids double-counting correlated image
+        evidence while still exploiting any visible mapped gate.
         """
         if (
             self.swift_detector is None
@@ -1257,12 +1256,15 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "capture_timestamp_s": now,
             "process_timestamp_s": None,
             "measurement_age_s": None,
-            "measurement_model": "direct_reprojection",
+            "measurement_model": "direct_reprojection_multigate",
             "accepted": False,
             "reject_stage": None,
             "reject_reason": None,
             "expected_active_gate_index": None,
             "selected_gate_index": None,
+            "selected_observation_index": None,
+            "detected_instance_count": 0,
+            "usable_instance_count": 0,
             "association_matches_active_gate": None,
             "visible_corner_count": 0,
             "visible_corner_indices": None,
@@ -1335,12 +1337,23 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     else 1.0
                 )
                 rgb = np.clip(rgb * scale, 0.0, 255.0).astype(np.uint8)
+            rgb = np.ascontiguousarray(rgb)
 
             try:
-                observation = self.swift_detector.detect(
-                    np.ascontiguousarray(rgb),
-                    timestamp_s=now,
-                )
+                if hasattr(self.swift_detector, "detect_all"):
+                    observations = list(
+                        self.swift_detector.detect_all(
+                            rgb,
+                            timestamp_s=now,
+                        )
+                    )
+                else:
+                    observations = [
+                        self.swift_detector.detect(
+                            rgb,
+                            timestamp_s=now,
+                        )
+                    ]
             except (ValueError, RuntimeError) as exc:
                 self._gate_reject_count += 1
                 capture_diagnostic["reject_stage"] = "detector"
@@ -1348,53 +1361,65 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 capture_diagnostic["exception_type"] = type(exc).__name__
                 capture_diagnostic["exception_message"] = str(exc)
                 self._gate_diagnostics.append(capture_diagnostic)
-            else:
+                observations = []
+
+            if observations:
                 from perception.corner_detection import CornerObservation
 
-                corners_uv = np.asarray(
-                    observation.corners_uv, dtype=np.float64
-                ).copy()
-                visible = np.asarray(
-                    observation.visible, dtype=bool
-                ).reshape(4).copy()
-                confidence = np.asarray(
-                    observation.confidence, dtype=np.float64
-                ).reshape(4).copy()
-
+                capture_diagnostic["detected_instance_count"] = int(
+                    len(observations)
+                )
+                stressed_observations = []
                 pixel_noise_sigma = float(
                     self.cfg.gate_stress_pixel_noise_sigma_px
                 )
-                if pixel_noise_sigma > 0.0:
-                    corners_uv += self._gate_stress_rng.normal(
-                        loc=0.0,
-                        scale=pixel_noise_sigma,
-                        size=corners_uv.shape,
-                    )
-
                 corner_drop_probability = float(
                     self.cfg.gate_stress_corner_drop_probability
                 )
-                if corner_drop_probability > 0.0:
-                    drop_draw = (
-                        self._gate_stress_rng.random(4)
-                        < corner_drop_probability
-                    )
-                    effective_drop = visible & drop_draw
-                    dropped_count = int(np.sum(effective_drop))
-                    if dropped_count:
-                        visible[effective_drop] = False
-                        self._gate_stress_corner_drop_count += dropped_count
-                        capture_diagnostic["stress_corner_drop_count"] = (
-                            dropped_count
-                        )
+                total_dropped = 0
+                for observation in observations:
+                    corners_uv = np.asarray(
+                        observation.corners_uv, dtype=np.float64
+                    ).copy()
+                    visible = np.asarray(
+                        observation.visible, dtype=bool
+                    ).reshape(4).copy()
+                    confidence = np.asarray(
+                        observation.confidence, dtype=np.float64
+                    ).reshape(4).copy()
 
-                stressed_observation = CornerObservation(
-                    corners_uv=corners_uv,
-                    visible=visible,
-                    confidence=confidence,
-                    timestamp_s=now,
-                    source=f"{observation.source}+v6.5_stress",
-                )
+                    if pixel_noise_sigma > 0.0:
+                        corners_uv += self._gate_stress_rng.normal(
+                            loc=0.0,
+                            scale=pixel_noise_sigma,
+                            size=corners_uv.shape,
+                        )
+                    if corner_drop_probability > 0.0:
+                        drop_draw = (
+                            self._gate_stress_rng.random(4)
+                            < corner_drop_probability
+                        )
+                        effective_drop = visible & drop_draw
+                        dropped_count = int(np.sum(effective_drop))
+                        if dropped_count:
+                            visible[effective_drop] = False
+                            total_dropped += dropped_count
+
+                    stressed_observations.append(
+                        CornerObservation(
+                            corners_uv=corners_uv,
+                            visible=visible,
+                            confidence=confidence,
+                            timestamp_s=now,
+                            source=f"{observation.source}+v6.5_stress",
+                        )
+                    )
+
+                if total_dropped:
+                    self._gate_stress_corner_drop_count += total_dropped
+                    capture_diagnostic["stress_corner_drop_count"] = int(
+                        total_dropped
+                    )
 
                 latency_s = float(self.cfg.gate_stress_latency_s)
                 if (
@@ -1414,100 +1439,135 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     capture_diagnostic["capture_clone_timestamp_s"] = now
 
                 self._gate_observation_queue.append(
-                    (now, stressed_observation, capture_diagnostic)
+                    (now, tuple(stressed_observations), capture_diagnostic)
                 )
+            elif capture_diagnostic["reject_reason"] is None:
+                self._gate_reject_count += 1
+                capture_diagnostic["reject_stage"] = "detector"
+                capture_diagnostic["reject_reason"] = "no_detected_instance"
+                self._gate_diagnostics.append(capture_diagnostic)
 
         latency_s = float(self.cfg.gate_stress_latency_s)
         if not self._gate_observation_queue:
             return
-        capture_time_s, observation, diagnostic = self._gate_observation_queue[0]
+        capture_time_s, observations, diagnostic = self._gate_observation_queue[0]
         if now - capture_time_s + 1.0e-12 < latency_s:
             return
         self._gate_observation_queue.pop(0)
         diagnostic["process_timestamp_s"] = now
         diagnostic["measurement_age_s"] = float(now - capture_time_s)
 
-        visible_indices = np.flatnonzero(
-            np.asarray(observation.visible, dtype=bool).reshape(4)
-        )
-        diagnostic["visible_corner_count"] = int(len(visible_indices))
-        diagnostic["visible_corner_indices"] = visible_indices.tolist()
         min_visible = int(self.cfg.gate_reprojection_min_visible_corners)
-        if len(visible_indices) < min_visible:
-            self._gate_reject_count += 1
-            diagnostic["reject_stage"] = "visibility"
-            diagnostic["reject_reason"] = "insufficient_visible_corners"
-            self._gate_diagnostics.append(diagnostic)
-            return
-
-        observed_uv = np.asarray(
-            observation.corners_uv, dtype=np.float64
-        )[visible_indices]
         K = np.asarray(
             self._gate_camera_calibration.K, dtype=np.float64
         ).reshape(3, 3)
         R_bc = np.asarray(self._gate_T_bc.R, dtype=np.float64).reshape(3, 3)
         t_bc = np.asarray(self._gate_T_bc.t, dtype=np.float64).reshape(3)
 
-        candidates: list[tuple[float, int, np.ndarray]] = []
-        for gate_index in range(self._gate_track_layout.num_gates):
-            T_wg = self._gate_track_layout.gate_pose(gate_index)
-            all_points_w = T_wg.transform_points(
-                self._gate_geometry.object_points_g
+        pair_candidates: list[
+            tuple[float, int, int, np.ndarray, np.ndarray, np.ndarray]
+        ] = []
+        usable_instances = 0
+        for observation_index, observation in enumerate(observations):
+            visible_indices = np.flatnonzero(
+                np.asarray(observation.visible, dtype=bool).reshape(4)
             )
-            points_w = np.asarray(all_points_w, dtype=np.float64)[visible_indices]
-            try:
-                if bool(diagnostic.get("latency_compensation_used", False)):
-                    predicted_uv, _ = (
-                        self._lio.predict_gate_corner_reprojection_at_clone(
+            if len(visible_indices) < min_visible:
+                continue
+            usable_instances += 1
+            observed_uv = np.asarray(
+                observation.corners_uv, dtype=np.float64
+            )[visible_indices]
+
+            for gate_index in range(self._gate_track_layout.num_gates):
+                T_wg = self._gate_track_layout.gate_pose(gate_index)
+                all_points_w = T_wg.transform_points(
+                    self._gate_geometry.object_points_g
+                )
+                points_w = np.asarray(
+                    all_points_w, dtype=np.float64
+                )[visible_indices]
+                try:
+                    if bool(diagnostic.get("latency_compensation_used", False)):
+                        predicted_uv, _ = (
+                            self._lio.predict_gate_corner_reprojection_at_clone(
+                                points_w,
+                                K,
+                                R_bc,
+                                t_bc,
+                                clone_timestamp_s=float(capture_time_s),
+                                clone_tolerance_s=float(
+                                    self.cfg.gate_reprojection_latency_clone_tolerance_s
+                                ),
+                                min_depth_m=float(
+                                    self.cfg.gate_reprojection_min_depth_m
+                                ),
+                            )
+                        )
+                    else:
+                        predicted_uv, _ = self._lio.predict_gate_corner_reprojection(
                             points_w,
                             K,
                             R_bc,
                             t_bc,
-                            clone_timestamp_s=float(capture_time_s),
-                            clone_tolerance_s=float(
-                                self.cfg.gate_reprojection_latency_clone_tolerance_s
-                            ),
                             min_depth_m=float(
                                 self.cfg.gate_reprojection_min_depth_m
                             ),
                         )
-                    )
-                else:
-                    predicted_uv, _ = self._lio.predict_gate_corner_reprojection(
-                        points_w,
-                        K,
-                        R_bc,
-                        t_bc,
-                        min_depth_m=float(
-                            self.cfg.gate_reprojection_min_depth_m
-                        ),
-                    )
-            except (KeyError, ValueError, RuntimeError):
-                continue
-            residual = observed_uv - predicted_uv
-            score = float(
-                np.sqrt(
-                    np.mean(np.sum(residual * residual, axis=1))
-                )
-            )
-            if np.isfinite(score):
-                candidates.append((score, gate_index, points_w))
+                except (KeyError, ValueError, RuntimeError):
+                    continue
 
-        if not candidates:
+                residual = observed_uv - predicted_uv
+                score = float(
+                    np.sqrt(
+                        np.mean(np.sum(residual * residual, axis=1))
+                    )
+                )
+                if np.isfinite(score):
+                    pair_candidates.append(
+                        (
+                            score,
+                            int(observation_index),
+                            int(gate_index),
+                            points_w,
+                            observed_uv,
+                            visible_indices,
+                        )
+                    )
+
+        diagnostic["usable_instance_count"] = int(usable_instances)
+        if not pair_candidates:
             self._gate_reject_count += 1
-            diagnostic["reject_stage"] = "association"
-            diagnostic["reject_reason"] = "no_projectable_mapped_gate"
+            diagnostic["reject_stage"] = (
+                "visibility" if usable_instances == 0 else "association"
+            )
+            diagnostic["reject_reason"] = (
+                "insufficient_visible_corners"
+                if usable_instances == 0
+                else "no_projectable_mapped_gate"
+            )
             self._gate_diagnostics.append(diagnostic)
             return
 
-        candidates.sort(key=lambda item: item[0])
-        association_rmse, gate_index, points_w = candidates[0]
-        diagnostic["association_pixel_rmse_px"] = association_rmse
-        diagnostic["association_second_best_rmse_px"] = (
-            None if len(candidates) < 2 else float(candidates[1][0])
-        )
+        pair_candidates.sort(key=lambda item: item[0])
+        (
+            association_rmse,
+            observation_index,
+            gate_index,
+            points_w,
+            observed_uv,
+            visible_indices,
+        ) = pair_candidates[0]
+        diagnostic["selected_observation_index"] = int(observation_index)
         diagnostic["selected_gate_index"] = int(gate_index)
+        diagnostic["visible_corner_count"] = int(len(visible_indices))
+        diagnostic["visible_corner_indices"] = visible_indices.tolist()
+        diagnostic["association_pixel_rmse_px"] = float(association_rmse)
+        diagnostic["association_second_best_rmse_px"] = (
+            None
+            if len(pair_candidates) < 2
+            else float(pair_candidates[1][0])
+        )
         expected_gate = diagnostic["expected_active_gate_index"]
         if expected_gate is not None:
             diagnostic["association_matches_active_gate"] = bool(
