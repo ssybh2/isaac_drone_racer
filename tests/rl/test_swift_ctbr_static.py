@@ -726,7 +726,9 @@ def test_v7_world_projected_network_shadow_task_is_registered():
     for token in (
         "body_dv_world_nominal",
         "R_end_nominal @ measurement_w",
-        "R_end_nominal @ protected_covariance @ R_end_nominal.T",
+        "protected_covariance = (",
+        "@ protected_covariance",
+        "@ R_end_nominal.T",
         '"network_world_nominal"',
     ):
         assert token in env
