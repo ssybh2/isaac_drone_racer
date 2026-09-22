@@ -938,3 +938,26 @@ def test_circular12_collector_records_pitch40_camera_contract():
         "def camera_to_body_rotation(",
     ):
         assert token in calibration
+
+
+def test_circular12_stable_antispin_task_contract():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+    agent_cfg = _text(
+        "tasks/drone_racer/agents/skrl_swift_ctbr_gt_circular12_stable_cfg.yaml"
+    )
+
+    for token in (
+        "class SwiftCTBRGTStableRacingRewardsCfg",
+        "weight=-0.02",
+        "weight=0.5",
+        "weight=-0.01",
+        "weight=-0.002",
+        "class DroneRacerSwiftCTBRGTCircular12StableRacingEnvCfg",
+        "body_rate_max_radps = (6.0, 6.0, 3.0)",
+    ):
+        assert token in cfg
+
+    assert "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-Stable-v0" in registry
+    assert "skrl_swift_ctbr_gt_circular12_stable_cfg.yaml" in registry
+    assert 'directory: "swift_ctbr_gt_circular12_stable"' in agent_cfg
