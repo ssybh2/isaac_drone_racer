@@ -858,3 +858,55 @@ def test_online_truth_audit_compares_imu_and_tcn_on_same_windows():
         "online_imu_truth_axis_rmse_mps",
     ):
         assert token in evaluator
+
+
+def test_circular12_multigate_vision_pipeline_is_wired():
+    detector = _text("perception/torchvision_keypoint_detector.py")
+    dataset = _text("perception/racing_multigate_dataset.py")
+    trainer = _text("scripts/perception/train_racing_multigate_detector.py")
+    env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+    learned_cfg = _text("tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    for token in (
+        "class RacingMultiGateKeypointDataset",
+        'payload.get("mapped_gates")',
+        "torch.zeros((0, 4)",
+    ):
+        assert token in dataset
+
+    assert "def detect_all(" in detector
+    for token in (
+        "circular12_multigate_keypointrcnn.v1",
+        "instance_recall",
+        "recommended_pixel_sigma_px",
+        "vision/train",
+        "vision/val",
+        "vision/test",
+    ):
+        assert token in trainer
+
+    assert "gate_reprojection_use_checkpoint_sigma: bool = False" in learned_cfg
+    for token in (
+        'hasattr(self.swift_detector, "detect_all")',
+        "direct_reprojection_multigate",
+        "selected_observation_index",
+        "pair_candidates",
+        "_gate_reprojection_sigma_px_runtime",
+    ):
+        assert token in env
+
+    for token in (
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowMultiGateVisionCfg",
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVisionCfg",
+        "torchvision_keypointrcnn_multigate_best.pt",
+        "self.learned_apply_displacement_updates = False",
+    ):
+        assert token in cfg
+
+    for token in (
+        "GTShadow-MultiGateVision-v0",
+        "GTPolicy-MultiGateVision-v0",
+    ):
+        assert token in registry
