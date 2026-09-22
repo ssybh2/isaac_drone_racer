@@ -1683,6 +1683,7 @@ class LearnedInertialOdometry:
         end_timestamp_s: float,
         clone_tolerance_s: float = 1.0e-6,
         marginalize_start_clone: bool = True,
+        gain_mode: str = "full",
     ) -> np.ndarray:
         """Fuse a two-clone gravity-compensated delta-velocity factor."""
         start_index = self._find_clone_index(
@@ -1705,7 +1706,7 @@ class LearnedInertialOdometry:
             label="learned clone delta velocity",
         )
         innovation = z - predicted
-        self._kalman_update(innovation, H, Rm, gain_mode="full")
+        self._kalman_update(innovation, H, Rm, gain_mode=str(gain_mode))
 
         if marginalize_start_clone:
             self.marginalize_clone(start_index)
@@ -1720,6 +1721,7 @@ class LearnedInertialOdometry:
         end_timestamp_s: float,
         clone_tolerance_s: float = 1.0e-6,
         marginalize_start_clone: bool = True,
+        gain_mode: str = "full",
     ) -> np.ndarray:
         """Fuse endpoint-body gravity-compensated delta velocity."""
         start_index = self._find_clone_index(
@@ -1742,7 +1744,7 @@ class LearnedInertialOdometry:
             label="learned clone endpoint-body delta velocity",
         )
         innovation = z - predicted
-        self._kalman_update(innovation, H, Rm, gain_mode="full")
+        self._kalman_update(innovation, H, Rm, gain_mode=str(gain_mode))
 
         if marginalize_start_clone:
             self.marginalize_clone(start_index)
