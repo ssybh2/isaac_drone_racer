@@ -644,3 +644,15 @@ def test_circular12_known_start_matches_training_reset_support():
         "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTPolicy-v0",
     ):
         assert token in registry
+
+
+def test_learned_inertial_evaluator_reports_orientation_error():
+    evaluator = _text("scripts/rl/evaluate_learned_inertial_policy.py")
+    for token in (
+        "orientation_rmse_deg",
+        "orientation_max_error_deg",
+        "orientation_rmse_mean_deg",
+        "orientation_max_error_across_episodes_deg",
+        "state.orientation_w_b_wxyz",
+    ):
+        assert token in evaluator
