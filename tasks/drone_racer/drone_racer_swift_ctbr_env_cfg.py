@@ -756,3 +756,19 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OracleDVCf
     def __post_init__(self) -> None:
         super().__post_init__()
         self.learned_debug_oracle_body_end_delta_velocity_fusion = True
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OracleWorldDVCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7NoVisionCfg
+):
+    """GT-shadow exact WORLD-frame gravity-compensated delta-velocity fusion.
+
+    This removes the endpoint-body attitude term from the learned factor while
+    preserving the same two-clone velocity factor and fusion cadence.  Comparing
+    this against OracleDV isolates body-frame attitude coupling/Jacobian effects.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_debug_oracle_delta_velocity_fusion = True
