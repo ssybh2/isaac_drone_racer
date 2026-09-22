@@ -159,6 +159,12 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # Gauge-invariant endpoint-body version of the delta-velocity Oracle:
     # z = R_end^T[(v_end-v_start)-g*dt].
     learned_debug_oracle_body_end_delta_velocity_fusion: bool = False
+    # Evaluation-only online audit. The TCN runs on the exact production
+    # runtime window/features, but its prediction is compared against the
+    # simulator-truth target for the same timestamps. This never changes the
+    # estimator state and is intended to distinguish offline/runtime feature
+    # mismatch from Kalman-fusion effects.
+    learned_debug_online_truth_audit: bool = False
     learned_debug_oracle_delta_velocity_sigma_mps: float = 0.05
     # Diagnostic only: rotate TCN gyro/thrust features with simulator truth
     # attitude instead of EKF attitude. If this materially improves fusion, it
