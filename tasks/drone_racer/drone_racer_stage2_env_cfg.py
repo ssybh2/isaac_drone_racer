@@ -13,10 +13,11 @@ from perception.stage2_calibration import (
     CAMERA_OFFSET_CONVENTION,
     CAMERA_OFFSET_POS_B,
     CAMERA_OFFSET_ROT_WXYZ,
+    camera_mount_quaternion_wxyz,
 )
 
 
-def stage2_reference_camera_cfg() -> TiledCameraCfg:
+def stage2_reference_camera_cfg(*, pitch_up_deg: float = 0.0) -> TiledCameraCfg:
     """Pinhole reference camera for Stage2A calibration and Stage2B labels.
 
     The mount and optical transform are authoritative values from
@@ -29,7 +30,11 @@ def stage2_reference_camera_cfg() -> TiledCameraCfg:
         prim_path="{ENV_REGEX_NS}/Robot/body/camera",
         offset=TiledCameraCfg.OffsetCfg(
             pos=CAMERA_OFFSET_POS_B,
-            rot=CAMERA_OFFSET_ROT_WXYZ,
+            rot=(
+                CAMERA_OFFSET_ROT_WXYZ
+                if abs(float(pitch_up_deg)) <= 1.0e-12
+                else camera_mount_quaternion_wxyz(pitch_up_deg)
+            ),
             convention=CAMERA_OFFSET_CONVENTION,
         ),
         data_types=["rgb"],
