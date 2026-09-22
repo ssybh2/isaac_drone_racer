@@ -794,3 +794,14 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProje
     def __post_init__(self) -> None:
         super().__post_init__()
         self.learned_delta_velocity_body_end_fusion_frame = "world_nominal"
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProjectedFreezeAttBiasCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProjectedCfg
+):
+    """World-projected V7 with learned DV prevented from correcting attitude/bias."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_delta_velocity_gain_mode = "freeze_attitude_bias"
