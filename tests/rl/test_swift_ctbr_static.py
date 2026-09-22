@@ -617,3 +617,30 @@ def test_direct_reprojection_associates_over_all_mapped_gates():
         'diagnostic["selected_gate_index"] = int(gate_index)',
     ):
         assert token in env
+
+
+def test_circular12_known_start_matches_training_reset_support():
+    track = _text("tasks/drone_racer/track_generator.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    for token in (
+        "CIRCULAR_12_KNOWN_START_POS_W",
+        "-5.133974596215562",
+        "1.10769515",
+        "CIRCULAR_12_KNOWN_START_ROT_WXYZ",
+    ):
+        assert token in track
+
+    for token in (
+        "class DroneRacerSwiftCTBRGTCircular12KnownStartEnvCfg",
+        "self.scene.robot.init_state.pos = CIRCULAR_12_KNOWN_START_POS_W",
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyCfg",
+    ):
+        assert token in cfg
+
+    for token in (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-KnownStart-v0",
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTPolicy-v0",
+    ):
+        assert token in registry
