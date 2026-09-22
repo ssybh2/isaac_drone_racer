@@ -580,3 +580,40 @@ def test_circular12_gt_estimator_validation_track_contract():
         'experiment_name: "circular12_r12_4096env_roll24_256x3_gt"',
     ):
         assert token in agent
+
+
+def test_circular12_fixed_start_and_estimator_replacement_contract():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    for token in (
+        "class DroneRacerSwiftCTBRGTCircular12FixedStartEnvCfg",
+        "DroneRacerSwiftCTBRGTCircular12RacingEnvCfg",
+        "self.commands.target.randomise_start = None",
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12GTPolicyCfg",
+        "DroneRacerLearnedInertialSwiftCTBRRLCfg",
+        "track_config=CIRCULAR_12_GATE_TRACK_CONFIG",
+    ):
+        assert token in cfg
+
+    for token in (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-FixedStart-v0",
+        "DroneRacerSwiftCTBRGTCircular12FixedStartEnvCfg",
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-GTPolicy-v0",
+        "DroneRacerLearnedInertialSwiftCTBRCircular12GTPolicyCfg",
+        "skrl_swift_ctbr_gt_circular12_cfg.yaml",
+    ):
+        assert token in registry
+
+
+def test_direct_reprojection_associates_over_all_mapped_gates():
+    env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+
+    for token in (
+        "for gate_index in range(self._gate_track_layout.num_gates):",
+        "candidates.append((score, gate_index, points_w))",
+        "candidates.sort(key=lambda item: item[0])",
+        "association_rmse, gate_index, points_w = candidates[0]",
+        'diagnostic["selected_gate_index"] = int(gate_index)',
+    ):
+        assert token in env
