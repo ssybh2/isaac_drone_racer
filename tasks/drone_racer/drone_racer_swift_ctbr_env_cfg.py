@@ -124,6 +124,35 @@ class SwiftCTBRGTRacingRewardsCfg(RewardsCfg):
 
 
 @configclass
+class SwiftCTBRGTStableRacingRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
+    """Circular-12 CTBR racing reward that suppresses gratuitous body spin.
+
+    The current GT policy can exploit the CTBR rate action because the legacy
+    angular-velocity penalty is effectively negligible relative to gate-pass
+    reward.  Keep large bank angles legal (they are physically required for
+    high-speed circular flight), but make sustained angular rate and violent
+    rate-command changes expensive and strengthen forward/gate alignment.
+    """
+
+    ang_vel_l2 = RewTerm(func=mdp.ang_vel_l2, weight=-0.02)
+    lookat_next = RewTerm(
+        func=mdp.lookat_next_gate,
+        weight=0.5,
+        params={"command_name": "target", "std": 0.5},
+    )
+    body_rate_command = RewTerm(
+        func=mdp.swift_ctbr_body_rate_command_l2,
+        weight=-0.01,
+        params={"action_name": "control_action"},
+    )
+    command_smoothness = RewTerm(
+        func=mdp.swift_ctbr_command_delta_l2,
+        weight=-0.002,
+        params={"action_name": "control_action"},
+    )
+
+
+@configclass
 class SwiftCTBRGTPerceptionAwareRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
     """Keep the successful GT racing objective and add camera observability.
 
@@ -398,6 +427,21 @@ class DroneRacerSwiftCTBRGTCircular12RacingEnvCfg(
         self.scene.track = generate_track(
             track_config=CIRCULAR_12_GATE_TRACK_CONFIG
         )
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12StableRacingEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12RacingEnvCfg
+):
+    """Circular-12 GT task with anti-spin CTBR limits and reward shaping."""
+
+    rewards: SwiftCTBRGTStableRacingRewardsCfg = SwiftCTBRGTStableRacingRewardsCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Preserve aggressive racing authority while removing the 10 rad/s
+        # roll/pitch and 6 rad/s yaw rates that enabled sustained tumbling.
+        self.actions.control_action.body_rate_max_radps = (6.0, 6.0, 3.0)
 
 
 @configclass
