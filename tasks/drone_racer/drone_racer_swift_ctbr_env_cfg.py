@@ -711,3 +711,48 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7Cfg(
         self.learned_motion_checkpoint = (
             "artifacts/imo_tcn/model_v7_circular12_racing.pt"
         )
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7NoVisionCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7Cfg
+):
+    """V7 GT-shadow ablation with camera fusion disabled.
+
+    This keeps IMU propagation + V7 learned delta-velocity fusion unchanged and
+    removes the sparse legacy detector updates, isolating inertial/learned
+    integration from perception.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.swift_detector_checkpoint = None
+        self.swift_visibility_checkpoint = None
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7ImuOnlyCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7NoVisionCfg
+):
+    """GT-shadow IMU-only control experiment; V7 runs but is not fused."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_apply_displacement_updates = False
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OracleDVCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7NoVisionCfg
+):
+    """GT-shadow exact endpoint-body delta-velocity fusion without vision.
+
+    The V7 network still runs for shadow diagnostics, but the EKF receives the
+    exact GT measurement for the identical 0.5 s clone window.  If this mode
+    diverges, the fault is in clone/EKF delta-velocity integration rather than
+    the learned model.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_debug_oracle_body_end_delta_velocity_fusion = True
