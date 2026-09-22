@@ -196,6 +196,19 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "gate stress start/duration/noise/latency must be finite and non-negative"
             )
 
+        body_dv_fusion_frame = str(
+            getattr(
+                cfg,
+                "learned_delta_velocity_body_end_fusion_frame",
+                "body_end",
+            )
+        )
+        if body_dv_fusion_frame not in ("body_end", "world_nominal"):
+            raise ValueError(
+                "learned_delta_velocity_body_end_fusion_frame must be "
+                "'body_end' or 'world_nominal'"
+            )
+
         filter_structure = str(
             getattr(cfg, "learned_filter_structure", "legacy_current_clone")
         )
@@ -615,6 +628,23 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             fusion_target_mode = "delta_velocity_body_end_gyro_aligned"
         else:
             fusion_target_mode = target_mode
+
+        body_dv_world_nominal = (
+            target_mode == "delta_velocity_body_end_gyro_aligned"
+            and str(
+                getattr(
+                    self.cfg,
+                    "learned_delta_velocity_body_end_fusion_frame",
+                    "body_end",
+                )
+            )
+            == "world_nominal"
+            and not bool(
+                self.cfg.learned_debug_oracle_body_end_delta_velocity_fusion
+            )
+        )
+        if body_dv_world_nominal:
+            fusion_target_mode = "delta_velocity_gravity_compensated"
         try:
             if fusion_target_mode == "kinematic_residual":
                 predicted_rel = self._lio.predicted_clone_kinematic_residual(
@@ -690,6 +720,23 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             measurement_w = np.asarray(
                 prediction.displacement_w, dtype=np.float64
             ).copy()
+            if body_dv_world_nominal:
+                # The endpoint clone is created from the current state
+                # immediately before this factor, so self._lio.R is the
+                # nominal R_wb at the measurement endpoint. Rotate both the
+                # body-frame network measurement and its protected covariance
+                # into world coordinates, then use the velocity-only world
+                # factor. This is intentionally a stop-gradient
+                # re-parameterization: endpoint attitude is not part of H.
+                R_end_nominal = np.asarray(
+                    self._lio.R, dtype=np.float64
+                ).reshape(3, 3)
+                measurement_w = R_end_nominal @ measurement_w
+                protected_covariance = (
+                    R_end_nominal
+                    @ protected_covariance
+                    @ R_end_nominal.T
+                )
             network_bias = np.asarray(
                 (
                     self.cfg.learned_delta_velocity_network_bias_mps
@@ -703,12 +750,21 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             ).reshape(3)
             if not np.all(np.isfinite(network_bias)):
                 raise ValueError("learned network bias must be finite")
+            if body_dv_world_nominal:
+                network_bias = R_end_nominal @ network_bias
             measurement_w = measurement_w - network_bias
-            measurement_source = (
-                "network_bias_calibrated"
-                if np.any(np.abs(network_bias) > 0.0)
-                else "network"
-            )
+            if body_dv_world_nominal:
+                measurement_source = (
+                    "network_world_nominal_bias_calibrated"
+                    if np.any(np.abs(network_bias) > 0.0)
+                    else "network_world_nominal"
+                )
+            else:
+                measurement_source = (
+                    "network_bias_calibrated"
+                    if np.any(np.abs(network_bias) > 0.0)
+                    else "network"
+                )
             if bool(self.cfg.learned_debug_oracle_uzh_displacement_fusion):
                 start_key = round(float(start_s), 9)
                 end_key = round(float(scheduled_end_s), 9)
