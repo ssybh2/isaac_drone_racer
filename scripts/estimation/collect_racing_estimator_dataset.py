@@ -49,6 +49,16 @@ parser.add_argument(
 )
 parser.add_argument("--width", type=int, default=256)
 parser.add_argument("--height", type=int, default=256)
+parser.add_argument(
+    "--camera-pitch-up-deg",
+    type=float,
+    default=40.0,
+    help=(
+        "Camera optical pitch-up angle relative to body horizontal. "
+        "Positive tilts optical +Z from body +X toward body +Z. "
+        "The new Circular-12 vision campaign uses 40 deg."
+    ),
+)
 parser.add_argument("--seed", type=int, default=1)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -418,7 +428,9 @@ def main() -> None:
     cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=1)
     cfg.scene.num_envs = 1
     cfg.seed = int(args_cli.seed)
-    cfg.scene.tiled_camera = stage2_reference_camera_cfg()
+    cfg.scene.tiled_camera = stage2_reference_camera_cfg(
+        pitch_up_deg=float(args_cli.camera_pitch_up_deg)
+    )
     cfg.scene.tiled_camera.width = int(args_cli.width)
     cfg.scene.tiled_camera.height = int(args_cli.height)
     cfg.scene.imu = ImuCfg(
@@ -659,6 +671,10 @@ def main() -> None:
                 )
             ),
             "image_size": [int(args_cli.width), int(args_cli.height)],
+            "camera_pitch_up_deg": float(args_cli.camera_pitch_up_deg),
+            "camera_mount_contract": (
+                "positive pitch-up tilts optical forward from body +X toward body +Z"
+            ),
             "split_episode_counts": {
                 k: len(v) for k, v in split_episodes.items()
             },
