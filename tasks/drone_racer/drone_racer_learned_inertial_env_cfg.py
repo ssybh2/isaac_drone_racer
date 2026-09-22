@@ -217,6 +217,10 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # Pixel-domain uncertainty from the independent Stage2 detector
     # calibration. This is a per-coordinate sigma, not a 2-D radial RMSE.
     gate_reprojection_sigma_px: float = 0.85
+    # When enabled, use the held-out validation coordinate RMSE stored in a
+    # detector checkpoint as the per-coordinate pixel sigma for direct
+    # reprojection. Legacy checkpoints/configurations keep the fixed value.
+    gate_reprojection_use_checkpoint_sigma: bool = False
     # Require at least two semantic corners, matching the intended partial-gate
     # direct-reprojection use case. Four-corner completeness is no longer a
     # prerequisite for an EKF visual update.
