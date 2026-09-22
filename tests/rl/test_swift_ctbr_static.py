@@ -904,6 +904,9 @@ def test_circular12_multigate_vision_pipeline_is_wired():
         "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowMultiGateVisionCfg",
         "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVisionCfg",
         "torchvision_keypointrcnn_multigate_best.pt",
+        "circular12_pitch40_multigate",
+        "pitch_up_deg=40.0",
+        "self.gate_camera_pitch_up_deg = 40.0",
         "self.learned_apply_displacement_updates = False",
     ):
         assert token in cfg
@@ -913,3 +916,25 @@ def test_circular12_multigate_vision_pipeline_is_wired():
         "GTPolicy-MultiGateVision-v0",
     ):
         assert token in registry
+
+
+def test_circular12_collector_records_pitch40_camera_contract():
+    collector = _text("scripts/estimation/collect_racing_estimator_dataset.py")
+    stage2 = _text("tasks/drone_racer/drone_racer_stage2_env_cfg.py")
+    calibration = _text("perception/stage2_calibration.py")
+
+    for token in (
+        '"--camera-pitch-up-deg"',
+        "default=40.0",
+        "pitch_up_deg=float(args_cli.camera_pitch_up_deg)",
+        '"camera_pitch_up_deg"',
+    ):
+        assert token in collector
+
+    assert "def stage2_reference_camera_cfg(*, pitch_up_deg: float = 0.0)" in stage2
+    for token in (
+        "RACING_CAMERA_PITCH_UP_DEG = 40.0",
+        "def camera_mount_quaternion_wxyz(",
+        "def camera_to_body_rotation(",
+    ):
+        assert token in calibration
