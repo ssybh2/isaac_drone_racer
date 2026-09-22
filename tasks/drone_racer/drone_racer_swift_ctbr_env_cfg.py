@@ -439,6 +439,52 @@ class DroneRacerSwiftCTBRGTPerceptionAwareV3EnvCfg(
 
 
 @configclass
+class DroneRacerSwiftCTBRGTCircular12FixedStartEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12RacingEnvCfg
+):
+    """Pure-GT fixed-start reference on the Circular-12 estimator test track."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.episode_length_s = 20.0
+
+        gate_opening_center_g = load_stage2_gate_geometry().center_g
+        self.scene.robot.init_state.pos = (
+            -4.0,
+            0.0,
+            1.0 + float(gate_opening_center_g[2]),
+        )
+        self.scene.robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
+        self.commands.target.randomise_start = None
+        self.commands.target.debug_vis = False
+        self.events.push_robot = None
+
+        self.events.reset_base = EventTerm(
+            func=mdp.reset_root_state_uniform,
+            mode="reset",
+            params={
+                "pose_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+                "velocity_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+            },
+        )
+
+
+@configclass
 class DroneRacerSwiftCTBRGTFixedStartEnvCfg(DroneRacerSwiftCTBRGTRacingEnvCfg):
     """Pure-GT fixed-start reference for GTShadow policy-isolation tests.
 
@@ -519,6 +565,25 @@ class DroneRacerLearnedInertialSwiftCTBRRLCfg(DroneRacerLearnedInertialRLCfg):
         # Keep one sensor-faithful environment for final closed-loop validation.
         # PPO training will later use a separate vectorized residual/noise task.
         self.scene.num_envs = 1
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12GTPolicyCfg(
+    DroneRacerLearnedInertialSwiftCTBRRLCfg
+):
+    """Frozen Circular-12 GT policy driven only by the production estimator.
+
+    This is the controlled GT-replacement experiment: policy architecture,
+    checkpoint, CTBR action and known track map are unchanged.  Only the
+    platform-state source changes from simulator truth to learned_inertial_state
+    (IMU + learned motion + SC-EKF + mapped-gate reprojection).
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.track = generate_track(
+            track_config=CIRCULAR_12_GATE_TRACK_CONFIG
+        )
 
 
 @configclass
