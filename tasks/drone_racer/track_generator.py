@@ -32,6 +32,44 @@ EASY_7_GATE_TRACK_CONFIG = {
 }
 
 
+# Estimator-validation circular track.
+#
+# The previous Easy-7 loop used a radius of 8 m and seven gates.  Consecutive
+# chord headings therefore changed by 360/7 ~= 51.4 deg, which is larger than
+# the validated Stage2 camera's ~47.2 deg horizontal FOV.  That made the next
+# gate geometrically difficult to keep observable during high-speed racing,
+# independent of estimator quality.
+#
+# This 12-gate loop is deliberately designed for the estimator-replacement
+# experiment:
+#   * 12 gates on a radius-12 m circle, centre (0, 12)
+#   * neighbouring gates are ~6.21 m apart, close to Easy-7's ~6.94 m spacing
+#   * gate normals follow the circle tangent (yaw step = 30 deg)
+#   * at a gate crossing, the next gate centre is only ~15 deg from the
+#     current tangent direction, comfortably inside the camera half-FOV
+#     (~23.6 deg)
+#
+# Keeping the spacing similar preserves the original high-speed character while
+# reducing the artificial visibility bottleneck.  This track is intended to
+# produce a strong GT upper bound first; the exact same geometry can then be
+# used when the 31-D policy observation source is switched to the learned
+# IMU/TCN/EKF/vision estimator.
+CIRCULAR_12_GATE_TRACK_CONFIG = {
+    "1":  {"pos": (0.0, 0.0, 1.0), "yaw": 0.0},
+    "2":  {"pos": (6.0, 1.60769515, 1.0), "yaw": torch.pi / 6.0},
+    "3":  {"pos": (10.39230485, 6.0, 1.0), "yaw": torch.pi / 3.0},
+    "4":  {"pos": (12.0, 12.0, 1.0), "yaw": torch.pi / 2.0},
+    "5":  {"pos": (10.39230485, 18.0, 1.0), "yaw": 2.0 * torch.pi / 3.0},
+    "6":  {"pos": (6.0, 22.39230485, 1.0), "yaw": 5.0 * torch.pi / 6.0},
+    "7":  {"pos": (0.0, 24.0, 1.0), "yaw": torch.pi},
+    "8":  {"pos": (-6.0, 22.39230485, 1.0), "yaw": -5.0 * torch.pi / 6.0},
+    "9":  {"pos": (-10.39230485, 18.0, 1.0), "yaw": -2.0 * torch.pi / 3.0},
+    "10": {"pos": (-12.0, 12.0, 1.0), "yaw": -torch.pi / 2.0},
+    "11": {"pos": (-10.39230485, 6.0, 1.0), "yaw": -torch.pi / 3.0},
+    "12": {"pos": (-6.0, 1.60769515, 1.0), "yaw": -torch.pi / 6.0},
+}
+
+
 def generate_track(track_config: dict | None) -> RigidObjectCollectionCfg:
     return RigidObjectCollectionCfg(
         rigid_objects={
