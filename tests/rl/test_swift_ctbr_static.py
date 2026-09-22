@@ -743,3 +743,39 @@ def test_v7_world_projected_network_shadow_task_is_registered():
         "GTShadow-V7-WorldProjected-v0"
         in registry
     )
+
+
+def test_v7_online_truth_audit_task_and_metrics_are_wired():
+    learned_cfg = _text("tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py")
+    env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+    evaluator = _text("scripts/rl/evaluate_learned_inertial_policy.py")
+
+    assert "learned_debug_online_truth_audit: bool = False" in learned_cfg
+    for token in (
+        "_debug_truth_rotation_history",
+        "target_truth_b = R_end_gt.T",
+        "_online_tcn_truth_sq_sum",
+        "online_tcn_truth_norm_rmse_mps",
+        "online_tcn_truth_nse_norm",
+    ):
+        assert token in env
+
+    assert (
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OnlineAuditCfg"
+        in cfg
+    )
+    assert "self.learned_debug_online_truth_audit = True" in cfg
+    assert (
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-"
+        "GTShadow-V7-OnlineAudit-v0"
+        in registry
+    )
+    for token in (
+        "tcn_truth_rmse=",
+        '"online_tcn_truth_audit":',
+        "online_tcn_truth_axis_rmse_mps",
+        "online_tcn_truth_one_sigma_axis",
+    ):
+        assert token in evaluator
