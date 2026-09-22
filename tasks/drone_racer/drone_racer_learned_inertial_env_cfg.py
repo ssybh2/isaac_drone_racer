@@ -214,6 +214,10 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # experiments use "direct_reprojection": detected gate pixels are compared
     # directly against mapped 3-D gate corners inside the inertial EKF.
     gate_measurement_model: str = "pnp_pose"
+    # Positive values tilt the optical axis upward from body +X toward body +Z.
+    # Keep 0 deg for legacy Stage2 checkpoints; the new Circular-12 racing
+    # camera tasks explicitly use the 40-deg mount.
+    gate_camera_pitch_up_deg: float = 0.0
     # Pixel-domain uncertainty from the independent Stage2 detector
     # calibration. This is a per-coordinate sigma, not a 2-D radial RMSE.
     gate_reprojection_sigma_px: float = 0.85
