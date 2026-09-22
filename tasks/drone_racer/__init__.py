@@ -517,6 +517,38 @@ gym.register(
 
 
 gym.register(
+    id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTShadow-MultiGateVision-v0",
+    entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowMultiGateVisionCfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_circular12_cfg.yaml"
+        ),
+    },
+)
+
+
+gym.register(
+    id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTPolicy-MultiGateVision-v0",
+    entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVisionCfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_circular12_cfg.yaml"
+        ),
+    },
+)
+
+
+gym.register(
     id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-GTShadow-v0",
     entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
     disable_env_checker=True,
