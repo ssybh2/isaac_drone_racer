@@ -216,6 +216,22 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 "learned_delta_velocity_body_end_fusion_frame must be "
                 "'body_end' or 'world_nominal'"
             )
+        delta_velocity_gain_mode = str(
+            getattr(cfg, "learned_delta_velocity_gain_mode", "full")
+        )
+        if delta_velocity_gain_mode not in (
+            "full",
+            "freeze_attitude_bias",
+            "freeze_position",
+            "freeze_position_attitude_bias",
+            "freeze_clones",
+            "freeze_clones_attitude_bias",
+            "freeze_kinematic_state",
+        ):
+            raise ValueError(
+                "unsupported learned_delta_velocity_gain_mode: "
+                f"{delta_velocity_gain_mode!r}"
+            )
 
         filter_structure = str(
             getattr(cfg, "learned_filter_structure", "legacy_current_clone")
@@ -1055,6 +1071,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_start_clone=True,
+                        gain_mode=str(self.cfg.learned_delta_velocity_gain_mode),
                     )
                 elif fusion_target_mode == "delta_velocity_body_end_gyro_aligned":
                     self._lio.update_learned_clone_delta_velocity_body_end_gravity_compensated(
@@ -1064,6 +1081,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         end_timestamp_s=scheduled_end_s,
                         clone_tolerance_s=timing_tolerance_s,
                         marginalize_start_clone=True,
+                        gain_mode=str(self.cfg.learned_delta_velocity_gain_mode),
                     )
                 else:
                     self._lio.update_learned_clone_displacement(
