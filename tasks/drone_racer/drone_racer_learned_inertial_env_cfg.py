@@ -120,6 +120,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # pseudo-measurement; it is used after Circular-12 Oracle tests showed the
     # body-end coupling destabilizes the EKF even with exact measurements.
     learned_delta_velocity_body_end_fusion_frame: str = "body_end"
+    # Gain structure used only by learned delta-velocity factors. "full"
+    # preserves the UZH-style stochastic-cloning update. Diagnostic modes may
+    # suppress attitude/bias correction while still updating velocity/position
+    # through clone cross-covariances.
+    learned_delta_velocity_gain_mode: str = "full"
     # Diagnostic-only learned relative-motion Kalman-gain constraint. "full"
     # preserves the production path. The freeze modes zero selected gain rows
     # before both state injection and Joseph covariance update, allowing us to
