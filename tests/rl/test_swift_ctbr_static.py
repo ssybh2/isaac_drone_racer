@@ -699,3 +699,18 @@ def test_circular12_v7_isolation_tasks_cover_imu_network_and_oracle_paths():
         "GTShadow-V7-OracleDV-v0",
     ):
         assert token in registry
+
+
+def test_circular12_v7_world_oracle_is_registered():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+    assert (
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OracleWorldDVCfg"
+        in cfg
+    )
+    assert "self.learned_debug_oracle_delta_velocity_fusion = True" in cfg
+    assert (
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-"
+        "GTShadow-V7-OracleWorldDV-v0"
+        in registry
+    )
