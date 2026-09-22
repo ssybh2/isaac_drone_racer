@@ -2206,7 +2206,16 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             reject_reason_counts: dict[str, int] = {}
             reject_stage_counts: dict[str, int] = {}
             accepted_gate_measurements = 0
+            detected_gate_instances = 0
+            usable_gate_instances = 0
+            multigate_detection_frames = 0
             for item in self._gate_diagnostics:
+                detected_count = int(item.get("detected_instance_count", 0) or 0)
+                usable_count = int(item.get("usable_instance_count", 0) or 0)
+                detected_gate_instances += detected_count
+                usable_gate_instances += usable_count
+                if detected_count > 1:
+                    multigate_detection_frames += 1
                 if bool(item.get("accepted", False)):
                     accepted_gate_measurements += 1
                 reason = item.get("reject_reason")
@@ -2248,6 +2257,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                     else 0.0
                 ),
                 "gate_accepted_diagnostics": int(accepted_gate_measurements),
+                "gate_detected_instances": int(detected_gate_instances),
+                "gate_usable_instances": int(usable_gate_instances),
+                "gate_multigate_detection_frames": int(multigate_detection_frames),
                 "gate_reject_reason_counts": reject_reason_counts,
                 "gate_reject_stage_counts": reject_stage_counts,
                 "learned_updates": int(self._learned_update_count),
