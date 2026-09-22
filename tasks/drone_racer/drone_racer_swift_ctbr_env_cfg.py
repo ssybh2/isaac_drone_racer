@@ -772,3 +772,14 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OracleWorl
     def __post_init__(self) -> None:
         super().__post_init__()
         self.learned_debug_oracle_delta_velocity_fusion = True
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProjectedCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7NoVisionCfg
+):
+    """V7 network fused through the stable world-frame velocity-only factor."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_delta_velocity_body_end_fusion_frame = "world_nominal"
