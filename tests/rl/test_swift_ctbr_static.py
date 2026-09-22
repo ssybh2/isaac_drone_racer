@@ -961,3 +961,21 @@ def test_circular12_stable_antispin_task_contract():
     assert "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-Stable-v0" in registry
     assert "skrl_swift_ctbr_gt_circular12_stable_cfg.yaml" in registry
     assert 'directory: "swift_ctbr_gt_circular12_stable"' in agent_cfg
+
+
+def test_circular12_stable_known_start_task_contract():
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    for token in (
+        "class DroneRacerSwiftCTBRGTCircular12StableKnownStartEnvCfg",
+        "CIRCULAR_12_KNOWN_START_POS_W",
+        "CIRCULAR_12_KNOWN_START_ROT_WXYZ",
+        "self.commands.target.randomise_start = None",
+    ):
+        assert token in cfg
+
+    assert (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-Stable-KnownStart-v0"
+        in registry
+    )
