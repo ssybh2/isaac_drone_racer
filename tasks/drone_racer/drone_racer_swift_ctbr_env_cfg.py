@@ -742,6 +742,17 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7ImuOnlyCfg
 
 
 @configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OnlineAuditCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7ImuOnlyCfg
+):
+    """IMU-only GT-shadow with V7 online prediction-vs-truth diagnostics."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_debug_online_truth_audit = True
+
+
+@configclass
 class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7OracleDVCfg(
     DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7NoVisionCfg
 ):
