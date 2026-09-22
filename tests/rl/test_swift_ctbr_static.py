@@ -799,3 +799,44 @@ def test_v7_world_projected_freeze_attitude_bias_task_is_registered():
         "GTShadow-V7-WorldProjected-FreezeAttBias-v0"
         in registry
     )
+
+
+def test_calibrated_v7_fusion_candidates_are_wired():
+    learned_cfg = _text("tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py")
+    env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+    calibrator = _text("scripts/estimation/calibrate_learned_motion_fusion.py")
+
+    assert "learned_delta_velocity_calibration_path: str | None = None" in learned_cfg
+    for token in (
+        "learned_delta_velocity_fusion_calibration.v1",
+        "bias_body_end_mps",
+        "_learned_delta_velocity_network_bias_mps",
+        "learned_delta_velocity_bias_source",
+    ):
+        assert token in env
+
+    for token in (
+        '"split": "val"',
+        '"bias_body_end_mps"',
+        '"fusion_rate_hz"',
+        "prediction-truth",
+    ):
+        assert token in calibrator
+
+    for token in (
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7CalibratedFreezeAttBiasCfg",
+        "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7CalibratedVelocityOnlyCfg",
+        'self.learned_delta_velocity_gain_mode = "freeze_attitude_bias"',
+        'self.learned_delta_velocity_gain_mode = "freeze_position_attitude_bias"',
+        "model_v7_circular12_racing.pt.",
+        "fusion_calibration.json",
+    ):
+        assert token in cfg
+
+    for token in (
+        "GTShadow-V7-CalibratedFreezeAttBias-v0",
+        "GTShadow-V7-CalibratedVelocityOnly-v0",
+    ):
+        assert token in registry
