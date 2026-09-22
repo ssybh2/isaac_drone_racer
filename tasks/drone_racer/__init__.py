@@ -182,6 +182,21 @@ gym.register(
 )
 
 gym.register(
+    id="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-Stable-KnownStart-v0",
+    entry_point=f"{__name__}.swift_ctbr_racing_env:SwiftCTBRRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerSwiftCTBRGTCircular12StableKnownStartEnvCfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_circular12_stable_cfg.yaml"
+        ),
+    },
+)
+
+gym.register(
     id="Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0",
     entry_point=f"{__name__}.swift_ctbr_racing_env:SwiftCTBRRacingEnv",
     disable_env_checker=True,
