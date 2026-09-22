@@ -134,7 +134,12 @@ class TorchvisionStage2KeypointDataset(Dataset):
 
 
 class TorchvisionGateCornerDetector:
-    """Inference adapter exposing Keypoint R-CNN through CornerObservation."""
+    """Inference adapter exposing Keypoint R-CNN gate instances.
+
+    detect_all is the production multi-instance API. detect is retained for
+    legacy single-gate callers and returns the highest-scoring usable instance,
+    or an empty observation when no instance survives thresholding.
+    """
 
     def __init__(
         self,
@@ -144,6 +149,7 @@ class TorchvisionGateCornerDetector:
         detection_threshold: float = 0.5,
         keypoint_confidence_threshold: float = 0.5,
         min_quad_area_px2: float = 16.0,
+        max_instances: int = 10,
     ):
         payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
         self.device = torch.device(device)
@@ -154,44 +160,94 @@ class TorchvisionGateCornerDetector:
         self.detection_threshold = float(detection_threshold)
         self.keypoint_confidence_threshold = float(keypoint_confidence_threshold)
         self.min_quad_area_px2 = float(min_quad_area_px2)
-        self.metadata = dict(payload["metadata"])
+        self.max_instances = int(max_instances)
+        if self.max_instances < 1:
+            raise ValueError("max_instances must be positive")
+        self.metadata = dict(payload.get("metadata", {}))
 
-    @torch.inference_mode()
-    def detect(self, rgb_image: np.ndarray, *, timestamp_s: float = 0.0) -> CornerObservation:
-        image = np.asarray(rgb_image)
-        if image.ndim != 3 or image.shape[-1] != 3:
-            raise ValueError("rgb_image must have shape (H, W, 3)")
-        tensor = torch.from_numpy(image.copy()).permute(2, 0, 1).float().div_(255.0).to(self.device)
-        output = self.model([tensor])[0]
-        if not len(output["scores"]) or float(output["scores"][0]) < self.detection_threshold:
-            return CornerObservation(
-                np.zeros((4, 2), dtype=np.float64),
-                visible=np.zeros(4, dtype=bool),
-                confidence=np.zeros(4, dtype=np.float64),
-                timestamp_s=timestamp_s,
-                source="torchvision_keypoint_rcnn",
-            )
-
-        corners = output["keypoints"][0, :, :2].detach().cpu().numpy()
-        raw_keypoint_scores = output.get("keypoints_scores")
-        logits = None
-        if raw_keypoint_scores is not None and len(raw_keypoint_scores):
-            logits = raw_keypoint_scores[0].detach().cpu().numpy()
-        instance_score = float(output["scores"][0].detach().cpu())
-
-        visible, confidence = _decode_keypoint_visibility(
-            corners,
-            image_width=int(image.shape[1]),
-            image_height=int(image.shape[0]),
-            keypoint_logits=logits,
-            instance_score=instance_score,
-            confidence_threshold=self.keypoint_confidence_threshold,
-            min_quad_area_px2=self.min_quad_area_px2,
-        )
+    @staticmethod
+    def _empty_observation(timestamp_s: float) -> CornerObservation:
         return CornerObservation(
-            corners_uv=corners,
-            visible=visible,
-            confidence=confidence,
+            np.zeros((4, 2), dtype=np.float64),
+            visible=np.zeros(4, dtype=bool),
+            confidence=np.zeros(4, dtype=np.float64),
             timestamp_s=timestamp_s,
             source="torchvision_keypoint_rcnn",
         )
+
+    @torch.inference_mode()
+    def detect_all(
+        self,
+        rgb_image: np.ndarray,
+        *,
+        timestamp_s: float = 0.0,
+    ) -> list[CornerObservation]:
+        image = np.asarray(rgb_image)
+        if image.ndim != 3 or image.shape[-1] != 3:
+            raise ValueError("rgb_image must have shape (H, W, 3)")
+        tensor = (
+            torch.from_numpy(image.copy())
+            .permute(2, 0, 1)
+            .float()
+            .div_(255.0)
+            .to(self.device)
+        )
+        output = self.model([tensor])[0]
+        scores = output.get("scores")
+        if scores is None or not len(scores):
+            return []
+
+        raw_keypoint_scores = output.get("keypoints_scores")
+        observations: list[CornerObservation] = []
+        limit = min(int(len(scores)), self.max_instances)
+        for index in range(limit):
+            instance_score = float(scores[index].detach().cpu())
+            if instance_score < self.detection_threshold:
+                break
+            corners = (
+                output["keypoints"][index, :, :2]
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            logits = None
+            if raw_keypoint_scores is not None and len(raw_keypoint_scores) > index:
+                logits = raw_keypoint_scores[index].detach().cpu().numpy()
+
+            visible, confidence = _decode_keypoint_visibility(
+                corners,
+                image_width=int(image.shape[1]),
+                image_height=int(image.shape[0]),
+                keypoint_logits=logits,
+                instance_score=instance_score,
+                confidence_threshold=self.keypoint_confidence_threshold,
+                min_quad_area_px2=self.min_quad_area_px2,
+            )
+            observations.append(
+                CornerObservation(
+                    corners_uv=corners,
+                    visible=visible,
+                    confidence=confidence,
+                    timestamp_s=timestamp_s,
+                    source=(
+                        "torchvision_keypoint_rcnn:"
+                        f"instance={index}:score={instance_score:.4f}"
+                    ),
+                )
+            )
+        return observations
+
+    @torch.inference_mode()
+    def detect(
+        self,
+        rgb_image: np.ndarray,
+        *,
+        timestamp_s: float = 0.0,
+    ) -> CornerObservation:
+        observations = self.detect_all(
+            rgb_image,
+            timestamp_s=timestamp_s,
+        )
+        if not observations:
+            return self._empty_observation(timestamp_s)
+        return observations[0]
