@@ -53,3 +53,30 @@ def test_hybrid_racing_eval_measures_availability():
     assert "hybrid_availability_given_gt_ge2" in text
     assert "speed_buckets_mps" in text
     assert "body_rate_buckets_radps" in text
+
+
+def test_racing_estimator_dataset_collector_is_gt_controlled_and_synchronized():
+    text = _text("scripts/estimation/collect_racing_estimator_dataset.py")
+
+    for token in (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-v0",
+        "stage2_reference_camera_cfg()",
+        "cfg.scene.imu = ImuCfg(",
+        "TRACE_FIELDS",
+        '"imu_gx"',
+        '"truth_vx"',
+        '"thrust_b_z"',
+        '"ctbr_collective_accel_mps2"',
+        '"mapped_gates"',
+        "_all_mapped_gate_labels",
+        "imo_manifest.json",
+        "isaac_drone_racer.imo_dataset_manifest.v2",
+        "target-successful-episodes",
+        "_split_for_success",
+    ):
+        assert token in text
+
+    # The collector must not put the user's learned estimator in the control
+    # loop; GT policy control is frozen while sensors/truth are logged.
+    assert "LearnedInertialRacingEnv" not in text
+    assert "learned_inertial_state" not in text
