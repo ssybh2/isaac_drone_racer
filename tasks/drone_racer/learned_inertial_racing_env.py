@@ -64,6 +64,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._gate_camera_calibration = None
         self._gate_T_bc = None
         self._gate_track_layout = None
+        self._gate_reprojection_sigma_px_runtime = float(
+            cfg.gate_reprojection_sigma_px
+        )
         self._last_camera_timestamp_s = -np.inf
         self._last_gate_measurement = None
         self._learned_update_count = 0
@@ -486,6 +489,34 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 else self.cfg.swift_keypoint_confidence_threshold
             ),
         )
+        if bool(
+            getattr(
+                self.cfg,
+                "gate_reprojection_use_checkpoint_sigma",
+                False,
+            )
+        ):
+            validation_metadata = dict(
+                coordinate_detector.metadata.get("validation", {})
+            )
+            calibrated_sigma = validation_metadata.get(
+                "recommended_pixel_sigma_px"
+            )
+            if calibrated_sigma is None:
+                calibrated_sigma = coordinate_detector.metadata.get(
+                    "recommended_pixel_sigma_px"
+                )
+            if calibrated_sigma is None:
+                raise ValueError(
+                    "detector checkpoint does not provide "
+                    "recommended_pixel_sigma_px"
+                )
+            calibrated_sigma = float(calibrated_sigma)
+            if calibrated_sigma <= 0.0 or not np.isfinite(calibrated_sigma):
+                raise ValueError(
+                    "detector checkpoint pixel sigma must be positive and finite"
+                )
+            self._gate_reprojection_sigma_px_runtime = calibrated_sigma
         if self.cfg.swift_visibility_checkpoint is None:
             self.swift_detector = coordinate_detector
         else:
@@ -1272,7 +1303,7 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "association_second_best_rmse_px": None,
             "pixel_residual_rmse_px": None,
             "pixel_residual_radial_rmse_px": None,
-            "pixel_sigma_px": float(self.cfg.gate_reprojection_sigma_px),
+            "pixel_sigma_px": float(self._gate_reprojection_sigma_px_runtime),
             "huber_weights": None,
             "corner_normalized_innovation": None,
             "normalized_nis": None,
