@@ -111,6 +111,15 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
         0.0,
         0.0,
     )
+    # Runtime fusion parameterization for endpoint-body delta-velocity
+    # checkpoints. "body_end" preserves the original nonlinear measurement
+    # h=R_end^T[(v_end-v_start)-g*dt]. "world_nominal" rotates the network
+    # measurement/covariance by the nominal endpoint attitude and fuses the
+    # equivalent world-frame velocity-only factor. The latter deliberately
+    # prevents the learned factor from acting as a strong attitude
+    # pseudo-measurement; it is used after Circular-12 Oracle tests showed the
+    # body-end coupling destabilizes the EKF even with exact measurements.
+    learned_delta_velocity_body_end_fusion_frame: str = "body_end"
     # Diagnostic-only learned relative-motion Kalman-gain constraint. "full"
     # preserves the production path. The freeze modes zero selected gain rows
     # before both state injection and Joseph covariance update, allowing us to
