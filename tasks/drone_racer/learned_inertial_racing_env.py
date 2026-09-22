@@ -110,6 +110,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._online_tcn_truth_one_sigma_count = np.zeros(3, dtype=np.int64)
         self._online_tcn_truth_two_sigma_count = np.zeros(3, dtype=np.int64)
         self._online_tcn_truth_max_norm = 0.0
+        self._online_imu_truth_sq_sum = np.zeros(3, dtype=np.float64)
+        self._online_imu_truth_bias_sum = np.zeros(3, dtype=np.float64)
+        self._online_imu_truth_max_norm = 0.0
         self.last_episode_diagnostic: dict[str, object] | None = None
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
 
@@ -376,6 +379,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._online_tcn_truth_one_sigma_count = np.zeros(3, dtype=np.int64)
         self._online_tcn_truth_two_sigma_count = np.zeros(3, dtype=np.int64)
         self._online_tcn_truth_max_norm = 0.0
+        self._online_imu_truth_sq_sum = np.zeros(3, dtype=np.float64)
+        self._online_imu_truth_bias_sum = np.zeros(3, dtype=np.float64)
+        self._online_imu_truth_max_norm = 0.0
         # Anchor the learned fixed-lag schedule on the first valid 100 Hz
         # motion sample, rather than inventing a thrust sample at reset.
         self._learned_epoch_start_s = None
@@ -856,6 +862,26 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             else:
                 raise RuntimeError(
                     f"unsupported learned-motion fusion target mode: {fusion_target_mode!r}"
+                )
+
+            if bool(self.cfg.learned_debug_online_truth_audit):
+                # Compare the IMU/EKF two-clone increment against the *same*
+                # body-end truth target used for the online TCN audit. In the
+                # OnlineAudit task the fusion target remains body-end, so this
+                # is an apples-to-apples per-window accuracy comparison.
+                if fusion_target_mode != "delta_velocity_body_end_gyro_aligned":
+                    raise RuntimeError(
+                        "online IMU truth audit requires body-end delta velocity"
+                    )
+                imu_residual_truth_b = (
+                    np.asarray(predicted_rel, dtype=np.float64).reshape(3)
+                    - target_truth_b
+                )
+                self._online_imu_truth_sq_sum += imu_residual_truth_b**2
+                self._online_imu_truth_bias_sum += imu_residual_truth_b
+                self._online_imu_truth_max_norm = max(
+                    self._online_imu_truth_max_norm,
+                    float(np.linalg.norm(imu_residual_truth_b)),
                 )
 
             measurement_w = np.asarray(
@@ -2179,6 +2205,25 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 ).tolist(),
                 "online_tcn_truth_max_norm_error_mps": float(
                     self._online_tcn_truth_max_norm
+                ),
+                "online_imu_truth_axis_rmse_mps": (
+                    np.sqrt(
+                        self._online_imu_truth_sq_sum
+                        / max(1, self._online_tcn_truth_count)
+                    ).tolist()
+                ),
+                "online_imu_truth_norm_rmse_mps": float(
+                    np.sqrt(
+                        np.sum(self._online_imu_truth_sq_sum)
+                        / max(1, self._online_tcn_truth_count)
+                    )
+                ),
+                "online_imu_truth_axis_bias_mps": (
+                    self._online_imu_truth_bias_sum
+                    / max(1, self._online_tcn_truth_count)
+                ).tolist(),
+                "online_imu_truth_max_norm_error_mps": float(
+                    self._online_imu_truth_max_norm
                 ),
             }
 
