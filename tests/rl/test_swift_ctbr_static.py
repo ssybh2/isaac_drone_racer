@@ -714,3 +714,30 @@ def test_circular12_v7_world_oracle_is_registered():
         "GTShadow-V7-OracleWorldDV-v0"
         in registry
     )
+
+
+def test_v7_world_projected_network_shadow_task_is_registered():
+    learned_cfg = _text("tasks/drone_racer/drone_racer_learned_inertial_env_cfg.py")
+    env = _text("tasks/drone_racer/learned_inertial_racing_env.py")
+    cfg = _text("tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py")
+    registry = _text("tasks/drone_racer/__init__.py")
+
+    assert 'learned_delta_velocity_body_end_fusion_frame: str = "body_end"' in learned_cfg
+    for token in (
+        "body_dv_world_nominal",
+        "R_end_nominal @ measurement_w",
+        "R_end_nominal @ protected_covariance @ R_end_nominal.T",
+        '"network_world_nominal"',
+    ):
+        assert token in env
+
+    assert (
+        "class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7WorldProjectedCfg"
+        in cfg
+    )
+    assert 'self.learned_delta_velocity_body_end_fusion_frame = "world_nominal"' in cfg
+    assert (
+        "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-"
+        "GTShadow-V7-WorldProjected-v0"
+        in registry
+    )
