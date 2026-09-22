@@ -874,8 +874,12 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVis
     def __post_init__(self) -> None:
         super().__post_init__()
         self.learned_apply_displacement_updates = False
+        self.scene.tiled_camera = stage2_reference_camera_cfg(
+            pitch_up_deg=40.0
+        )
+        self.gate_camera_pitch_up_deg = 40.0
         self.swift_detector_checkpoint = (
-            "artifacts/racing_vision/circular12_multigate/"
+            "artifacts/racing_vision/circular12_pitch40_multigate/"
             "torchvision_keypointrcnn_multigate_best.pt"
         )
         self.swift_visibility_checkpoint = None
