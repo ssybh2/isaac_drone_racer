@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 
 import numpy as np
 
@@ -23,6 +24,11 @@ CAMERA_OPTICAL_CONVENTION = "opencv_ros_x_right_y_down_z_forward"
 CAMERA_OFFSET_POS_B = (0.14, 0.0, 0.05)
 CAMERA_OFFSET_ROT_WXYZ = (1.0, 0.0, 0.0, 0.0)
 CAMERA_OFFSET_CONVENTION = "world"
+
+# New high-speed Circular-12 racing camera mount. Positive pitch-up means the
+# optical forward axis acquires a positive body-Z component. The legacy Stage2
+# camera remains 0 deg unless a caller explicitly requests this mount.
+RACING_CAMERA_PITCH_UP_DEG = 40.0
 
 # Validated transform from OpenCV/ROS optical frame C to drone body frame B.
 CAMERA_TO_BODY_ROTATION = (
@@ -59,10 +65,53 @@ def openvins_camera_matrix() -> np.ndarray:
     )
 
 
-def stage2_camera_to_body() -> RigidTransform:
-    """Return the single configured Stage2 transform ``T_bc``."""
+def camera_mount_quaternion_wxyz(
+    pitch_up_deg: float = 0.0,
+) -> tuple[float, float, float, float]:
+    """Return Isaac mount quaternion for a positive optical pitch-up angle.
+
+    With the legacy 0-deg mount the OpenCV optical +Z axis maps to body +X.
+    A positive pitch-up rotates that optical forward axis toward body +Z.
+    In the body XYZ convention this is a negative rotation about body +Y.
+    """
+    angle = math.radians(float(pitch_up_deg))
+    half = 0.5 * angle
+    return (
+        float(math.cos(half)),
+        0.0,
+        float(-math.sin(half)),
+        0.0,
+    )
+
+
+def camera_to_body_rotation(
+    pitch_up_deg: float = 0.0,
+) -> np.ndarray:
+    """Return optical-frame C -> body-frame B rotation for the mount angle."""
+    angle = math.radians(float(pitch_up_deg))
+    ca = math.cos(angle)
+    sa = math.sin(angle)
+    # R_y(-angle): body-fixed mount rotation that tips optical +Z upward.
+    R_pitch_up = np.array(
+        [
+            [ca, 0.0, -sa],
+            [0.0, 1.0, 0.0],
+            [sa, 0.0, ca],
+        ],
+        dtype=np.float64,
+    )
+    return R_pitch_up @ np.asarray(
+        CAMERA_TO_BODY_ROTATION,
+        dtype=np.float64,
+    )
+
+
+def stage2_camera_to_body(
+    pitch_up_deg: float = 0.0,
+) -> RigidTransform:
+    """Return the Stage2/racing camera transform ``T_bc``."""
     return RigidTransform(
-        np.asarray(CAMERA_TO_BODY_ROTATION, dtype=np.float64),
+        camera_to_body_rotation(pitch_up_deg),
         np.asarray(CAMERA_OFFSET_POS_B, dtype=np.float64),
         to_frame="B",
         from_frame="C",
