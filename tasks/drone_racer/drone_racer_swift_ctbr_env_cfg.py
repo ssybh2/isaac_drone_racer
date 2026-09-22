@@ -445,6 +445,46 @@ class DroneRacerSwiftCTBRGTCircular12StableRacingEnvCfg(
 
 
 @configclass
+class DroneRacerSwiftCTBRGTCircular12StableKnownStartEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12StableRacingEnvCfg
+):
+    """Stable anti-spin Circular-12 benchmark from the exact known start."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.episode_length_s = 20.0
+        self.scene.robot.init_state.pos = CIRCULAR_12_KNOWN_START_POS_W
+        self.scene.robot.init_state.rot = CIRCULAR_12_KNOWN_START_ROT_WXYZ
+        self.commands.target.randomise_start = None
+        self.commands.target.debug_vis = False
+        self.events.push_robot = None
+
+        self.events.reset_base = EventTerm(
+            func=mdp.reset_root_state_uniform,
+            mode="reset",
+            params={
+                "pose_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+                "velocity_range": {
+                    "x": (0.0, 0.0),
+                    "y": (0.0, 0.0),
+                    "z": (0.0, 0.0),
+                    "roll": (0.0, 0.0),
+                    "pitch": (0.0, 0.0),
+                    "yaw": (0.0, 0.0),
+                },
+            },
+        )
+
+
+@configclass
 class DroneRacerSwiftCTBRGTPerceptionAwareEnvCfg(
     DroneRacerSwiftCTBRGTRacingEnvCfg
 ):
