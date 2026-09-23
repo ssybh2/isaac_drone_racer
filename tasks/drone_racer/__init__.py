@@ -593,6 +593,22 @@ gym.register(
 
 
 gym.register(
+    id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTShadow-Color20VisionV1-v0",
+    entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowColor20VisionV1Cfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_circular12_cfg.yaml"
+        ),
+    },
+)
+
+
+gym.register(
     id="Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-KnownStart-GTPolicy-MultiGateVision-v0",
     entry_point=f"{__name__}.learned_inertial_racing_env:LearnedInertialRacingEnv",
     disable_env_checker=True,
