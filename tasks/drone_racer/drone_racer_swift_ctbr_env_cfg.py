@@ -995,6 +995,44 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowMultiGateVis
 
 
 @configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowColor20VisionV1Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowV7ImuOnlyCfg
+):
+    """GT-controlled Circular-12 shadow run with the Color20 Gate-ID detector.
+
+    The actor remains on simulator truth, while the estimator uses IMU
+    propagation plus the newly retrained 20-degree, 2.07-m diversified visual
+    detector. Learned-motion fusion stays disabled in this first integration
+    check so the effect of visual map corrections is isolated.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.tiled_camera = stage2_reference_camera_cfg(
+            pitch_up_deg=20.0
+        )
+        self.gate_camera_pitch_up_deg = 20.0
+        self.swift_detector_checkpoint = (
+            "artifacts/racing_vision/"
+            "circular12_color20_h207_gateid_kprcnn_v1/"
+            "torchvision_keypointrcnn_multigate_best.pt"
+        )
+        self.swift_visibility_checkpoint = None
+        self.swift_detection_threshold = 0.35
+        self.swift_keypoint_confidence_threshold = 0.35
+        self.gate_measurement_model = "direct_reprojection"
+        self.gate_reprojection_use_checkpoint_sigma = True
+        self.gate_reprojection_min_visible_corners = 2
+        self.gate_reprojection_association_max_rmse_px = 80.0
+        self.gate_identity_min_confidence = 0.50
+        self.gate_identity_preferred_max_rmse_px = 15.0
+        self.gate_identity_preference_margin_px = 4.0
+        self.gate_reprojection_huber_delta_sigma = 2.5
+        self.gate_reprojection_max_normalized_nis = 25.0
+        self.gate_debug_gt_diagnostics = True
+
+
+@configclass
 class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVisionCfg(
     DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyV7Cfg
 ):
