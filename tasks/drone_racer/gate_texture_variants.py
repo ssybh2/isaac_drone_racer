@@ -40,6 +40,16 @@ def variant_path_for_gate(gate: dict) -> Path:
     return GATE_DIR / f"gate_circular12_{gate_id:02d}_{color}.usd"
 
 
+def _runtime_asset_path(asset: Path) -> str:
+    """Give nested USD references and MDL paths that survive scene instancing.
+
+    These generated USD wrappers are local build products, so an absolute path
+    is preferable to a wrapper-relative path that Isaac's MDL loader later
+    resolves from the parent scene instead.
+    """
+    return str(asset.resolve(strict=True))
+
+
 def _is_gate_bitmap_asset(value) -> bool:
     """Return True for the original or generated gate bitmap asset slot."""
     from pxr import Sdf
@@ -86,7 +96,7 @@ def _build_reference_wrapper_variant(destination: Path, replacement_asset_path: 
     wrapper = Usd.Stage.CreateNew(str(destination))
     wrapper_root = wrapper.DefinePrim(f"/{root_name}", root_type)
     wrapper.SetDefaultPrim(wrapper_root)
-    wrapper_root.GetReferences().AddReference("./gate.usd")
+    wrapper_root.GetReferences().AddReference(_runtime_asset_path(SOURCE_GATE_USD))
 
     # The reference is composed immediately. Setting an input below the
     # referenced prim authors a stronger override into this wrapper layer; it
@@ -117,6 +127,7 @@ def _variant_is_fresh(destination: Path, texture: Path) -> bool:
     if not destination.is_file():
         return False
     newest_input = max(
+        Path(__file__).stat().st_mtime_ns,
         SOURCE_GATE_USD.stat().st_mtime_ns,
         TEXTURE_MAP.stat().st_mtime_ns,
         texture.stat().st_mtime_ns,
@@ -140,7 +151,7 @@ def ensure_circular12_gate_usd_variants(*, force: bool = False) -> dict[str, str
             raise FileNotFoundError(texture)
 
         if force or not _variant_is_fresh(destination, texture):
-            replacement = f"./textures/circular12/{texture.name}"
+            replacement = _runtime_asset_path(texture)
             changed = _build_reference_wrapper_variant(destination, replacement)
             print(
                 f"[gate-usd] gate={int(gate_id):02d} "

@@ -33,6 +33,6 @@ def test_gate_variant_builder_uses_reference_wrapper_layer():
         ROOT / "tasks/drone_racer/gate_texture_variants.py"
     ).read_text(encoding="utf-8")
     assert "_build_reference_wrapper_variant" in text
-    assert 'wrapper_root.GetReferences().AddReference("./gate.usd")' in text
+    assert "wrapper_root.GetReferences().AddReference" in text
     assert "wrapper.GetRootLayer().Save()" in text
     assert "stage.GetRootLayer().Export" not in text
