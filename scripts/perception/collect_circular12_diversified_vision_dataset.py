@@ -420,8 +420,10 @@ def main() -> None:
                     cv2.imwrite(str(audit_path), _annotate(rgb, mapped_gates))
 
     finally:
+        # Do not close SimulationApp here. In Isaac Sim 4.5 close() can tear
+        # down the process before ordinary Python code after this block runs.
+        # Manifests must be flushed first; the app is closed at the very end.
         env.close()
-        simulation_app.close()
 
     for split in ("train", "val", "test"):
         manifest = {
@@ -490,6 +492,7 @@ def main() -> None:
     print("=" * 104)
     print(json.dumps(root_manifest, indent=2))
     print(f"[diversified-vision] dataset: {root}", flush=True)
+    simulation_app.close()
 
 
 if __name__ == "__main__":
