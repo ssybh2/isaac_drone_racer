@@ -26,3 +26,11 @@ def test_preview_uses_real_track_not_multicolor_overlay_geometry():
 def test_generated_variant_naming_is_ignored_by_git():
     ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "assets/gate/gate_circular12_*.usd" in ignore
+
+
+def test_gate_variant_builder_reloads_cached_source_layer():
+    text = (
+        ROOT / "tasks/drone_racer/gate_texture_variants.py"
+    ).read_text(encoding="utf-8")
+    assert "stage.Reload()" in text
+    assert "basename.startswith(\"bitmap_gate_\")" in text
