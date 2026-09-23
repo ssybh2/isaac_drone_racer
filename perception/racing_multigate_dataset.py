@@ -172,9 +172,16 @@ class RacingMultiGateKeypointDataset(Dataset):
             corners_array = np.zeros((0, 4, 2), dtype=np.float64)
             visible_array = np.zeros((0, 4), dtype=bool)
 
+        # Torchvision class 0 is background. Circular-12 Gate IDs are 1..12,
+        # so the detector classification head can learn color -> global Gate ID
+        # directly while the keypoint head learns the four semantic corners.
+        labels_tensor = torch.as_tensor(
+            [gate_index + 1 for gate_index in gate_indices],
+            dtype=torch.int64,
+        )
         target = {
             "boxes": boxes_tensor,
-            "labels": torch.ones((count,), dtype=torch.int64),
+            "labels": labels_tensor,
             "keypoints": keypoints_tensor,
             "image_id": torch.tensor(index, dtype=torch.int64),
             "area": area,
