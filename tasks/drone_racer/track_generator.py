@@ -11,6 +11,8 @@ import isaaclab.utils.math as math_utils
 import torch
 from isaaclab.assets import RigidObjectCfg, RigidObjectCollectionCfg
 
+from .gate_texture_variants import ensure_circular12_gate_usd_variants
+
 
 # Easy curriculum used by the deployment-faithful learned-inertial PPO task.
 #
@@ -87,12 +89,26 @@ CIRCULAR_12_KNOWN_START_ROT_WXYZ = (1.0, 0.0, 0.0, 0.0)
 
 
 def generate_track(track_config: dict | None) -> RigidObjectCollectionCfg:
+    # Circular-12 is the localization track: each physical gate has a stable
+    # visual identity. Build one USD sibling per gate from the authoritative
+    # gate.usd and bind its unique checked-in texture before Isaac spawns /
+    # clones the rigid objects. Other tracks keep the original shared asset.
+    gate_usd_paths = (
+        ensure_circular12_gate_usd_variants()
+        if track_config is CIRCULAR_12_GATE_TRACK_CONFIG
+        else None
+    )
+
     return RigidObjectCollectionCfg(
         rigid_objects={
             f"gate_{gate_id}": RigidObjectCfg(
                 prim_path=f"/World/envs/env_.*/Gate_{gate_id}",
                 spawn=sim_utils.UsdFileCfg(
-                    usd_path="assets/gate/gate.usd",
+                    usd_path=(
+                        gate_usd_paths[str(gate_id)]
+                        if gate_usd_paths is not None
+                        else "assets/gate/gate.usd"
+                    ),
                     rigid_props=sim_utils.RigidBodyPropertiesCfg(
                         kinematic_enabled=True,
                         disable_gravity=True,
