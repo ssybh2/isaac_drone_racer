@@ -5,8 +5,11 @@ those map-wide labels directly, keeps negative/no-usable-gate frames, selects
 checkpoints on held-out racing episodes, and evaluates the final model on the
 untouched test split.
 
-The model remains class-agnostic with one gate class; gate identity is resolved
-later by known-map direct reprojection association in the estimator.
+The model has 12 foreground classes, one per physical Circular-12 gate. The
+high-contrast gate texture therefore supervises color -> global Gate ID while
+the keypoint head simultaneously learns the four semantic gate corners. Runtime
+association uses the predicted identity to select the known-map landmark and
+still applies pixel reprojection gating before any EKF update.
 """
 
 from __future__ import annotations
@@ -136,12 +139,13 @@ def _prediction_instances(
     image_height: int,
     detection_threshold: float,
     keypoint_confidence_threshold: float,
-) -> list[tuple[np.ndarray, np.ndarray, float]]:
+) -> list[tuple[np.ndarray, np.ndarray, float, int | None]]:
     scores = output.get("scores")
     if scores is None:
         return []
     raw_keypoint_scores = output.get("keypoints_scores")
-    result: list[tuple[np.ndarray, np.ndarray, float]] = []
+    raw_labels = output.get("labels")
+    result: list[tuple[np.ndarray, np.ndarray, float, int | None]] = []
     for index in range(int(len(scores))):
         instance_score = float(scores[index].detach().cpu())
         if instance_score < float(detection_threshold):
@@ -160,12 +164,19 @@ def _prediction_instances(
             min_quad_area_px2=16.0,
         )
         if int(visible.sum()) >= 2:
-            result.append((corners.astype(np.float64), visible, instance_score))
+            gate_id = None
+            if raw_labels is not None and len(raw_labels) > index:
+                label = int(raw_labels[index].detach().cpu())
+                if 1 <= label <= 12:
+                    gate_id = label
+            result.append(
+                (corners.astype(np.float64), visible, instance_score, gate_id)
+            )
     return result
 
 
 def _greedy_match(
-    predictions: list[tuple[np.ndarray, np.ndarray, float]],
+    predictions: list[tuple[np.ndarray, np.ndarray, float, int | None]],
     gt_corners: np.ndarray,
     gt_visible: np.ndarray,
     *,
@@ -217,6 +228,8 @@ def _evaluate(
     negative_frames_false_positive = 0
     coordinate_sq_sum = 0.0
     matched_corner_count = 0
+    matched_gate_id_correct = 0
+    matched_gate_id_count = 0
 
     for images, _, infos in loader:
         outputs = model([image.to(device) for image in images])
@@ -255,6 +268,14 @@ def _evaluate(
                 coordinate_sq_sum += float(np.sum(residual * residual))
                 matched_corner_count += int(common.sum())
 
+                predicted_gate_id = predictions[pred_index][3]
+                truth_gate_id = int(info.gate_indices[gt_index]) + 1
+                if predicted_gate_id is not None:
+                    matched_gate_id_count += 1
+                    matched_gate_id_correct += int(
+                        int(predicted_gate_id) == truth_gate_id
+                    )
+
     precision = matched_instances / max(pred_instances, 1)
     recall = matched_instances / max(gt_instances, 1)
     coordinate_rmse = float(
@@ -265,6 +286,7 @@ def _evaluate(
     )
     negative_fp_rate = negative_frames_false_positive / max(negative_frames, 1)
     positive_hit_rate = positive_frames_hit / max(positive_frames, 1)
+    gate_id_accuracy = matched_gate_id_correct / max(matched_gate_id_count, 1)
     return {
         "gt_instances": int(gt_instances),
         "predicted_usable_instances": int(pred_instances),
@@ -275,6 +297,9 @@ def _evaluate(
         "negative_frame_false_positive_rate": float(negative_fp_rate),
         "matched_corner_coordinate_rmse_px": coordinate_rmse,
         "matched_corner_radial_rmse_px": radial_rmse,
+        "gate_id_evaluated_matches": int(matched_gate_id_count),
+        "gate_id_correct_matches": int(matched_gate_id_correct),
+        "gate_id_accuracy": float(gate_id_accuracy),
         "recommended_pixel_sigma_px": float(max(1.0, coordinate_rmse)),
     }
 
@@ -363,12 +388,30 @@ def main() -> None:
         shuffle=False,
     )
 
-    model = build_keypoint_rcnn(image_size=args.image_size).to(device)
+    num_gate_ids = 12
+    num_classes = num_gate_ids + 1  # background + Gate IDs 1..12
+    model = build_keypoint_rcnn(
+        image_size=args.image_size,
+        num_classes=num_classes,
+    ).to(device)
     warm_start = args.warm_start.expanduser().resolve()
     if warm_start.exists():
         payload = torch.load(warm_start, map_location=device, weights_only=False)
-        model.load_state_dict(payload["model_state_dict"])
-        print(f"[multigate-vision] warm start: {warm_start}", flush=True)
+        source_state = payload["model_state_dict"]
+        target_state = model.state_dict()
+        compatible = {
+            key: value
+            for key, value in source_state.items()
+            if key in target_state and target_state[key].shape == value.shape
+        }
+        missing, unexpected = model.load_state_dict(compatible, strict=False)
+        print(
+            "[multigate-vision] warm start: "
+            f"{warm_start} compatible_tensors={len(compatible)}/"
+            f"{len(target_state)} skipped_or_missing={len(missing)} "
+            f"unexpected={len(unexpected)}",
+            flush=True,
+        )
     else:
         print(
             f"[multigate-vision] warm start not found; training from scratch: {warm_start}",
@@ -427,6 +470,7 @@ def main() -> None:
             + 0.25 * metrics["positive_frame_hit_rate"]
             - 0.25 * metrics["negative_frame_false_positive_rate"]
             - 0.003 * metrics["matched_corner_coordinate_rmse_px"]
+            + 0.50 * metrics["gate_id_accuracy"]
         )
         print(
             "[multigate-vision] "
@@ -436,7 +480,8 @@ def main() -> None:
             f"recall={metrics['instance_recall']:.4f} "
             f"frame_hit={metrics['positive_frame_hit_rate']:.4f} "
             f"neg_fp={metrics['negative_frame_false_positive_rate']:.4f} "
-            f"coord_rmse={metrics['matched_corner_coordinate_rmse_px']:.3f}px",
+            f"coord_rmse={metrics['matched_corner_coordinate_rmse_px']:.3f}px "
+            f"gate_id_acc={metrics['gate_id_accuracy']:.4f}",
             flush=True,
         )
 
@@ -445,8 +490,14 @@ def main() -> None:
             best_epoch = int(epoch)
             best_val = dict(metrics)
             metadata = {
-                "schema": "isaac_drone_racer.circular12_multigate_keypointrcnn.v1",
+                "schema": "isaac_drone_racer.circular12_multigate_keypointrcnn.v2",
                 "architecture": "torchvision_keypointrcnn_resnet50_fpn",
+                "num_classes": int(num_classes),
+                "gate_identity_mode": "gate_id_class",
+                "gate_id_count": int(num_gate_ids),
+                "gate_identity_source": (
+                    "high_contrast_texture+supervised_global_gate_id"
+                ),
                 "dataset_root": str(root),
                 "train_root": str(train_root),
                 "val_root": str(val_root),
@@ -470,6 +521,7 @@ def main() -> None:
                 {
                     "model_state_dict": model.state_dict(),
                     "image_size": int(args.image_size),
+                    "num_classes": int(num_classes),
                     "metadata": metadata,
                 },
                 checkpoint_path,
@@ -490,7 +542,7 @@ def main() -> None:
         match_rmse_px=args.match_rmse_px,
     )
     report = {
-        "schema": "isaac_drone_racer.circular12_multigate_training_report.v1",
+        "schema": "isaac_drone_racer.circular12_multigate_training_report.v2",
         "checkpoint": str(checkpoint_path),
         "best_epoch": best_epoch,
         "best_score": best_score,
@@ -499,7 +551,10 @@ def main() -> None:
         "test": test_metrics,
         "runtime_contract": {
             "detector_api": "TorchvisionGateCornerDetector.detect_all",
-            "map_identity": "known-map direct reprojection association",
+            "map_identity": (
+                "detector Gate ID class -> known-map gate index; "
+                "pixel reprojection remains the consistency gate"
+            ),
             "gate_measurement_model": "direct_reprojection",
             "visibility_guard": "not used; per-instance Keypoint R-CNN confidence only",
             "recommended_pixel_sigma_px": float(
