@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.headless = False
+args.enable_cameras = True
 simulation_app = AppLauncher(args).app
 
 import gymnasium as gym  # noqa: E402
