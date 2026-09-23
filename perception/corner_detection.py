@@ -22,6 +22,10 @@ class CornerObservation:
     confidence: np.ndarray | None = None
     timestamp_s: float = 0.0
     source: str = "unknown"
+    # Optional global landmark identity. New Circular-12 color-aware detectors
+    # use gate IDs 1..12; legacy class-agnostic detectors leave this unset.
+    gate_id: int | None = None
+    gate_id_confidence: float | None = None
 
     def __post_init__(self) -> None:
         corners = np.asarray(self.corners_uv, dtype=np.float64)
@@ -38,6 +42,18 @@ class CornerObservation:
         object.__setattr__(self, "corners_uv", corners)
         object.__setattr__(self, "visible", visible)
         object.__setattr__(self, "confidence", confidence)
+        if self.gate_id is not None:
+            gate_id = int(self.gate_id)
+            if gate_id < 1:
+                raise ValueError("gate_id must be positive when provided")
+            object.__setattr__(self, "gate_id", gate_id)
+        if self.gate_id_confidence is not None:
+            gate_id_confidence = float(self.gate_id_confidence)
+            if not 0.0 <= gate_id_confidence <= 1.0:
+                raise ValueError("gate_id_confidence must be in [0, 1]")
+            object.__setattr__(
+                self, "gate_id_confidence", gate_id_confidence
+            )
 
     @property
     def complete(self) -> bool:
