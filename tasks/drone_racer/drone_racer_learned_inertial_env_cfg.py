@@ -233,10 +233,15 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # through the current inertial state and scored in pixel space.
     gate_reprojection_association_max_rmse_px: float = 80.0
     # New color-aware Circular-12 checkpoints classify Gate IDs 1..12.
-    # Above this score, identity selects a single known-map landmark before
-    # reprojection gating. Legacy/class-agnostic checkpoints fall back to the
-    # previous all-gates pixel association.
+    # Identity is deliberately a *bounded prior*, not a hard map assignment:
+    # the predicted Gate ID is preferred only when its reprojection is already
+    # geometrically plausible and remains close to the best all-map candidate.
+    # Otherwise association falls back to all mapped gates. This protects the
+    # EKF from texture/classification mistakes while still breaking circular
+    # track symmetry when color identity and geometry agree.
     gate_identity_min_confidence: float = 0.50
+    gate_identity_preferred_max_rmse_px: float = 15.0
+    gate_identity_preference_margin_px: float = 4.0
     gate_reprojection_min_depth_m: float = 0.05
     # Robust innovation weighting and a permissive final consistency gate.
     gate_reprojection_huber_delta_sigma: float = 2.5
