@@ -1,0 +1,76 @@
+seed: 1
+
+# Stable-v1 PPO architecture; a separate output directory keeps this reward
+# experiment isolated while allowing a state-dict compatible warm start.
+models:
+  separate: False
+
+  policy:
+    class: GaussianMixin
+    clip_actions: True
+    clip_mean_actions: False
+    clip_log_std: True
+    min_log_std: -20.0
+    max_log_std: 2.0
+    initial_log_std: 0.0
+    network:
+      - name: net
+        input: STATES
+        layers: [256, 256, 256]
+        activations: elu
+    output: tanh(ACTIONS)
+
+  value:
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: STATES
+        layers: [256, 256, 256]
+        activations: elu
+    output: ONE
+
+memory:
+  class: RandomMemory
+  memory_size: -1
+
+agent:
+  class: PPO
+  rollouts: 24
+  learning_epochs: 5
+  mini_batches: 4
+  discount_factor: 0.99
+  lambda: 0.95
+  learning_rate: 1.0e-04
+  learning_rate_scheduler: KLAdaptiveLR
+  learning_rate_scheduler_kwargs:
+    kl_threshold: 0.01
+
+  state_preprocessor: RunningStandardScaler
+  state_preprocessor_kwargs: null
+  value_preprocessor: RunningStandardScaler
+  value_preprocessor_kwargs: null
+
+  random_timesteps: 0
+  learning_starts: 0
+  grad_norm_clip: 1.0
+  ratio_clip: 0.2
+  value_clip: 0.2
+  clip_predicted_values: True
+  entropy_loss_scale: 0.005
+  value_loss_scale: 1.0
+  kl_threshold: 0.0
+
+  rewards_shaper_scale: 0.6
+  time_limit_bootstrap: False
+
+  experiment:
+    directory: "swift_ctbr_gt_circular12_stable_heading"
+    experiment_name: "circular12_r12_4096env_roll24_256x3_gt_stable_heading"
+    write_interval: auto
+    checkpoint_interval: auto
+
+trainer:
+  class: SequentialTrainer
+  timesteps: 50000
+  environment_info: log

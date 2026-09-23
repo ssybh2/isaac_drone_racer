@@ -14,14 +14,19 @@ import isaaclab.utils.math as math_utils
 import torch
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers.manager_base import ManagerTermBase
+from isaaclab.managers.manager_term_cfg import RewardTermCfg
 
 from perception.stage2_calibration import (
     CAMERA_OFFSET_POS_B,
     CAMERA_TO_BODY_ROTATION,
     OPENVINS_CAMERA_INTRINSICS,
     OPENVINS_CAMERA_RESOLUTION,
+    camera_to_body_rotation,
     load_stage2_gate_geometry,
 )
+from .racing_visibility import advance_blackout, best_gate_visibility
+from .racing_heading import forward_velocity_heading_error
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -33,15 +38,16 @@ _STAGE2_GATE_CORNERS_G = tuple(
     tuple(float(v) for v in point)
     for point in load_stage2_gate_geometry().object_points_g.tolist()
 )
-_GT_CAMERA_TENSOR_CACHE: dict[tuple[str, torch.dtype], tuple[torch.Tensor, ...]] = {}
+_GT_CAMERA_TENSOR_CACHE: dict[tuple[str, torch.dtype, float], tuple[torch.Tensor, ...]] = {}
 
 
 def _gt_camera_reward_tensors(
     device: torch.device,
     dtype: torch.dtype,
+    pitch_up_deg: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Cache tiny calibrated tensors so 4096-env PPO does no CPU->GPU copy per step."""
-    key = (str(device), dtype)
+    key = (str(device), dtype, float(pitch_up_deg))
     cached = _GT_CAMERA_TENSOR_CACHE.get(key)
     if cached is None:
         cached = (
@@ -56,13 +62,94 @@ def _gt_camera_reward_tensors(
                 device=device,
             ),
             torch.as_tensor(
-                CAMERA_TO_BODY_ROTATION,
+                CAMERA_TO_BODY_ROTATION
+                if pitch_up_deg == 0.0
+                else camera_to_body_rotation(pitch_up_deg),
                 dtype=dtype,
                 device=device,
             ),
         )
         _GT_CAMERA_TENSOR_CACHE[key] = cached
     return cached
+
+
+class gt_multigate_camera_continuity(ManagerTermBase):
+    """Penalize weak 40-degree camera visibility and consecutive blackouts.
+
+    The camera is evaluated analytically from GT for shaping only. The actor
+    still receives its unchanged 31-D observation, and any mapped gate can
+    satisfy the visual measurement requirement.
+    """
+
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self._blackout_frames = torch.zeros(
+            env.num_envs, dtype=torch.long, device=env.device
+        )
+        self._control_step = 0
+
+    def reset(self, env_ids=None) -> None:
+        self._blackout_frames[env_ids] = 0
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        pitch_up_deg: float = 40.0,
+        margin_px: float = 16.0,
+        capture_every_steps: int = 4,
+        max_blackout_frames: int = 25,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ) -> torch.Tensor:
+        if capture_every_steps <= 0 or max_blackout_frames <= 0:
+            raise ValueError("camera capture interval and blackout limit must be positive")
+        asset: RigidObject = env.scene[asset_cfg.name]
+        track_data = env.command_manager.get_term("target").track.data
+        gate_pos_w = getattr(track_data, "object_pos_w", None)
+        gate_quat_w = getattr(track_data, "object_quat_w", None)
+        if gate_pos_w is None or gate_quat_w is None:
+            gate_pos_w = getattr(track_data, "object_link_pos_w", None)
+            gate_quat_w = getattr(track_data, "object_link_quat_w", None)
+        if gate_pos_w is None or gate_quat_w is None:
+            raise RuntimeError("Multi-gate camera reward requires gate actor/link poses")
+
+        num_envs, num_gates = gate_pos_w.shape[:2]
+        gate_R_wg = math_utils.matrix_from_quat(
+            gate_quat_w.reshape(-1, 4)
+        ).reshape(num_envs, num_gates, 3, 3)
+        corners_g, camera_offset_b, R_bc = _gt_camera_reward_tensors(
+            asset.device, asset.data.root_pos_w.dtype, pitch_up_deg
+        )
+        corners_w = gate_pos_w[:, :, None, :] + torch.einsum(
+            "ngij,kj->ngki", gate_R_wg, corners_g
+        )
+        body_R_wb = math_utils.matrix_from_quat(asset.data.root_quat_w)
+        rel_w = corners_w - asset.data.root_pos_w[:, None, None, :]
+        corners_b = torch.einsum("nji,ngkj->ngki", body_R_wb, rel_w)
+        corners_c = torch.matmul(
+            corners_b - camera_offset_b.view(1, 1, 1, 3), R_bc
+        )
+        fx, fy, cx, cy = (float(v) for v in OPENVINS_CAMERA_INTRINSICS)
+        width, height = OPENVINS_CAMERA_RESOLUTION
+        score, usable = best_gate_visibility(
+            corners_c,
+            fx=fx,
+            fy=fy,
+            cx=cx,
+            cy=cy,
+            image_width=width,
+            image_height=height,
+            margin_px=margin_px,
+        )
+
+        self._control_step += 1
+        capture_due = self._control_step % capture_every_steps == 0
+        self._blackout_frames = advance_blackout(
+            self._blackout_frames,
+            usable,
+            capture_due=capture_due,
+            max_frames=max_blackout_frames,
+        )
+        return 1.0 - score + 2.0 * self._blackout_frames.float() / max_blackout_frames
 
 
 def pos_error_l2(
@@ -187,6 +274,28 @@ def lookat_next_gate(
     dot = (drone_x_axis * vec_to_gate).sum(dim=1).clamp(-1.0, 1.0)
     angle = torch.acos(dot)
     return torch.exp(-angle / std)
+
+
+def gt_forward_velocity_heading_error(
+    env: ManagerBasedRLEnv,
+    min_speed_mps: float = 5.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize forward flight with the body nose pointed away from velocity.
+
+    At launch, speed is too small to define a useful flight direction; leave
+    that transient to the existing progress and gate rewards.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    forward_b = torch.tensor(
+        (1.0, 0.0, 0.0),
+        dtype=asset.data.root_lin_vel_w.dtype,
+        device=asset.device,
+    ).expand(env.num_envs, 3)
+    forward_w = math_utils.quat_apply(asset.data.root_quat_w, forward_b)
+    return forward_velocity_heading_error(
+        forward_w, asset.data.root_lin_vel_w, min_speed_mps
+    )
 
 
 def lookat_truth_gate(
@@ -545,4 +654,3 @@ def swift_ctbr_command_delta_l2(
             f"action term {action_name!r} does not expose CTBR command history"
         )
     return torch.sum(torch.square(command - previous), dim=1)
-

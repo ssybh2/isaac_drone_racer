@@ -153,6 +153,33 @@ class SwiftCTBRGTStableRacingRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
 
 
 @configclass
+class SwiftCTBRGTStableHeadingRewardsCfg(SwiftCTBRGTStableRacingRewardsCfg):
+    """Discourage the nose spin seen in otherwise successful Circular-12 laps."""
+
+    forward_velocity_heading = RewTerm(
+        func=mdp.gt_forward_velocity_heading_error,
+        weight=-2.0,
+        params={"min_speed_mps": 5.0},
+    )
+
+
+@configclass
+class SwiftCTBRGTStableMultiGateRewardsCfg(SwiftCTBRGTStableHeadingRewardsCfg):
+    """Reward sustained usable frames from any mapped gate at the 40-degree mount."""
+
+    multi_gate_continuity = RewTerm(
+        func=mdp.gt_multigate_camera_continuity,
+        weight=-4.0,
+        params={
+            "pitch_up_deg": 40.0,
+            "margin_px": 16.0,
+            "capture_every_steps": 4,
+            "max_blackout_frames": 25,
+        },
+    )
+
+
+@configclass
 class SwiftCTBRGTPerceptionAwareRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
     """Keep the successful GT racing objective and add camera observability.
 
@@ -442,6 +469,24 @@ class DroneRacerSwiftCTBRGTCircular12StableRacingEnvCfg(
         # Preserve aggressive racing authority while removing the 10 rad/s
         # roll/pitch and 6 rad/s yaw rates that enabled sustained tumbling.
         self.actions.control_action.body_rate_max_radps = (6.0, 6.0, 3.0)
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12StableHeadingEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12StableRacingEnvCfg
+):
+    """Stable-v1 dynamics with a forward-flight heading objective."""
+
+    rewards: SwiftCTBRGTStableHeadingRewardsCfg = SwiftCTBRGTStableHeadingRewardsCfg()
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12StableMultiGateEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12StableHeadingEnvCfg
+):
+    """GT racing with a 25-Hz multi-gate camera-continuity objective."""
+
+    rewards: SwiftCTBRGTStableMultiGateRewardsCfg = SwiftCTBRGTStableMultiGateRewardsCfg()
 
 
 @configclass
