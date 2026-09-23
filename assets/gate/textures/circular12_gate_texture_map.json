@@ -1,0 +1,218 @@
+{
+  "schema": "isaac_drone_racer.circular12_gate_texture_map.v1",
+  "source_texture": "assets/gate/textures/bitmap.png",
+  "generated_directory": "assets/gate/textures/circular12",
+  "track": "CIRCULAR_12_GATE_TRACK_CONFIG",
+  "track_center_xy_m": [
+    0,
+    12
+  ],
+  "track_radius_m": 12,
+  "note": "Gate 1 keeps the original blue bitmap. Gates 2-12 hue-shift only the original blue paint; black/white checkerboards and shading are preserved.",
+  "gates": [
+    {
+      "gate_id": 1,
+      "color_name": "blue",
+      "rgb": [
+        20,
+        77,
+        242
+      ],
+      "hex": "#144DF2",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_01_blue.png",
+      "position_m": [
+        0,
+        0,
+        1
+      ],
+      "yaw_deg": 0
+    },
+    {
+      "gate_id": 2,
+      "color_name": "red",
+      "rgb": [
+        242,
+        20,
+        20
+      ],
+      "hex": "#F21414",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_02_red.png",
+      "position_m": [
+        6,
+        1.60769515,
+        1
+      ],
+      "yaw_deg": 30
+    },
+    {
+      "gate_id": 3,
+      "color_name": "yellow",
+      "rgb": [
+        255,
+        219,
+        5
+      ],
+      "hex": "#FFDB05",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_03_yellow.png",
+      "position_m": [
+        10.39230485,
+        6,
+        1
+      ],
+      "yaw_deg": 60
+    },
+    {
+      "gate_id": 4,
+      "color_name": "green",
+      "rgb": [
+        10,
+        212,
+        31
+      ],
+      "hex": "#0AD41F",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_04_green.png",
+      "position_m": [
+        12,
+        12,
+        1
+      ],
+      "yaw_deg": 90
+    },
+    {
+      "gate_id": 5,
+      "color_name": "orange",
+      "rgb": [
+        255,
+        97,
+        5
+      ],
+      "hex": "#FF6105",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_05_orange.png",
+      "position_m": [
+        10.39230485,
+        18,
+        1
+      ],
+      "yaw_deg": 120
+    },
+    {
+      "gate_id": 6,
+      "color_name": "cyan",
+      "rgb": [
+        5,
+        209,
+        245
+      ],
+      "hex": "#05D1F5",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_06_cyan.png",
+      "position_m": [
+        6,
+        22.39230485,
+        1
+      ],
+      "yaw_deg": 150
+    },
+    {
+      "gate_id": 7,
+      "color_name": "violet",
+      "rgb": [
+        148,
+        46,
+        242
+      ],
+      "hex": "#942EF2",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_07_violet.png",
+      "position_m": [
+        0,
+        24,
+        1
+      ],
+      "yaw_deg": 180
+    },
+    {
+      "gate_id": 8,
+      "color_name": "magenta",
+      "rgb": [
+        245,
+        20,
+        161
+      ],
+      "hex": "#F514A1",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_08_magenta.png",
+      "position_m": [
+        -6,
+        22.39230485,
+        1
+      ],
+      "yaw_deg": -150
+    },
+    {
+      "gate_id": 9,
+      "color_name": "lime",
+      "rgb": [
+        153,
+        245,
+        5
+      ],
+      "hex": "#99F505",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_09_lime.png",
+      "position_m": [
+        -10.39230485,
+        18,
+        1
+      ],
+      "yaw_deg": -120
+    },
+    {
+      "gate_id": 10,
+      "color_name": "turquoise",
+      "rgb": [
+        8,
+        209,
+        138
+      ],
+      "hex": "#08D18A",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_10_turquoise.png",
+      "position_m": [
+        -12,
+        12,
+        1
+      ],
+      "yaw_deg": -90
+    },
+    {
+      "gate_id": 11,
+      "color_name": "pink",
+      "rgb": [
+        255,
+        105,
+        166
+      ],
+      "hex": "#FF69A6",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_11_pink.png",
+      "position_m": [
+        -10.39230485,
+        6,
+        1
+      ],
+      "yaw_deg": -60
+    },
+    {
+      "gate_id": 12,
+      "color_name": "amber",
+      "rgb": [
+        255,
+        166,
+        10
+      ],
+      "hex": "#FFA60A",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_12_amber.png",
+      "position_m": [
+        -6,
+        1.60769515,
+        1
+      ],
+      "yaw_deg": -30
+    }
+  ]
+}
