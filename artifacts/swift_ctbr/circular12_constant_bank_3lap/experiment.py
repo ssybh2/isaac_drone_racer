@@ -1,4 +1,4 @@
-"""One-off prescribed-circle FPV comparison; never used by training.
+"""One-off prescribed-circle FPV/data-capture comparison; prescribed flight only.
 
 The pose and velocity are forced to the ideal steady turn at every frame.
 The corresponding 2.85 g body-up force is also set in the simulator, but
@@ -34,7 +34,7 @@ parser.add_argument(
     default=1,
     help="Save every N rendered frames when --capture-dataset is enabled.",
 )
-parser.add_argument("--body-height-m", type=float, default=1.0)
+parser.add_argument("--body-height-m", type=float, default=2.07)
 parser.add_argument(
     "--multicolor-gates", action="store_true",
     help="Add visual-only, per-gate color panels without changing the gate USD.",
