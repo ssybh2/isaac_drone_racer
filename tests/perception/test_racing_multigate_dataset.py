@@ -58,7 +58,7 @@ def test_multigate_dataset_uses_all_eligible_mapped_gates(tmp_path):
     assert tuple(image.shape) == (3, 32, 32)
     assert tuple(target["boxes"].shape) == (2, 4)
     assert tuple(target["keypoints"].shape) == (2, 4, 3)
-    assert target["labels"].tolist() == [1, 1]
+    assert target["labels"].tolist() == [3, 8]
     assert info.gate_indices == (2, 7)
     assert info.visible_masks.sum(axis=1).tolist() == [4, 2]
 
