@@ -232,6 +232,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # Association is performed without PnP: every mapped gate is projected
     # through the current inertial state and scored in pixel space.
     gate_reprojection_association_max_rmse_px: float = 80.0
+    # New color-aware Circular-12 checkpoints classify Gate IDs 1..12.
+    # Above this score, identity selects a single known-map landmark before
+    # reprojection gating. Legacy/class-agnostic checkpoints fall back to the
+    # previous all-gates pixel association.
+    gate_identity_min_confidence: float = 0.50
     gate_reprojection_min_depth_m: float = 0.05
     # Robust innovation weighting and a permissive final consistency gate.
     gate_reprojection_huber_delta_sigma: float = 2.5
