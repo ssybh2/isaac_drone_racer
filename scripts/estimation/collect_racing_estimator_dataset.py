@@ -77,6 +77,7 @@ from skrl.utils.runner.torch import Runner  # noqa: E402
 import tasks  # noqa: F401,E402
 from perception.dataset import Stage2DatasetWriter  # noqa: E402
 from perception.dataset_collector import IsaacStage2DatasetCollector  # noqa: E402
+from perception.gate_identity import identity_for_gate_index  # noqa: E402
 from perception.perfect_gate_corner_sensor import PerfectGateCornerSensor  # noqa: E402
 from perception.rigid_transform import RigidTransform  # noqa: E402
 from perception.stage2_calibration import load_stage2_gate_geometry  # noqa: E402
@@ -189,6 +190,7 @@ def _all_mapped_gate_labels(raw_env, geometry, snapshot) -> list[dict]:
     command = raw_env.command_manager.get_term("target")
     output: list[dict] = []
     for gate_index in range(int(command.num_gates)):
+        identity = identity_for_gate_index(gate_index)
         T_wg = _gate_pose_from_track(raw_env, gate_index)
         T_cg = snapshot.truth.T_wc.inverse() @ T_wg
         corners = sensor.measure(
@@ -198,6 +200,10 @@ def _all_mapped_gate_labels(raw_env, geometry, snapshot) -> list[dict]:
         output.append(
             {
                 "gate_index": int(gate_index),
+                "gate_id": int(identity.gate_id),
+                "color_name": identity.color_name,
+                "color_rgb": list(identity.rgb),
+                "color_hex": identity.hex,
                 "corners_uv": np.asarray(corners.corners_uv).tolist(),
                 "visible": np.asarray(corners.visible, dtype=bool).tolist(),
                 "confidence": np.asarray(corners.confidence).tolist(),
