@@ -1299,6 +1299,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "selected_gate_id": None,
             "selected_gate_id_confidence": None,
             "gate_identity_used": False,
+            "gate_identity_fallback_used": False,
+            "gate_identity_candidate_count": 0,
+            "gate_identity_preferred_rmse_px": None,
+            "association_mode": None,
             "detected_instance_count": 0,
             "usable_instance_count": 0,
             "association_matches_active_gate": None,
@@ -1507,6 +1511,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         pair_candidates: list[
             tuple[float, int, int, np.ndarray, np.ndarray, np.ndarray]
         ] = []
+        identity_candidates: list[
+            tuple[float, int, int, np.ndarray, np.ndarray, np.ndarray]
+        ] = []
         usable_instances = 0
         for observation_index, observation in enumerate(observations):
             visible_indices = np.flatnonzero(
@@ -1529,20 +1536,17 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 and float(gate_id_confidence)
                 >= float(self.cfg.gate_identity_min_confidence)
             )
+            identified_gate_index = None
             if use_gate_identity:
                 from perception.gate_identity import gate_index_from_id
 
-                identified_gate_index = gate_index_from_id(int(gate_id))
-                if identified_gate_index >= self._gate_track_layout.num_gates:
-                    candidate_gate_indices = ()
-                else:
-                    candidate_gate_indices = (identified_gate_index,)
-            else:
-                candidate_gate_indices = range(
-                    self._gate_track_layout.num_gates
-                )
+                candidate_index = gate_index_from_id(int(gate_id))
+                if candidate_index < self._gate_track_layout.num_gates:
+                    identified_gate_index = int(candidate_index)
 
-            for gate_index in candidate_gate_indices:
+            # Always score every mapped gate. Gate identity contributes only a
+            # bounded preference after the geometric scores are known.
+            for gate_index in range(self._gate_track_layout.num_gates):
                 T_wg = self._gate_track_layout.gate_pose(gate_index)
                 all_points_w = T_wg.transform_points(
                     self._gate_geometry.object_points_g
@@ -1586,19 +1590,28 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                         np.mean(np.sum(residual * residual, axis=1))
                     )
                 )
-                if np.isfinite(score):
-                    pair_candidates.append(
-                        (
-                            score,
-                            int(observation_index),
-                            int(gate_index),
-                            points_w,
-                            observed_uv,
-                            visible_indices,
-                        )
-                    )
+                if not np.isfinite(score):
+                    continue
+
+                candidate = (
+                    score,
+                    int(observation_index),
+                    int(gate_index),
+                    points_w,
+                    observed_uv,
+                    visible_indices,
+                )
+                pair_candidates.append(candidate)
+                if (
+                    identified_gate_index is not None
+                    and int(gate_index) == identified_gate_index
+                ):
+                    identity_candidates.append(candidate)
 
         diagnostic["usable_instance_count"] = int(usable_instances)
+        diagnostic["gate_identity_candidate_count"] = int(
+            len(identity_candidates)
+        )
         if not pair_candidates:
             self._gate_reject_count += 1
             diagnostic["reject_stage"] = (
@@ -1613,6 +1626,36 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             return
 
         pair_candidates.sort(key=lambda item: item[0])
+        identity_candidates.sort(key=lambda item: item[0])
+        global_best = pair_candidates[0]
+        identity_best = (
+            None if not identity_candidates else identity_candidates[0]
+        )
+
+        association_mode = "all_map"
+        selected_candidate = global_best
+        if identity_best is not None:
+            identity_rmse = float(identity_best[0])
+            global_rmse = float(global_best[0])
+            diagnostic["gate_identity_preferred_rmse_px"] = identity_rmse
+            max_identity_rmse = min(
+                float(self.cfg.gate_identity_preferred_max_rmse_px),
+                float(self.cfg.gate_reprojection_association_max_rmse_px),
+            )
+            within_geometry_gate = identity_rmse <= max_identity_rmse
+            within_best_margin = (
+                identity_rmse
+                <= global_rmse
+                + float(self.cfg.gate_identity_preference_margin_px)
+            )
+            if within_geometry_gate and within_best_margin:
+                selected_candidate = identity_best
+                association_mode = "gate_id_preferred"
+                diagnostic["gate_identity_used"] = True
+            else:
+                association_mode = "all_map_fallback"
+                diagnostic["gate_identity_fallback_used"] = True
+
         (
             association_rmse,
             observation_index,
@@ -1620,7 +1663,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             points_w,
             observed_uv,
             visible_indices,
-        ) = pair_candidates[0]
+        ) = selected_candidate
+        diagnostic["association_mode"] = association_mode
         diagnostic["selected_observation_index"] = int(observation_index)
         diagnostic["selected_gate_index"] = int(gate_index)
         selected_observation = observations[int(observation_index)]
@@ -1635,12 +1679,6 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             None
             if selected_gate_id_confidence is None
             else float(selected_gate_id_confidence)
-        )
-        diagnostic["gate_identity_used"] = bool(
-            selected_gate_id is not None
-            and selected_gate_id_confidence is not None
-            and float(selected_gate_id_confidence)
-            >= float(self.cfg.gate_identity_min_confidence)
         )
         diagnostic["visible_corner_count"] = int(len(visible_indices))
         diagnostic["visible_corner_indices"] = visible_indices.tolist()
@@ -1662,8 +1700,8 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             self._gate_reject_count += 1
             diagnostic["reject_stage"] = "association"
             diagnostic["reject_reason"] = (
-                "gate_identity_reprojection_inconsistent"
-                if bool(diagnostic.get("gate_identity_used", False))
+                "gate_identity_fallback_pixel_gate"
+                if bool(diagnostic.get("gate_identity_fallback_used", False))
                 else "pixel_association_gate"
             )
             self._gate_diagnostics.append(diagnostic)
