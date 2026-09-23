@@ -183,7 +183,7 @@ def _greedy_match(
     max_rmse_px: float,
 ) -> list[tuple[int, int, float, np.ndarray]]:
     candidates: list[tuple[float, int, int, np.ndarray]] = []
-    for pred_index, (pred_corners, pred_visible, _) in enumerate(predictions):
+    for pred_index, (pred_corners, pred_visible, _, _) in enumerate(predictions):
         for gt_index in range(len(gt_corners)):
             common = np.asarray(gt_visible[gt_index], dtype=bool) & np.asarray(
                 pred_visible, dtype=bool
