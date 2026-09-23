@@ -1,24 +1,27 @@
 # Circular-12 Gate Color Map
 
-The Circular-12 track uses one distinct texture color per physical gate. The
-geometry is the existing `CIRCULAR_12_GATE_TRACK_CONFIG`; only the blue paint
-in the source texture is hue-shifted. Black/white checkerboards and shading are
-preserved.
+The Circular-12 track uses one distinct, high-saturation texture color per physical gate.
+Only the blue paint in the source texture is recoloured; black/white checkerboards,
+alpha, shading and value remain unchanged.
 
-| Gate | Color | RGB | Hex | Position (x, y, z) m | Yaw |
-|---:|---|---:|---|---|---:|
-| 1 | Blue | (20, 77, 242) | `#144DF2` | (0.00000000, 0.00000000, 1.0) | 0° |
-| 2 | Red | (242, 20, 20) | `#F21414` | (6.00000000, 1.60769515, 1.0) | +30° |
-| 3 | Yellow | (255, 219, 5) | `#FFDB05` | (10.39230485, 6.00000000, 1.0) | +60° |
-| 4 | Green | (10, 212, 31) | `#0AD41F` | (12.00000000, 12.00000000, 1.0) | +90° |
-| 5 | Orange | (255, 97, 5) | `#FF6105` | (10.39230485, 18.00000000, 1.0) | +120° |
-| 6 | Cyan | (5, 209, 245) | `#05D1F5` | (6.00000000, 22.39230485, 1.0) | +150° |
-| 7 | Violet | (148, 46, 242) | `#942EF2` | (0.00000000, 24.00000000, 1.0) | 180° |
-| 8 | Magenta | (245, 20, 161) | `#F514A1` | (-6.00000000, 22.39230485, 1.0) | -150° |
-| 9 | Lime | (153, 245, 5) | `#99F505` | (-10.39230485, 18.00000000, 1.0) | -120° |
-| 10 | Turquoise | (8, 209, 138) | `#08D18A` | (-12.00000000, 12.00000000, 1.0) | -90° |
-| 11 | Pink | (255, 105, 166) | `#FF69A6` | (-10.39230485, 6.00000000, 1.0) | -60° |
-| 12 | Amber | (255, 166, 10) | `#FFA60A` | (-6.00000000, 1.60769515, 1.0) | -30° |
+The palette is deliberately **not** ordered by hue. It is permuted around the circular
+track so every neighbouring pair—including Gate 12 -> Gate 1—has a **150° HSV hue
+separation**. This makes adjacent landmarks visually very different in the FPV camera.
+
+| Gate | Color | RGB | Hex | Hue | Position (x, y, z) m | Yaw |
+|---:|---|---:|---|---:|---|---:|
+| 1 | Red | (255, 0, 0) | `#FF0000` | 0° | (0.00000000, 0.00000000, 1.0) | 0° |
+| 2 | Spring Green | (0, 255, 128) | `#00FF80` | 150° | (6.00000000, 1.60769515, 1.0) | +30° |
+| 3 | Magenta | (255, 0, 255) | `#FF00FF` | 300° | (10.39230485, 6.00000000, 1.0) | +60° |
+| 4 | Chartreuse | (128, 255, 0) | `#80FF00` | 90° | (12.00000000, 12.00000000, 1.0) | +90° |
+| 5 | Blue | (0, 0, 255) | `#0000FF` | 240° | (10.39230485, 18.00000000, 1.0) | +120° |
+| 6 | Orange | (255, 128, 0) | `#FF8000` | 30° | (6.00000000, 22.39230485, 1.0) | +150° |
+| 7 | Cyan | (0, 255, 255) | `#00FFFF` | 180° | (0.00000000, 24.00000000, 1.0) | +180° |
+| 8 | Rose | (255, 0, 128) | `#FF0080` | 330° | (-6.00000000, 22.39230485, 1.0) | -150° |
+| 9 | Green | (0, 255, 0) | `#00FF00` | 120° | (-10.39230485, 18.00000000, 1.0) | -120° |
+| 10 | Violet | (128, 0, 255) | `#8000FF` | 270° | (-12.00000000, 12.00000000, 1.0) | -90° |
+| 11 | Yellow | (255, 255, 0) | `#FFFF00` | 60° | (-10.39230485, 6.00000000, 1.0) | -60° |
+| 12 | Azure | (0, 128, 255) | `#0080FF` | 210° | (-6.00000000, 1.60769515, 1.0) | -30° |
 
 The machine-readable source of truth is
 `assets/gate/textures/circular12_gate_texture_map.json`.
@@ -26,18 +29,18 @@ The machine-readable source of truth is
 Generated filenames are:
 
 ```text
-bitmap_gate_01_blue.png
-bitmap_gate_02_red.png
-bitmap_gate_03_yellow.png
-bitmap_gate_04_green.png
-bitmap_gate_05_orange.png
-bitmap_gate_06_cyan.png
-bitmap_gate_07_violet.png
-bitmap_gate_08_magenta.png
-bitmap_gate_09_lime.png
-bitmap_gate_10_turquoise.png
-bitmap_gate_11_pink.png
-bitmap_gate_12_amber.png
+bitmap_gate_01_red.png
+bitmap_gate_02_spring_green.png
+bitmap_gate_03_magenta.png
+bitmap_gate_04_chartreuse.png
+bitmap_gate_05_blue.png
+bitmap_gate_06_orange.png
+bitmap_gate_07_cyan.png
+bitmap_gate_08_rose.png
+bitmap_gate_09_green.png
+bitmap_gate_10_violet.png
+bitmap_gate_11_yellow.png
+bitmap_gate_12_azure.png
 ```
 
 Regenerate from the original mother texture with:
@@ -45,6 +48,9 @@ Regenerate from the original mother texture with:
 ```bash
 python scripts/perception/generate_circular12_gate_textures.py
 ```
+
+The generator also applies a saturation floor to the recoloured paint and removes
+obsolete `bitmap_gate_*.png` files before writing the current 12 textures.
 
 The generated images are written to
 `assets/gate/textures/circular12/`.
