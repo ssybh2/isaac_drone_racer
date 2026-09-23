@@ -14,12 +14,12 @@ from torchvision.models.detection import keypointrcnn_resnet50_fpn
 from .corner_detection import CornerObservation
 
 
-def build_keypoint_rcnn(*, image_size: int = 128):
+def build_keypoint_rcnn(*, image_size: int = 128, num_classes: int = 2):
     """Build the maintained torchvision keypoint architecture without hidden downloads."""
     return keypointrcnn_resnet50_fpn(
         weights=None,
         weights_backbone=None,
-        num_classes=2,
+        num_classes=int(num_classes),
         num_keypoints=4,
         min_size=image_size,
         max_size=image_size,
@@ -154,7 +154,20 @@ class TorchvisionGateCornerDetector:
         payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
         self.device = torch.device(device)
         self.image_size = int(payload["image_size"])
-        self.model = build_keypoint_rcnn(image_size=self.image_size).to(self.device)
+        self.metadata = dict(payload.get("metadata", {}))
+        self.num_classes = int(
+            payload.get(
+                "num_classes",
+                self.metadata.get("num_classes", 2),
+            )
+        )
+        self.gate_identity_mode = str(
+            self.metadata.get("gate_identity_mode", "class_agnostic")
+        )
+        self.model = build_keypoint_rcnn(
+            image_size=self.image_size,
+            num_classes=self.num_classes,
+        ).to(self.device)
         self.model.load_state_dict(payload["model_state_dict"])
         self.model.eval()
         self.detection_threshold = float(detection_threshold)
@@ -163,7 +176,6 @@ class TorchvisionGateCornerDetector:
         self.max_instances = int(max_instances)
         if self.max_instances < 1:
             raise ValueError("max_instances must be positive")
-        self.metadata = dict(payload.get("metadata", {}))
 
     @staticmethod
     def _empty_observation(timestamp_s: float) -> CornerObservation:
@@ -198,6 +210,7 @@ class TorchvisionGateCornerDetector:
             return []
 
         raw_keypoint_scores = output.get("keypoints_scores")
+        raw_labels = output.get("labels")
         observations: list[CornerObservation] = []
         limit = min(int(len(scores)), self.max_instances)
         for index in range(limit):
@@ -223,6 +236,20 @@ class TorchvisionGateCornerDetector:
                 confidence_threshold=self.keypoint_confidence_threshold,
                 min_quad_area_px2=self.min_quad_area_px2,
             )
+            gate_id = None
+            gate_id_confidence = None
+            if (
+                self.gate_identity_mode == "gate_id_class"
+                and raw_labels is not None
+                and len(raw_labels) > index
+            ):
+                predicted_label = int(raw_labels[index].detach().cpu())
+                if 1 <= predicted_label <= 12:
+                    gate_id = predicted_label
+                    gate_id_confidence = float(
+                        np.clip(instance_score, 0.0, 1.0)
+                    )
+
             observations.append(
                 CornerObservation(
                     corners_uv=corners,
@@ -232,7 +259,14 @@ class TorchvisionGateCornerDetector:
                     source=(
                         "torchvision_keypoint_rcnn:"
                         f"instance={index}:score={instance_score:.4f}"
+                        + (
+                            f":gate_id={gate_id}"
+                            if gate_id is not None
+                            else ""
+                        )
                     ),
+                    gate_id=gate_id,
+                    gate_id_confidence=gate_id_confidence,
                 )
             )
         return observations
