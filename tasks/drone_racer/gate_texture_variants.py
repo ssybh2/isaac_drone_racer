@@ -40,38 +40,76 @@ def variant_path_for_gate(gate: dict) -> Path:
     return GATE_DIR / f"gate_circular12_{gate_id:02d}_{color}.usd"
 
 
-def _replace_bitmap_asset(stage, replacement_asset_path: str) -> list[str]:
-    """Replace the gate diffuse bitmap asset with a Circular-12 texture.
+def _is_gate_bitmap_asset(value) -> bool:
+    """Return True for the original or generated gate bitmap asset slot."""
+    from pxr import Sdf
 
-    USD/Sdf layers are cached process-wide. A previous in-memory edit may
-    therefore still point at bitmap_gate_XX_*.png even when gate.usd was
-    reopened. Accept either the original bitmap.png or one of our generated
-    Circular-12 bitmap names as the replaceable texture slot.
+    if not isinstance(value, Sdf.AssetPath):
+        return False
+    source = value.path or value.resolvedPath
+    if not source:
+        return False
+    basename = source.replace("\\", "/").rsplit("/", 1)[-1]
+    return basename == "bitmap.png" or (
+        basename.startswith("bitmap_gate_") and basename.endswith(".png")
+    )
+
+
+def _build_reference_wrapper_variant(destination: Path, replacement_asset_path: str) -> list[str]:
+    """Create a tiny USD wrapper that references gate.usd and overrides only its texture.
+
+    Copy/exporting the composed binary gate stage proved fragile in Isaac Sim:
+    it could leave the referenced MDL material unresolved and render a white
+    gate even though the edited asset input looked correct in USD inspection.
+    A reference wrapper keeps the original gate.usd as the authoritative
+    geometry/material/physics layer and authors only the texture override in a
+    stronger sibling layer.
     """
-    from pxr import Sdf, UsdShade
+    from pxr import Sdf, Usd, UsdShade
 
+    source_stage = Usd.Stage.Open(str(SOURCE_GATE_USD))
+    if source_stage is None:
+        raise RuntimeError(f"failed to open source gate USD: {SOURCE_GATE_USD}")
+    source_stage.Reload()
+
+    source_default = source_stage.GetDefaultPrim()
+    if not source_default or not source_default.IsValid():
+        raise RuntimeError(f"source gate USD has no valid default prim: {SOURCE_GATE_USD}")
+
+    root_path = source_default.GetPath()
+    root_name = root_path.name
+    root_type = source_default.GetTypeName() or "Xform"
+
+    if destination.exists():
+        destination.unlink()
+
+    wrapper = Usd.Stage.CreateNew(str(destination))
+    wrapper_root = wrapper.DefinePrim(f"/{root_name}", root_type)
+    wrapper.SetDefaultPrim(wrapper_root)
+    wrapper_root.GetReferences().AddReference("./gate.usd")
+
+    # The reference is composed immediately. Setting an input below the
+    # referenced prim authors a stronger override into this wrapper layer; it
+    # does not mutate gate.usd.
     changed: list[str] = []
-    for prim in stage.Traverse():
+    for prim in wrapper.Traverse():
         if not prim.IsA(UsdShade.Shader):
             continue
         shader = UsdShade.Shader(prim)
         for shader_input in shader.GetInputs():
             value = shader_input.Get()
-            if not isinstance(value, Sdf.AssetPath):
-                continue
-            source = value.path or value.resolvedPath
-            if not source:
-                continue
-            normalized = source.replace("\\", "/")
-            basename = normalized.rsplit("/", 1)[-1]
-            is_source_bitmap = basename == "bitmap.png"
-            is_circular12_bitmap = (
-                basename.startswith("bitmap_gate_") and basename.endswith(".png")
-            )
-            if not (is_source_bitmap or is_circular12_bitmap):
+            if not _is_gate_bitmap_asset(value):
                 continue
             shader_input.Set(Sdf.AssetPath(replacement_asset_path))
             changed.append(f"{prim.GetPath()}.{shader_input.GetBaseName()}")
+
+    if not changed:
+        raise RuntimeError(
+            "referenced gate.usd contains no replaceable gate bitmap asset input; "
+            "refusing to generate an unbound color variant"
+        )
+
+    wrapper.GetRootLayer().Save()
     return changed
 
 
@@ -93,8 +131,6 @@ def ensure_circular12_gate_usd_variants(*, force: bool = False) -> dict[str, str
     if not TEXTURE_MAP.is_file():
         raise FileNotFoundError(TEXTURE_MAP)
 
-    from pxr import Usd
-
     result: dict[str, str] = {}
     for gate in _load_gate_map():
         gate_id = str(int(gate["gate_id"]))
@@ -104,25 +140,8 @@ def ensure_circular12_gate_usd_variants(*, force: bool = False) -> dict[str, str
             raise FileNotFoundError(texture)
 
         if force or not _variant_is_fresh(destination, texture):
-            stage = Usd.Stage.Open(str(SOURCE_GATE_USD))
-            if stage is None:
-                raise RuntimeError(f"failed to open source gate USD: {SOURCE_GATE_USD}")
-
-            # Sdf keeps opened layers in a process-wide registry. Without an
-            # explicit reload, the edit made for Gate 01 can remain cached and
-            # Gate 02 would reopen that in-memory layer instead of the pristine
-            # gate.usd on disk. Reload here so every variant starts from the
-            # authoritative source asset.
-            stage.Reload()
-
             replacement = f"./textures/circular12/{texture.name}"
-            changed = _replace_bitmap_asset(stage, replacement)
-            if not changed:
-                raise RuntimeError(
-                    "gate.usd contains no replaceable gate bitmap asset input; "
-                    "refusing to generate an unbound color variant"
-                )
-            stage.GetRootLayer().Export(str(destination))
+            changed = _build_reference_wrapper_variant(destination, replacement)
             print(
                 f"[gate-usd] gate={int(gate_id):02d} "
                 f"color={gate['color_name']:10s} "
