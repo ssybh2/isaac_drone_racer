@@ -68,3 +68,7 @@ _build
 
 # Teleop Recorded Dataset
 datasets
+
+# Local USD build products for the 12 color-coded Circular-12 gates.
+# Generated automatically from assets/gate/gate.usd + checked-in textures.
+assets/gate/gate_circular12_*.usd
