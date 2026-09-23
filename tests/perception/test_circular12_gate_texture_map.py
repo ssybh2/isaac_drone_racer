@@ -43,3 +43,24 @@ def test_circular12_texture_map_matches_track_geometry():
         position, yaw_deg = expected[gate["gate_id"]]
         assert tuple(gate["position_m"]) == position
         assert gate["yaw_deg"] == yaw_deg
+
+
+def test_circular12_adjacent_gate_hues_are_widely_separated():
+    data = json.loads(MAP_PATH.read_text(encoding="utf-8"))
+    hues = [float(gate["hue_deg"]) for gate in data["gates"]]
+
+    separations = []
+    for index, hue_a in enumerate(hues):
+        hue_b = hues[(index + 1) % len(hues)]
+        raw = abs(hue_a - hue_b) % 360.0
+        separations.append(min(raw, 360.0 - raw))
+
+    assert data["adjacent_hue_separation_deg"] == 150
+    assert separations == [150.0] * 12
+
+
+def test_circular12_palette_names_match_generated_texture_names():
+    data = json.loads(MAP_PATH.read_text(encoding="utf-8"))
+    for gate in data["gates"]:
+        expected = f"bitmap_gate_{int(gate['gate_id']):02d}_{gate['color_name']}.png"
+        assert Path(gate["texture"]).name == expected
