@@ -1,0 +1,48 @@
+name: Generate Circular12 Gate Textures
+
+on:
+  push:
+    branches:
+      - feature/racing-vision-retraining
+    paths:
+      - "scripts/perception/generate_circular12_gate_textures.py"
+      - "assets/gate/textures/circular12_gate_texture_map.json"
+      - ".github/workflows/generate-circular12-gate-textures.yaml"
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/racing-vision-retraining
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install texture-generation dependencies
+        run: python -m pip install --disable-pip-version-check numpy pillow
+
+      - name: Generate 12 gate textures
+        run: python scripts/perception/generate_circular12_gate_textures.py
+
+      - name: Commit generated PNGs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/gate/textures/circular12/*.png
+          if git diff --cached --quiet; then
+            echo "No texture changes to commit."
+            exit 0
+          fi
+          git commit -m "feat(assets): generate 12 Circular12 gate textures"
+          git push origin HEAD:feature/racing-vision-retraining
