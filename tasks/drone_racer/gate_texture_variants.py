@@ -41,7 +41,13 @@ def variant_path_for_gate(gate: dict) -> Path:
 
 
 def _replace_bitmap_asset(stage, replacement_asset_path: str) -> list[str]:
-    """Replace all shader asset inputs whose source basename is bitmap.png."""
+    """Replace the gate diffuse bitmap asset with a Circular-12 texture.
+
+    USD/Sdf layers are cached process-wide. A previous in-memory edit may
+    therefore still point at bitmap_gate_XX_*.png even when gate.usd was
+    reopened. Accept either the original bitmap.png or one of our generated
+    Circular-12 bitmap names as the replaceable texture slot.
+    """
     from pxr import Sdf, UsdShade
 
     changed: list[str] = []
@@ -57,7 +63,12 @@ def _replace_bitmap_asset(stage, replacement_asset_path: str) -> list[str]:
             if not source:
                 continue
             normalized = source.replace("\\", "/")
-            if normalized.rsplit("/", 1)[-1] != "bitmap.png":
+            basename = normalized.rsplit("/", 1)[-1]
+            is_source_bitmap = basename == "bitmap.png"
+            is_circular12_bitmap = (
+                basename.startswith("bitmap_gate_") and basename.endswith(".png")
+            )
+            if not (is_source_bitmap or is_circular12_bitmap):
                 continue
             shader_input.Set(Sdf.AssetPath(replacement_asset_path))
             changed.append(f"{prim.GetPath()}.{shader_input.GetBaseName()}")
@@ -97,12 +108,19 @@ def ensure_circular12_gate_usd_variants(*, force: bool = False) -> dict[str, str
             if stage is None:
                 raise RuntimeError(f"failed to open source gate USD: {SOURCE_GATE_USD}")
 
+            # Sdf keeps opened layers in a process-wide registry. Without an
+            # explicit reload, the edit made for Gate 01 can remain cached and
+            # Gate 02 would reopen that in-memory layer instead of the pristine
+            # gate.usd on disk. Reload here so every variant starts from the
+            # authoritative source asset.
+            stage.Reload()
+
             replacement = f"./textures/circular12/{texture.name}"
             changed = _replace_bitmap_asset(stage, replacement)
             if not changed:
                 raise RuntimeError(
-                    "gate.usd contains no UsdShade asset input ending in "
-                    "'bitmap.png'; refusing to generate an unbound color variant"
+                    "gate.usd contains no replaceable gate bitmap asset input; "
+                    "refusing to generate an unbound color variant"
                 )
             stage.GetRootLayer().Export(str(destination))
             print(
