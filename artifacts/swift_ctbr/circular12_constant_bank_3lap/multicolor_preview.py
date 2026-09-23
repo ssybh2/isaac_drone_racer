@@ -10,21 +10,21 @@ class GatePanel:
     color_rgb: tuple[float, float, float]
 
 
-# Distinct, saturated colors are legible in the small 256-pixel racing camera.
-# The original blue/black texture and white corner checkerboards remain intact.
+# High-saturation colors ordered so every neighbouring Circular-12 gate differs
+# by 150 degrees in hue. This visual-only preview mirrors the real texture map.
 GATE_COLORS_RGB = (
-    (0.08, 0.30, 0.95),  # 1 blue
-    (0.95, 0.08, 0.08),  # 2 red
-    (1.00, 0.86, 0.02),  # 3 yellow
-    (0.04, 0.83, 0.12),  # 4 green
-    (1.00, 0.38, 0.02),  # 5 orange
-    (0.02, 0.82, 0.96),  # 6 cyan
-    (0.58, 0.18, 0.95),  # 7 violet
-    (0.96, 0.08, 0.63),  # 8 magenta
-    (0.60, 0.96, 0.02),  # 9 lime
-    (0.03, 0.82, 0.54),  # 10 turquoise
-    (1.00, 0.41, 0.65),  # 11 pink
-    (1.00, 0.65, 0.04),  # 12 amber
+    (1.00, 0.00, 0.00),  # 1 red
+    (0.00, 1.00, 0.50),  # 2 spring green
+    (1.00, 0.00, 1.00),  # 3 magenta
+    (0.50, 1.00, 0.00),  # 4 chartreuse
+    (0.00, 0.00, 1.00),  # 5 blue
+    (1.00, 0.50, 0.00),  # 6 orange
+    (0.00, 1.00, 1.00),  # 7 cyan
+    (1.00, 0.00, 0.50),  # 8 rose
+    (0.00, 1.00, 0.00),  # 9 green
+    (0.50, 0.00, 1.00),  # 10 violet
+    (1.00, 1.00, 0.00),  # 11 yellow
+    (0.00, 0.50, 1.00),  # 12 azure
 )
 
 
