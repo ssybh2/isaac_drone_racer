@@ -1799,6 +1799,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "reject_reason": None,
             "expected_active_gate_index": None,
             "selected_gate_index": None,
+            "selected_gate_id": None,
+            "selected_gate_id_confidence": None,
+            "gate_identity_used": False,
             "association_matches_active_gate": None,
             "reprojection_rmse_px": None,
             "camera_to_gate_range_m": None,
@@ -1983,10 +1986,32 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 diagnostic["oracle_corner_audit_exception_type"] = type(exc).__name__
                 diagnostic["oracle_corner_audit_exception_message"] = str(exc)
 
+        identity_gate_index = None
+        observation_gate_id = getattr(observation, "gate_id", None)
+        observation_gate_id_confidence = getattr(
+            observation, "gate_id_confidence", None
+        )
+        if (
+            observation_gate_id is not None
+            and observation_gate_id_confidence is not None
+            and float(observation_gate_id_confidence)
+            >= float(self.cfg.gate_identity_min_confidence)
+        ):
+            from perception.gate_identity import gate_index_from_id
+
+            identity_gate_index = gate_index_from_id(
+                int(observation_gate_id)
+            )
+            diagnostic["selected_gate_id"] = int(observation_gate_id)
+            diagnostic["selected_gate_id_confidence"] = float(
+                observation_gate_id_confidence
+            )
+            diagnostic["gate_identity_used"] = True
+
         try:
             measurement = self._gate_builder.build(
                 observation,
-                gate_index=None,
+                gate_index=identity_gate_index,
                 reference_position_w_b=self._lio.p,
             )
         except (ValueError, RuntimeError) as exc:
