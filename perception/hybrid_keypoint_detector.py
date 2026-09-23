@@ -41,4 +41,6 @@ class VisibilityGuardedGateCornerDetector:
             confidence=guard_confidence,
             timestamp_s=timestamp_s,
             source=f"{coordinate.source}+visibility_guard:{guard.source}",
+            gate_id=coordinate.gate_id,
+            gate_id_confidence=coordinate.gate_id_confidence,
         )
