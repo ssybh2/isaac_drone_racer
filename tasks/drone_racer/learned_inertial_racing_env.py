@@ -1296,6 +1296,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             "expected_active_gate_index": None,
             "selected_gate_index": None,
             "selected_observation_index": None,
+            "selected_gate_id": None,
+            "selected_gate_id_confidence": None,
+            "gate_identity_used": False,
             "detected_instance_count": 0,
             "usable_instance_count": 0,
             "association_matches_active_gate": None,
@@ -1445,6 +1448,10 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                             confidence=confidence,
                             timestamp_s=now,
                             source=f"{observation.source}+v6.5_stress",
+                            gate_id=getattr(observation, "gate_id", None),
+                            gate_id_confidence=getattr(
+                                observation, "gate_id_confidence", None
+                            ),
                         )
                     )
 
@@ -1512,7 +1519,30 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 observation.corners_uv, dtype=np.float64
             )[visible_indices]
 
-            for gate_index in range(self._gate_track_layout.num_gates):
+            gate_id = getattr(observation, "gate_id", None)
+            gate_id_confidence = getattr(
+                observation, "gate_id_confidence", None
+            )
+            use_gate_identity = bool(
+                gate_id is not None
+                and gate_id_confidence is not None
+                and float(gate_id_confidence)
+                >= float(self.cfg.gate_identity_min_confidence)
+            )
+            if use_gate_identity:
+                from perception.gate_identity import gate_index_from_id
+
+                identified_gate_index = gate_index_from_id(int(gate_id))
+                if identified_gate_index >= self._gate_track_layout.num_gates:
+                    candidate_gate_indices = ()
+                else:
+                    candidate_gate_indices = (identified_gate_index,)
+            else:
+                candidate_gate_indices = range(
+                    self._gate_track_layout.num_gates
+                )
+
+            for gate_index in candidate_gate_indices:
                 T_wg = self._gate_track_layout.gate_pose(gate_index)
                 all_points_w = T_wg.transform_points(
                     self._gate_geometry.object_points_g
@@ -1593,6 +1623,25 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         ) = pair_candidates[0]
         diagnostic["selected_observation_index"] = int(observation_index)
         diagnostic["selected_gate_index"] = int(gate_index)
+        selected_observation = observations[int(observation_index)]
+        selected_gate_id = getattr(selected_observation, "gate_id", None)
+        selected_gate_id_confidence = getattr(
+            selected_observation, "gate_id_confidence", None
+        )
+        diagnostic["selected_gate_id"] = (
+            None if selected_gate_id is None else int(selected_gate_id)
+        )
+        diagnostic["selected_gate_id_confidence"] = (
+            None
+            if selected_gate_id_confidence is None
+            else float(selected_gate_id_confidence)
+        )
+        diagnostic["gate_identity_used"] = bool(
+            selected_gate_id is not None
+            and selected_gate_id_confidence is not None
+            and float(selected_gate_id_confidence)
+            >= float(self.cfg.gate_identity_min_confidence)
+        )
         diagnostic["visible_corner_count"] = int(len(visible_indices))
         diagnostic["visible_corner_indices"] = visible_indices.tolist()
         diagnostic["association_pixel_rmse_px"] = float(association_rmse)
@@ -1612,7 +1661,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         ):
             self._gate_reject_count += 1
             diagnostic["reject_stage"] = "association"
-            diagnostic["reject_reason"] = "pixel_association_gate"
+            diagnostic["reject_reason"] = (
+                "gate_identity_reprojection_inconsistent"
+                if bool(diagnostic.get("gate_identity_used", False))
+                else "pixel_association_gate"
+            )
             self._gate_diagnostics.append(diagnostic)
             return
 
