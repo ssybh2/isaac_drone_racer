@@ -1,5 +1,5 @@
 {
-  "schema": "isaac_drone_racer.circular12_gate_texture_map.v1",
+  "schema": "isaac_drone_racer.circular12_gate_texture_map.v2",
   "source_texture": "assets/gate/textures/bitmap.png",
   "generated_directory": "assets/gate/textures/circular12",
   "track": "CIRCULAR_12_GATE_TRACK_CONFIG",
@@ -8,211 +8,224 @@
     12
   ],
   "track_radius_m": 12,
-  "note": "Gate 1 keeps the original blue bitmap. Gates 2-12 hue-shift only the original blue paint; black/white checkerboards and shading are preserved.",
+  "note": "High-contrast cyclic palette. Only the original blue paint is recoloured; black/white checkerboards, alpha, shading and value are preserved. Every neighbouring gate, including Gate 12 -> Gate 1, differs by 150 degrees in HSV hue.",
   "gates": [
     {
       "gate_id": 1,
-      "color_name": "blue",
+      "color_name": "red",
       "rgb": [
-        20,
-        77,
-        242
+        255,
+        0,
+        0
       ],
-      "hex": "#144DF2",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_01_blue.png",
+      "hex": "#FF0000",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_01_red.png",
       "position_m": [
         0,
         0,
         1
       ],
-      "yaw_deg": 0
+      "yaw_deg": 0,
+      "hue_deg": 0
     },
     {
       "gate_id": 2,
-      "color_name": "red",
+      "color_name": "spring_green",
       "rgb": [
-        242,
-        20,
-        20
+        0,
+        255,
+        128
       ],
-      "hex": "#F21414",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_02_red.png",
+      "hex": "#00FF80",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_02_spring_green.png",
       "position_m": [
         6,
         1.60769515,
         1
       ],
-      "yaw_deg": 30
+      "yaw_deg": 30,
+      "hue_deg": 150
     },
     {
       "gate_id": 3,
-      "color_name": "yellow",
+      "color_name": "magenta",
       "rgb": [
         255,
-        219,
-        5
+        0,
+        255
       ],
-      "hex": "#FFDB05",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_03_yellow.png",
+      "hex": "#FF00FF",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_03_magenta.png",
       "position_m": [
         10.39230485,
         6,
         1
       ],
-      "yaw_deg": 60
+      "yaw_deg": 60,
+      "hue_deg": 300
     },
     {
       "gate_id": 4,
-      "color_name": "green",
+      "color_name": "chartreuse",
       "rgb": [
-        10,
-        212,
-        31
+        128,
+        255,
+        0
       ],
-      "hex": "#0AD41F",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_04_green.png",
+      "hex": "#80FF00",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_04_chartreuse.png",
       "position_m": [
         12,
         12,
         1
       ],
-      "yaw_deg": 90
+      "yaw_deg": 90,
+      "hue_deg": 90
     },
     {
       "gate_id": 5,
-      "color_name": "orange",
+      "color_name": "blue",
       "rgb": [
-        255,
-        97,
-        5
+        0,
+        0,
+        255
       ],
-      "hex": "#FF6105",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_05_orange.png",
+      "hex": "#0000FF",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_05_blue.png",
       "position_m": [
         10.39230485,
         18,
         1
       ],
-      "yaw_deg": 120
+      "yaw_deg": 120,
+      "hue_deg": 240
     },
     {
       "gate_id": 6,
-      "color_name": "cyan",
+      "color_name": "orange",
       "rgb": [
-        5,
-        209,
-        245
+        255,
+        128,
+        0
       ],
-      "hex": "#05D1F5",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_06_cyan.png",
+      "hex": "#FF8000",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_06_orange.png",
       "position_m": [
         6,
         22.39230485,
         1
       ],
-      "yaw_deg": 150
+      "yaw_deg": 150,
+      "hue_deg": 30
     },
     {
       "gate_id": 7,
-      "color_name": "violet",
+      "color_name": "cyan",
       "rgb": [
-        148,
-        46,
-        242
+        0,
+        255,
+        255
       ],
-      "hex": "#942EF2",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_07_violet.png",
+      "hex": "#00FFFF",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_07_cyan.png",
       "position_m": [
         0,
         24,
         1
       ],
-      "yaw_deg": 180
+      "yaw_deg": 180,
+      "hue_deg": 180
     },
     {
       "gate_id": 8,
-      "color_name": "magenta",
+      "color_name": "rose",
       "rgb": [
-        245,
-        20,
-        161
+        255,
+        0,
+        128
       ],
-      "hex": "#F514A1",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_08_magenta.png",
+      "hex": "#FF0080",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_08_rose.png",
       "position_m": [
         -6,
         22.39230485,
         1
       ],
-      "yaw_deg": -150
+      "yaw_deg": -150,
+      "hue_deg": 330
     },
     {
       "gate_id": 9,
-      "color_name": "lime",
+      "color_name": "green",
       "rgb": [
-        153,
-        245,
-        5
+        0,
+        255,
+        0
       ],
-      "hex": "#99F505",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_09_lime.png",
+      "hex": "#00FF00",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_09_green.png",
       "position_m": [
         -10.39230485,
         18,
         1
       ],
-      "yaw_deg": -120
+      "yaw_deg": -120,
+      "hue_deg": 120
     },
     {
       "gate_id": 10,
-      "color_name": "turquoise",
+      "color_name": "violet",
       "rgb": [
-        8,
-        209,
-        138
+        128,
+        0,
+        255
       ],
-      "hex": "#08D18A",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_10_turquoise.png",
+      "hex": "#8000FF",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_10_violet.png",
       "position_m": [
         -12,
         12,
         1
       ],
-      "yaw_deg": -90
+      "yaw_deg": -90,
+      "hue_deg": 270
     },
     {
       "gate_id": 11,
-      "color_name": "pink",
+      "color_name": "yellow",
       "rgb": [
         255,
-        105,
-        166
+        255,
+        0
       ],
-      "hex": "#FF69A6",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_11_pink.png",
+      "hex": "#FFFF00",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_11_yellow.png",
       "position_m": [
         -10.39230485,
         6,
         1
       ],
-      "yaw_deg": -60
+      "yaw_deg": -60,
+      "hue_deg": 60
     },
     {
       "gate_id": 12,
-      "color_name": "amber",
+      "color_name": "azure",
       "rgb": [
-        255,
-        166,
-        10
+        0,
+        128,
+        255
       ],
-      "hex": "#FFA60A",
-      "texture": "assets/gate/textures/circular12/bitmap_gate_12_amber.png",
+      "hex": "#0080FF",
+      "texture": "assets/gate/textures/circular12/bitmap_gate_12_azure.png",
       "position_m": [
         -6,
         1.60769515,
         1
       ],
-      "yaw_deg": -30
+      "yaw_deg": -30,
+      "hue_deg": 210
     }
-  ]
+  ],
+  "adjacent_hue_separation_deg": 150
 }
