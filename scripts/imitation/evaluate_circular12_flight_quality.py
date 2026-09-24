@@ -164,6 +164,9 @@ def main() -> None:
     radius_error: list[float] = []
     height_error: list[float] = []
     attitude_error: list[float] = []
+    estimator_position_error: list[float] = []
+    estimator_velocity_error: list[float] = []
+    estimator_orientation_error_rad: list[float] = []
     action_abs: list[float] = []
     controller_expert_action_mae: list[float] = []
     controller_expert_action_abs_components: list[np.ndarray] = []
@@ -313,6 +316,41 @@ def main() -> None:
                 ).item()
             )
             attitude_error.append(att_err)
+
+            # Estimator diagnostics are evaluation-only. They compare the
+            # no-GT runtime state against simulator truth without feeding truth
+            # back into the estimator or controller.
+            estimator_state = getattr(raw, "learned_inertial_state", None)
+            if estimator_state is not None:
+                p_est = torch.as_tensor(
+                    estimator_state.position_w_b,
+                    dtype=p_w.dtype,
+                    device=p_w.device,
+                ).view(1, 3)
+                v_est = torch.as_tensor(
+                    estimator_state.linear_velocity_w_b,
+                    dtype=v_w.dtype,
+                    device=v_w.device,
+                ).view(1, 3)
+                q_est = torch.as_tensor(
+                    estimator_state.orientation_w_b_wxyz,
+                    dtype=robot.data.root_quat_w.dtype,
+                    device=robot.data.root_quat_w.device,
+                ).view(1, 4)
+                R_est = math_utils.matrix_from_quat(q_est)[0]
+                R_delta = R_est.transpose(0, 1) @ R_wb[0]
+                cos_angle = (
+                    (torch.trace(R_delta) - 1.0) * 0.5
+                ).clamp(-1.0, 1.0)
+                estimator_position_error.append(
+                    float(torch.linalg.vector_norm(p_est[0] - p_w[0]).item())
+                )
+                estimator_velocity_error.append(
+                    float(torch.linalg.vector_norm(v_est[0] - v_w[0]).item())
+                )
+                estimator_orientation_error_rad.append(
+                    float(torch.acos(cos_angle).item())
+                )
 
             # In a correct ~69-deg coordinated turn body +Z still has a positive
             # world-Z component. A negative value means the vehicle crossed
@@ -488,6 +526,48 @@ def main() -> None:
                 "height_rmse_m": float(
                     np.sqrt(np.mean(np.square(height_error)))
                 ),
+                "estimator_position_rmse_m": (
+                    float(
+                        np.sqrt(
+                            np.mean(np.square(estimator_position_error))
+                        )
+                    )
+                    if estimator_position_error else float("nan")
+                ),
+                "estimator_velocity_rmse_mps": (
+                    float(
+                        np.sqrt(
+                            np.mean(np.square(estimator_velocity_error))
+                        )
+                    )
+                    if estimator_velocity_error else float("nan")
+                ),
+                "estimator_orientation_rmse_deg": (
+                    float(
+                        np.degrees(
+                            np.sqrt(
+                                np.mean(
+                                    np.square(
+                                        estimator_orientation_error_rad
+                                    )
+                                )
+                            )
+                        )
+                    )
+                    if estimator_orientation_error_rad else float("nan")
+                ),
+                "estimator_position_final_error_m": (
+                    float(estimator_position_error[-1])
+                    if estimator_position_error else float("nan")
+                ),
+                "estimator_velocity_final_error_mps": (
+                    float(estimator_velocity_error[-1])
+                    if estimator_velocity_error else float("nan")
+                ),
+                "estimator_orientation_final_error_deg": (
+                    float(np.degrees(estimator_orientation_error_rad[-1]))
+                    if estimator_orientation_error_rad else float("nan")
+                ),
                 "attitude_error_p95_deg": float(
                     np.degrees(np.percentile(attitude_error, 95))
                 ),
@@ -595,7 +675,15 @@ def main() -> None:
                 f"ep={episode + 1:02d}/{args.episodes} "
                 f"gates={ep_gates} cause={row['termination']} "
                 f"inv={inversion_events} gross={gross_excursion_events} "
-                f"rate95={row['body_rate_p95_radps']:.3f}",
+                f"rate95={row['body_rate_p95_radps']:.3f}"
+                + (
+                    " "
+                    f"est_p={row['estimator_position_rmse_m']:.3f}m "
+                    f"est_v={row['estimator_velocity_rmse_mps']:.3f}m/s "
+                    f"est_R={row['estimator_orientation_rmse_deg']:.2f}deg"
+                    if np.isfinite(row["estimator_position_rmse_m"])
+                    else ""
+                ),
                 flush=True,
             )
 
@@ -608,6 +696,9 @@ def main() -> None:
             radius_error = []
             height_error = []
             attitude_error = []
+            estimator_position_error = []
+            estimator_velocity_error = []
+            estimator_orientation_error_rad = []
             action_abs = []
             controller_expert_action_mae = []
             controller_expert_action_abs_components = []
@@ -673,6 +764,87 @@ def main() -> None:
             ),
             "speed_mean_mps": float(
                 np.mean([row["speed_mean_mps"] for row in rows])
+            ),
+            "estimator_position_rmse_mean_m": (
+                float(
+                    np.nanmean(
+                        [row["estimator_position_rmse_m"] for row in rows]
+                    )
+                )
+                if any(
+                    np.isfinite(row["estimator_position_rmse_m"])
+                    for row in rows
+                )
+                else float("nan")
+            ),
+            "estimator_velocity_rmse_mean_mps": (
+                float(
+                    np.nanmean(
+                        [row["estimator_velocity_rmse_mps"] for row in rows]
+                    )
+                )
+                if any(
+                    np.isfinite(row["estimator_velocity_rmse_mps"])
+                    for row in rows
+                )
+                else float("nan")
+            ),
+            "estimator_orientation_rmse_mean_deg": (
+                float(
+                    np.nanmean(
+                        [row["estimator_orientation_rmse_deg"] for row in rows]
+                    )
+                )
+                if any(
+                    np.isfinite(row["estimator_orientation_rmse_deg"])
+                    for row in rows
+                )
+                else float("nan")
+            ),
+            "estimator_position_final_error_mean_m": (
+                float(
+                    np.nanmean(
+                        [
+                            row["estimator_position_final_error_m"]
+                            for row in rows
+                        ]
+                    )
+                )
+                if any(
+                    np.isfinite(row["estimator_position_final_error_m"])
+                    for row in rows
+                )
+                else float("nan")
+            ),
+            "estimator_velocity_final_error_mean_mps": (
+                float(
+                    np.nanmean(
+                        [
+                            row["estimator_velocity_final_error_mps"]
+                            for row in rows
+                        ]
+                    )
+                )
+                if any(
+                    np.isfinite(row["estimator_velocity_final_error_mps"])
+                    for row in rows
+                )
+                else float("nan")
+            ),
+            "estimator_orientation_final_error_mean_deg": (
+                float(
+                    np.nanmean(
+                        [
+                            row["estimator_orientation_final_error_deg"]
+                            for row in rows
+                        ]
+                    )
+                )
+                if any(
+                    np.isfinite(row["estimator_orientation_final_error_deg"])
+                    for row in rows
+                )
+                else float("nan")
             ),
             "controller_expert_action_mae_mean": float(
                 np.nanmean(
