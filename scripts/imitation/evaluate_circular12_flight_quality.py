@@ -153,11 +153,10 @@ def main() -> None:
     ]
     obs, _ = wrapped.reset()
     command = raw.command_manager.get_term("target")
-    prev_gate = int(command.next_gate_idx[0].item())
-
     episode = 0
     ep_step = 0
     ep_gates = 0
+    ep_gate_misses = 0
     speed_samples: list[float] = []
     rate_samples: list[float] = []
     radius_error: list[float] = []
@@ -378,12 +377,12 @@ def main() -> None:
                 truncated.reshape(-1)[0].item()
             )
 
-            current_gate = int(command.next_gate_idx[0].item())
-            if not done and current_gate != prev_gate:
-                ep_gates += int(
-                    (current_gate - prev_gate) % int(command.num_gates)
-                )
-            prev_gate = current_gate
+            # Count true gate passes separately from actor-target
+            # advancement. Safety-oriented imitation tasks may advance the
+            # control target after a miss, but a miss must never inflate the
+            # racing gate score.
+            ep_gates += int(bool(command.gate_passed[0].item()))
+            ep_gate_misses += int(bool(command.gate_missed[0].item()))
             if not done:
                 continue
 
@@ -391,6 +390,7 @@ def main() -> None:
                 "episode": episode + 1,
                 "steps": ep_step,
                 "gates": ep_gates,
+                "gate_misses": ep_gate_misses,
                 "termination": _termination_cause(raw),
                 "speed_mean_mps": float(np.mean(speed_samples)),
                 "speed_p95_mps": float(np.percentile(speed_samples, 95)),
@@ -507,6 +507,7 @@ def main() -> None:
             episode += 1
             ep_step = 0
             ep_gates = 0
+            ep_gate_misses = 0
             speed_samples = []
             rate_samples = []
             radius_error = []
@@ -532,7 +533,6 @@ def main() -> None:
             gross_active = False
             warning_snapshot = None
             tumble_snapshot = None
-            prev_gate = int(command.next_gate_idx[0].item())
 
         total_inversions = int(
             sum(row["inversion_events"] for row in rows)
