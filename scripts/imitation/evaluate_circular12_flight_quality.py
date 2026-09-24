@@ -165,8 +165,8 @@ def main() -> None:
     height_error: list[float] = []
     attitude_error: list[float] = []
     action_abs: list[float] = []
-    bc_expert_action_mae: list[float] = []
-    bc_expert_action_abs_components: list[np.ndarray] = []
+    controller_expert_action_mae: list[float] = []
+    controller_expert_action_abs_components: list[np.ndarray] = []
     obs_zmax: list[float] = []
     obs_group_zmax: dict[str, list[float]] = {
         "position": [],
@@ -196,6 +196,8 @@ def main() -> None:
                 p_w, v_w, R_wb, expert_cfg
             )
 
+            standardized = None
+            diagnostic_clip = None
             if args.controller == "expert":
                 action = expert.action
             elif args.controller == "bc":
@@ -204,48 +206,7 @@ def main() -> None:
                     standardized = (
                         obs - bc.observation_mean
                     ) / bc.observation_std
-                action_abs_error = (action - expert.action).abs()
-                bc_expert_action_mae.append(
-                    float(action_abs_error.mean().item())
-                )
-                bc_expert_action_abs_components.append(
-                    action_abs_error.detach()
-                    .cpu()
-                    .numpy()
-                    .reshape(-1)
-                    .astype(np.float64)
-                )
-                obs_zmax.append(
-                    float(standardized.abs().max().item())
-                )
-                group_slices = {
-                    "position": slice(0, 3),
-                    "velocity": slice(3, 6),
-                    "rotation": slice(6, 15),
-                    "gate_corners": slice(15, 27),
-                    "previous_action": slice(27, 31),
-                }
-                obs_dim_absz.append(
-                    standardized.detach().abs().cpu().numpy().reshape(-1).astype(np.float64)
-                )
-                for group_name, group_slice in group_slices.items():
-                    obs_group_zmax[group_name].append(
-                        float(
-                            standardized[
-                                :, group_slice
-                            ].abs().max().item()
-                        )
-                    )
-                clip = bc.cfg.standardized_observation_clip
-                if clip is not None:
-                    obs_clip_fraction.append(
-                        float(
-                            (standardized.abs() > float(clip))
-                            .float()
-                            .mean()
-                            .item()
-                        )
-                    )
+                diagnostic_clip = bc.cfg.standardized_observation_clip
             else:
                 with torch.inference_mode():
                     outputs = runner.agent.act(
@@ -254,6 +215,75 @@ def main() -> None:
                     action = outputs[-1].get(
                         "mean_actions", outputs[0]
                     )
+                scaler = getattr(
+                    runner.agent, "_state_preprocessor", None
+                )
+                running_mean = getattr(scaler, "running_mean", None)
+                running_variance = getattr(
+                    scaler, "running_variance", None
+                )
+                if (
+                    torch.is_tensor(running_mean)
+                    and torch.is_tensor(running_variance)
+                ):
+                    standardized = (
+                        obs - running_mean.float()
+                    ) / (
+                        torch.sqrt(running_variance.float())
+                        + float(getattr(scaler, "epsilon", 1.0e-8))
+                    )
+                    diagnostic_clip = getattr(
+                        scaler, "clip_threshold", None
+                    )
+
+            if args.controller in {"bc", "skrl"}:
+                action_abs_error = (action - expert.action).abs()
+                controller_expert_action_mae.append(
+                    float(action_abs_error.mean().item())
+                )
+                controller_expert_action_abs_components.append(
+                    action_abs_error.detach()
+                    .cpu()
+                    .numpy()
+                    .reshape(-1)
+                    .astype(np.float64)
+                )
+                if standardized is not None:
+                    obs_zmax.append(
+                        float(standardized.abs().max().item())
+                    )
+                    group_slices = {
+                        "position": slice(0, 3),
+                        "velocity": slice(3, 6),
+                        "rotation": slice(6, 15),
+                        "gate_corners": slice(15, 27),
+                        "previous_action": slice(27, 31),
+                    }
+                    obs_dim_absz.append(
+                        standardized.detach().abs().cpu().numpy().reshape(-1).astype(np.float64)
+                    )
+                    for group_name, group_slice in group_slices.items():
+                        obs_group_zmax[group_name].append(
+                            float(
+                                standardized[
+                                    :, group_slice
+                                ].abs().max().item()
+                            )
+                        )
+                    if diagnostic_clip is not None:
+                        obs_clip_fraction.append(
+                            float(
+                                (
+                                    standardized.abs()
+                                    > float(diagnostic_clip)
+                                )
+                                .float()
+                                .mean()
+                                .item()
+                            )
+                        )
+                    else:
+                        obs_clip_fraction.append(0.0)
 
             speed_samples.append(
                 float(torch.linalg.vector_norm(v_w[0, :2]).item())
@@ -297,7 +327,10 @@ def main() -> None:
             gross_active = gross_now
             inverted_samples += int(inverted_now)
 
-            if args.controller == "bc":
+            if (
+                args.controller in {"bc", "skrl"}
+                and standardized is not None
+            ):
                 body_rate_now = float(
                     torch.linalg.vector_norm(
                         robot.data.root_ang_vel_b[0]
@@ -337,13 +370,13 @@ def main() -> None:
                         "velocity_w_mps": (
                             v_w[0].detach().cpu().numpy().astype(np.float64).tolist()
                         ),
-                        "bc_action": (
+                        "controller_action": (
                             action[0].detach().cpu().numpy().astype(np.float64).tolist()
                         ),
                         "expert_action": (
                             expert.action[0].detach().cpu().numpy().astype(np.float64).tolist()
                         ),
-                        "bc_expert_action_mae": action_mae_now,
+                        "controller_expert_action_mae": action_mae_now,
                         "obs_zmax": float(abs_z.max()),
                         "top_ood_dimensions": [
                             {
@@ -409,13 +442,13 @@ def main() -> None:
                                 robot.data.root_ang_vel_b[0]
                             ).item()
                         ),
-                        "bc_action": (
+                        "controller_action": (
                             action[0].detach().cpu().numpy().astype(np.float64).tolist()
                         ),
                         "expert_action": (
                             expert.action[0].detach().cpu().numpy().astype(np.float64).tolist()
                         ),
-                        "bc_expert_action_mae": float(
+                        "controller_expert_action_mae": float(
                             (action - expert.action).abs().mean().item()
                         ),
                         "obs_zmax": float(standardized.abs().max().item()),
@@ -472,13 +505,13 @@ def main() -> None:
                 "action_saturation_fraction": float(
                     np.mean(np.asarray(action_abs) > 0.95)
                 ),
-                "bc_expert_action_mae_mean": (
-                    float(np.mean(bc_expert_action_mae))
-                    if bc_expert_action_mae else float("nan")
+                "controller_expert_action_mae_mean": (
+                    float(np.mean(controller_expert_action_mae))
+                    if controller_expert_action_mae else float("nan")
                 ),
-                "bc_expert_action_mae_p95": (
-                    float(np.percentile(bc_expert_action_mae, 95))
-                    if bc_expert_action_mae else float("nan")
+                "controller_expert_action_mae_p95": (
+                    float(np.percentile(controller_expert_action_mae, 95))
+                    if controller_expert_action_mae else float("nan")
                 ),
                 "obs_zmax_mean": (
                     float(np.mean(obs_zmax))
@@ -516,16 +549,16 @@ def main() -> None:
                 },
                 **(
                     {
-                        f"bc_expert_action_{name}_mae": float(
+                        f"controller_expert_action_{name}_mae": float(
                             np.asarray(
-                                bc_expert_action_abs_components
+                                controller_expert_action_abs_components
                             )[:, index].mean()
                         )
                         for index, name in enumerate(
                             ("thrust", "p", "q", "r")
                         )
                     }
-                    if bc_expert_action_abs_components
+                    if controller_expert_action_abs_components
                     else {}
                 ),
                 "obs_dim_absz_p95": (
@@ -576,8 +609,8 @@ def main() -> None:
             height_error = []
             attitude_error = []
             action_abs = []
-            bc_expert_action_mae = []
-            bc_expert_action_abs_components = []
+            controller_expert_action_mae = []
+            controller_expert_action_abs_components = []
             obs_zmax = []
             obs_group_zmax = {
                 "position": [],
@@ -641,14 +674,14 @@ def main() -> None:
             "speed_mean_mps": float(
                 np.mean([row["speed_mean_mps"] for row in rows])
             ),
-            "bc_expert_action_mae_mean": float(
+            "controller_expert_action_mae_mean": float(
                 np.nanmean(
-                    [row["bc_expert_action_mae_mean"] for row in rows]
+                    [row["controller_expert_action_mae_mean"] for row in rows]
                 )
             ),
-            "bc_expert_action_mae_p95_mean": float(
+            "controller_expert_action_mae_p95_mean": float(
                 np.nanmean(
-                    [row["bc_expert_action_mae_p95"] for row in rows]
+                    [row["controller_expert_action_mae_p95"] for row in rows]
                 )
             ),
             "obs_zmax_p95_mean": float(
@@ -702,11 +735,11 @@ def main() -> None:
                 )
             },
             **{
-                f"bc_expert_action_{name}_mae_mean": float(
+                f"controller_expert_action_{name}_mae_mean": float(
                     np.nanmean(
                         [
                             row.get(
-                                f"bc_expert_action_{name}_mae",
+                                f"controller_expert_action_{name}_mae",
                                 float("nan"),
                             )
                             for row in rows
