@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from types import MethodType
 from typing import Any
 
 import torch
@@ -44,6 +45,76 @@ def _set_running_standard_scaler(
         "observation_scaler_std_min": float(std.min().item()),
         "observation_scaler_std_max": float(std.max().item()),
     }
+
+
+def freeze_skrl_observation_normalization(agent: Any) -> dict[str, float]:
+    """Freeze the BC observation coordinates during PPO fine-tuning.
+
+    skrl's PPO intentionally calls RunningStandardScaler(..., train=True) on
+    the first epoch of every rollout. That behavior is appropriate for PPO
+    trained from scratch, but it would overwrite the semantic std floors that
+    are part of the validated Circular-12 BC policy contract. Keep the loaded
+    mean/variance in the checkpoint while turning the scaler's variance update
+    into a no-op.
+    """
+
+    seen: set[int] = set()
+    frozen = 0
+    metadata: dict[str, float] = {}
+    for name in ("_state_preprocessor", "_observation_preprocessor"):
+        scaler = getattr(agent, name, None)
+        if scaler is None or id(scaler) in seen:
+            continue
+        seen.add(id(scaler))
+
+        running_mean = getattr(scaler, "running_mean", None)
+        running_variance = getattr(scaler, "running_variance", None)
+        current_count = getattr(scaler, "current_count", None)
+        parallel_variance = getattr(scaler, "_parallel_variance", None)
+        if (
+            not torch.is_tensor(running_mean)
+            or not torch.is_tensor(running_variance)
+            or not callable(parallel_variance)
+        ):
+            raise RuntimeError(
+                "imitation PPO requires a skrl RunningStandardScaler-like "
+                "observation preprocessor that can be frozen"
+            )
+
+        def _frozen_parallel_variance(
+            self: Any,
+            input_mean: torch.Tensor,
+            input_var: torch.Tensor,
+            input_count: int,
+        ) -> None:
+            del self, input_mean, input_var, input_count
+            return None
+
+        scaler._parallel_variance = MethodType(
+            _frozen_parallel_variance, scaler
+        )
+        setattr(scaler, "_imitation_updates_frozen", True)
+        frozen += 1
+
+        std = torch.sqrt(running_variance.detach().float())
+        metadata.update(
+            {
+                "frozen_observation_scaler_std_min": float(std.min().item()),
+                "frozen_observation_scaler_std_max": float(std.max().item()),
+                "frozen_observation_scaler_sample_count": float(
+                    current_count.item()
+                    if torch.is_tensor(current_count)
+                    else float("nan")
+                ),
+            }
+        )
+
+    if frozen == 0:
+        raise RuntimeError(
+            "imitation PPO did not expose an observation preprocessor to freeze"
+        )
+    metadata["frozen_observation_scaler_instances"] = float(frozen)
+    return metadata
 
 
 def initialize_skrl_policy_from_bc(
