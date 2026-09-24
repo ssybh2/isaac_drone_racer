@@ -44,6 +44,8 @@ parser.add_argument("--safety-height-error-m", type=float, default=0.20)
 parser.add_argument("--safety-speed-error-mps", type=float, default=1.50)
 parser.add_argument("--safety-attitude-error-deg", type=float, default=15.0)
 parser.add_argument("--safety-body-rate-radps", type=float, default=2.50)
+parser.add_argument("--safety-gate-plane-distance-m", type=float, default=1.5)
+parser.add_argument("--safety-gate-center-limit-m", type=float, default=0.40)
 parser.add_argument(
     "--recovery-hold-steps",
     type=int,
@@ -64,6 +66,8 @@ for name in (
     "safety_speed_error_mps",
     "safety_attitude_error_deg",
     "safety_body_rate_radps",
+    "safety_gate_plane_distance_m",
+    "safety_gate_center_limit_m",
 ):
     if float(getattr(args, name)) <= 0.0:
         parser.error(f"--{name.replace('_', '-')} must be positive")
@@ -83,6 +87,29 @@ from imitation.circular12_expert import (  # noqa: E402
     config_from_ctbr_action_cfg,
 )
 from imitation.dataset import save_dataset  # noqa: E402
+
+
+def _gate_clearance_metrics(
+    position_w: torch.Tensor,
+    gate_pose_w: torch.Tensor,
+    *,
+    plane_distance_m: float,
+    center_limit_m: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return absolute gate-frame offsets and near-plane clearance risk."""
+    gate_pos_w = gate_pose_w[:, :3]
+    gate_quat_w = gate_pose_w[:, 3:7]
+    position_gate = math_utils.quat_apply(
+        math_utils.quat_inv(gate_quat_w), position_w - gate_pos_w
+    )
+    plane_distance = position_gate[:, 0].abs()
+    lateral_error = position_gate[:, 1].abs()
+    vertical_error = position_gate[:, 2].abs()
+    clearance_unsafe = (
+        (plane_distance <= plane_distance_m)
+        & ((lateral_error > center_limit_m) | (vertical_error > center_limit_m))
+    )
+    return plane_distance, lateral_error, vertical_error, clearance_unsafe
 
 
 def main() -> None:
@@ -112,6 +139,7 @@ def main() -> None:
             "Finish this DAgger round before advancing the speed curriculum."
         )
     student = student.to(raw.device).eval()
+    command = raw.command_manager.get_term("target")
     expert_cfg = config_from_ctbr_action_cfg(
         raw.cfg.actions.control_action,
         target_speed_mps=float(args.target_speed_mps),
@@ -132,6 +160,10 @@ def main() -> None:
     speed_error_mps: list[float] = []
     attitude_error_deg: list[float] = []
     body_rate_radps: list[float] = []
+    gate_plane_distance_m: list[float] = []
+    gate_lateral_error_m: list[float] = []
+    gate_vertical_error_m: list[float] = []
+    gate_clearance_unsafe: list[bool] = []
     episode_ids: list[int] = []
     episode_steps: list[int] = []
 
@@ -171,6 +203,17 @@ def main() -> None:
             body_rate = torch.linalg.vector_norm(
                 robot.data.root_ang_vel_b, dim=-1
             )
+            (
+                gate_plane_distance,
+                gate_lateral_error,
+                gate_vertical_error,
+                clearance_unsafe,
+            ) = _gate_clearance_metrics(
+                p_w,
+                command.command,
+                plane_distance_m=float(args.safety_gate_plane_distance_m),
+                center_limit_m=float(args.safety_gate_center_limit_m),
+            )
 
             unsafe = bool(
                 (
@@ -185,6 +228,7 @@ def main() -> None:
                         body_rate[0]
                         > float(args.safety_body_rate_radps)
                     )
+                    | clearance_unsafe[0]
                 ).item()
             )
 
@@ -227,6 +271,10 @@ def main() -> None:
             speed_error_mps.append(float(speed_err[0].item()))
             attitude_error_deg.append(float(attitude_err[0].item()))
             body_rate_radps.append(float(body_rate[0].item()))
+            gate_plane_distance_m.append(float(gate_plane_distance[0].item()))
+            gate_lateral_error_m.append(float(gate_lateral_error[0].item()))
+            gate_vertical_error_m.append(float(gate_vertical_error[0].item()))
+            gate_clearance_unsafe.append(bool(clearance_unsafe[0].item()))
             episode_ids.append(episode)
             episode_steps.append(step)
 
@@ -267,6 +315,18 @@ def main() -> None:
                     "body_rate_radps": np.asarray(
                         body_rate_radps, dtype=np.float32
                     ),
+                    "gate_plane_distance_m": np.asarray(
+                        gate_plane_distance_m, dtype=np.float32
+                    ),
+                    "gate_lateral_error_m": np.asarray(
+                        gate_lateral_error_m, dtype=np.float32
+                    ),
+                    "gate_vertical_error_m": np.asarray(
+                        gate_vertical_error_m, dtype=np.float32
+                    ),
+                    "gate_clearance_unsafe": np.asarray(
+                        gate_clearance_unsafe, dtype=np.bool_
+                    ),
                     "episode_id": np.asarray(
                         episode_ids, dtype=np.int32
                     ),
@@ -294,6 +354,12 @@ def main() -> None:
                     ),
                     "safety_body_rate_radps": np.asarray(
                         float(args.safety_body_rate_radps), dtype=np.float32
+                    ),
+                    "safety_gate_plane_distance_m": np.asarray(
+                        float(args.safety_gate_plane_distance_m), dtype=np.float32
+                    ),
+                    "safety_gate_center_limit_m": np.asarray(
+                        float(args.safety_gate_center_limit_m), dtype=np.float32
                     ),
                     "recovery_hold_steps": np.asarray(
                         int(args.recovery_hold_steps), dtype=np.int32
