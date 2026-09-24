@@ -375,6 +375,25 @@ def main() -> None:
             )
 
             if args.controller == "bc":
+                contact_force_max_n = float("nan")
+                try:
+                    contact_data = raw.scene.sensors["collision_sensor"].data
+                    contact_forces = getattr(
+                        contact_data, "net_forces_w_history", None
+                    )
+                    if contact_forces is None:
+                        contact_forces = getattr(
+                            contact_data, "net_forces_w", None
+                        )
+                    if contact_forces is not None:
+                        contact_force_max_n = float(
+                            torch.linalg.vector_norm(
+                                contact_forces.reshape(-1, 3), dim=-1
+                            ).max().item()
+                        )
+                except Exception:
+                    pass
+
                 terminal_trace.append(
                     {
                         "step": int(ep_step),
@@ -400,6 +419,7 @@ def main() -> None:
                             (action - expert.action).abs().mean().item()
                         ),
                         "obs_zmax": float(standardized.abs().max().item()),
+                        "contact_force_max_n": contact_force_max_n,
                     }
                 )
 
