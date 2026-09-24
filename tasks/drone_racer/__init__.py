@@ -784,6 +784,10 @@ _register_circular12_imitation_estimator_task(
     "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20Cfg",
 )
 _register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-EstimatorMission-Legacy-Coordinated14-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionLegacyCoordinated14Color20Cfg",
+)
+_register_circular12_imitation_estimator_task(
     "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-EstimatorMission-Color20-V7-v0",
     "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20V7Cfg",
 )
