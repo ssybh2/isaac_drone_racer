@@ -354,7 +354,9 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._lio.reset(
             timestamp_s=self._timestamp_s(),
             position_w_b=tuple(float(v) for v in init.pos),
-            linear_velocity_w_b=(0.0, 0.0, 0.0),
+            linear_velocity_w_b=tuple(
+                float(v) for v in getattr(init, "lin_vel", (0.0, 0.0, 0.0))
+            ),
             orientation_w_b_wxyz=tuple(float(v) for v in init.rot),
         )
         self._motion_buffer.reset()
