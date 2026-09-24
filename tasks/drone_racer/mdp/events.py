@@ -183,9 +183,15 @@ def reset_circular12_coordinated_state(
     asset.write_root_velocity_to_sim(velocity, env_ids=env_ids)
 
     # Avoid a false first-step gate-plane crossing caused by stale command
-    # history from the pre-reset pose.
+    # history from the pre-reset pose. ManagerBasedRLEnv may reset only a
+    # subset of vectorized environments, so preserve the full [num_envs, 3]
+    # command-history buffer and update just env_ids. Replacing the entire
+    # tensor with positions would shrink it to [len(env_ids), 3] and break the
+    # next 4096-env command update.
     try:
         command = env.command_manager.get_term("target")
-        command.prev_robot_pos_w = positions.clone()
+        previous = command.prev_robot_pos_w.clone()
+        previous[env_ids] = positions
+        command.prev_robot_pos_w = previous
     except (AttributeError, KeyError):
         pass
