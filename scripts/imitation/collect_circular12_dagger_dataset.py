@@ -57,9 +57,18 @@ def main() -> None:
     raw = env.unwrapped
     wrapped = SkrlVecEnvWrapper(env, ml_framework="torch")
 
-    student, _ = Circular12BCPolicy.load(
+    student, student_metadata = Circular12BCPolicy.load(
         args.student, map_location=raw.device
     )
+    trained_speed = student_metadata.get("target_speed_mps")
+    if trained_speed is not None and abs(
+        float(trained_speed) - float(args.target_speed_mps)
+    ) > 1.0e-6:
+        raise ValueError(
+            "DAgger target speed must match the student BC checkpoint. "
+            f"checkpoint={trained_speed} requested={args.target_speed_mps}. "
+            "Finish this DAgger round before advancing the speed curriculum."
+        )
     student = student.to(raw.device).eval()
     expert_cfg = config_from_ctbr_action_cfg(
         raw.cfg.actions.control_action,

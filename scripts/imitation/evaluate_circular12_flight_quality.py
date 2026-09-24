@@ -104,9 +104,17 @@ def main() -> None:
     bc = None
     runner = None
     if args.controller == "bc":
-        bc, _ = Circular12BCPolicy.load(
+        bc, bc_metadata = Circular12BCPolicy.load(
             args.checkpoint, map_location=raw.device
         )
+        trained_speed = bc_metadata.get("target_speed_mps")
+        if trained_speed is not None and abs(
+            float(trained_speed) - float(args.target_speed_mps)
+        ) > 1.0e-6:
+            raise ValueError(
+                "BC flight-quality target speed must match checkpoint metadata: "
+                f"checkpoint={trained_speed} requested={args.target_speed_mps}"
+            )
         bc = bc.to(raw.device).eval()
     elif args.controller == "skrl":
         runner = _skrl_runner(wrapped)

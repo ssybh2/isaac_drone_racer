@@ -48,28 +48,55 @@ def save_dataset(
 def concatenate_datasets(
     *datasets: dict[str, np.ndarray],
 ) -> dict[str, np.ndarray]:
-    """Concatenate common arrays while making episode IDs globally unique."""
+    """Concatenate only sample-aligned arrays and offset episode IDs.
+
+    Scalar metadata such as target_speed_mps and schema_version is deliberately
+    not concatenated. This keeps dataset metadata separate from per-step arrays.
+    """
     if not datasets:
         raise ValueError("at least one dataset is required")
+
+    sample_counts = [int(len(dataset["observation"])) for dataset in datasets]
     common = set(datasets[0].keys())
-    for dataset in datasets[1:]:
-        common &= set(dataset.keys())
+    for current in datasets[1:]:
+        common &= set(current.keys())
+
+    sample_keys = []
+    for key in sorted(common):
+        aligned = True
+        for current, count in zip(datasets, sample_counts):
+            array = np.asarray(current[key])
+            if array.ndim < 1 or int(array.shape[0]) != count:
+                aligned = False
+                break
+        if aligned:
+            sample_keys.append(key)
+
+    for required in REQUIRED_ARRAYS:
+        if required not in sample_keys:
+            raise ValueError(
+                f"required sample-aligned array {required!r} is missing"
+            )
 
     normalized: list[dict[str, np.ndarray]] = []
     episode_offset = 0
-    for dataset in datasets:
-        current = {key: np.asarray(dataset[key]) for key in common}
-        episode_id = current["episode_id"].astype(np.int64, copy=True)
+    for current in datasets:
+        item = {
+            key: np.asarray(current[key])
+            for key in sample_keys
+        }
+        episode_id = item["episode_id"].astype(np.int64, copy=True)
         if episode_id.size:
             episode_id -= int(episode_id.min())
             episode_id += episode_offset
             episode_offset = int(episode_id.max()) + 1
-        current["episode_id"] = episode_id.astype(np.int32)
-        normalized.append(current)
+        item["episode_id"] = episode_id.astype(np.int32)
+        normalized.append(item)
 
     return {
         key: np.concatenate(
-            [dataset[key] for dataset in normalized], axis=0
+            [current[key] for current in normalized],
+            axis=0,
         )
-        for key in sorted(common)
+        for key in sample_keys
     }

@@ -30,6 +30,20 @@ parser.add_argument("--device", default="cuda:0")
 args = parser.parse_args()
 
 
+def _dataset_target_speed(
+    dataset: dict[str, np.ndarray],
+) -> float:
+    value = dataset.get("target_speed_mps")
+    if value is None:
+        raise ValueError(
+            "Circular-12 BC datasets must record target_speed_mps"
+        )
+    array = np.asarray(value, dtype=np.float64)
+    if array.size != 1:
+        raise ValueError("target_speed_mps metadata must be scalar")
+    return float(array.reshape(-1)[0])
+
+
 def _split_by_episode(
     episode_id: np.ndarray, seed: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -87,6 +101,14 @@ def main() -> None:
     )
 
     datasets = [load_dataset(path) for path in args.dataset]
+    target_speeds = [_dataset_target_speed(dataset) for dataset in datasets]
+    if max(target_speeds) - min(target_speeds) > 1.0e-6:
+        raise ValueError(
+            "Do not mix hidden target speeds in one BC dataset. "
+            "Train sequential speed-curriculum checkpoints instead: "
+            f"got {target_speeds}"
+        )
+    target_speed_mps = float(target_speeds[0])
     data = concatenate_datasets(*datasets)
     observation = data["observation"].astype(np.float32)
     target = data["expert_action"].astype(np.float32)
@@ -168,6 +190,7 @@ def main() -> None:
         "datasets": [str(path) for path in args.dataset],
         "samples": int(observation.shape[0]),
         "episodes": int(np.unique(data["episode_id"]).size),
+        "target_speed_mps": target_speed_mps,
         "best_epoch": int(
             min(history, key=lambda row: row["val_rmse"])["epoch"]
         ),
