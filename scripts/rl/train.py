@@ -232,6 +232,10 @@ LEARNED_INERTIAL_SWIFT_CTBR_TASK = (
     "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0"
 )
 
+IMITATION_FINE_TUNE_TASK = (
+    "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0"
+)
+
 
 def _audit_learned_inertial_bounded_cfg(env, agent_cfg: dict) -> None:
     """Fail closed if the PPO/action contract regresses to the old unbounded path."""
@@ -411,6 +415,91 @@ def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
     print(f"  mini_batches               : {agent['mini_batches']}")
     print(f"  learning_rate              : {agent['learning_rate']}")
     print(f"  reward_shaper              : {agent['rewards_shaper_scale']}")
+
+
+def _audit_swift_ctbr_imitation_cfg(env, agent_cfg: dict) -> None:
+    """Fail closed on the BC/DAgger -> PPO fine-tune contract."""
+    if args_cli.task != IMITATION_FINE_TUNE_TASK:
+        return
+
+    action_space = env.unwrapped.single_action_space
+    low = float(action_space.low.min())
+    high = float(action_space.high.max())
+    if int(action_space.shape[0]) != 4:
+        raise RuntimeError(
+            f"imitation fine-tune requires four CTBR actions, got {action_space.shape}"
+        )
+    if abs(low + 1.0) > 1.0e-6 or abs(high - 1.0) > 1.0e-6:
+        raise RuntimeError(
+            "imitation fine-tune requires bounded [-1, 1]^4 CTBR actions"
+        )
+    if int(env.unwrapped.num_envs) != 4096:
+        raise RuntimeError(
+            "imitation fine-tune is intentionally fixed at 4096 environments; "
+            f"got {env.unwrapped.num_envs}"
+        )
+
+    rate_limit = tuple(
+        float(v)
+        for v in env.unwrapped.cfg.actions.control_action.body_rate_max_radps
+    )
+    if rate_limit != (4.0, 4.0, 2.0):
+        raise RuntimeError(
+            "imitation fine-tune CTBR limits must remain (4, 4, 2) rad/s; "
+            f"got {rate_limit}"
+        )
+
+    models = agent_cfg["models"]
+    if bool(models.get("separate", True)):
+        raise RuntimeError("imitation PPO must keep the shared actor/critic model")
+    for name in ("policy", "value"):
+        cfg = models[name]
+        network = cfg.get("network", [])
+        if len(network) != 1:
+            raise RuntimeError(f"imitation {name} must have one network block")
+        if list(network[0].get("layers", [])) != [256, 256, 256]:
+            raise RuntimeError(
+                f"imitation {name} must use 256x256x256 hidden layers"
+            )
+        if str(network[0].get("activations")) != "elu":
+            raise RuntimeError(f"imitation {name} must use ELU activations")
+
+    policy_cfg = models["policy"]
+    if str(policy_cfg.get("output")) != "tanh(ACTIONS)":
+        raise RuntimeError("imitation actor mean must be tanh(ACTIONS)")
+    if not bool(policy_cfg.get("clip_actions", False)):
+        raise RuntimeError("imitation PPO must clip sampled CTBR actions")
+
+    agent = agent_cfg["agent"]
+    expected_int = {
+        "rollouts": 24,
+        "learning_epochs": 5,
+        "mini_batches": 4,
+    }
+    for key, expected in expected_int.items():
+        if int(agent[key]) != expected:
+            raise RuntimeError(
+                f"imitation PPO requires {key}={expected}, got {agent[key]}"
+            )
+    expected_float = {
+        "learning_rate": 5.0e-5,
+        "discount_factor": 0.99,
+        "ratio_clip": 0.15,
+        "entropy_loss_scale": 0.001,
+        "rewards_shaper_scale": 0.6,
+    }
+    for key, expected in expected_float.items():
+        if abs(float(agent[key]) - expected) > 1.0e-12:
+            raise RuntimeError(
+                f"imitation PPO requires {key}={expected}, got {agent[key]}"
+            )
+
+    print("[INFO] Circular-12 imitation PPO contract:")
+    print(f"  num_envs                   : {env.unwrapped.num_envs}")
+    print(f"  CTBR rate limits           : {rate_limit}")
+    print("  actor / critic             : shared 256x256x256 ELU")
+    print(f"  learning_rate              : {agent['learning_rate']}")
+    print(f"  PPO clip / entropy         : {agent['ratio_clip']} / {agent['entropy_loss_scale']}")
 
 
 def _audit_loaded_policy_std(agent, max_std: float) -> None:
@@ -822,6 +911,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     _audit_learned_inertial_bounded_cfg(env, agent_cfg)
     _audit_swift_ctbr_policy0_cfg(env, agent_cfg)
     _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg)
+    _audit_swift_ctbr_imitation_cfg(env, agent_cfg)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:

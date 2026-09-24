@@ -51,6 +51,10 @@ import torch  # noqa: E402
 import isaaclab.utils.math as math_utils  # noqa: E402
 
 import tasks  # noqa: F401,E402
+from imitation.circular12_reference import (  # noqa: E402
+    Circular12Reference,
+    Circular12ReferenceConfig,
+)
 from perception.gate_identity import identity_for_gate_index  # noqa: E402
 from perception.isaac_adapter import IsaacStage2TruthAdapter  # noqa: E402
 from perception.perfect_gate_corner_sensor import PerfectGateCornerSensor  # noqa: E402
@@ -191,14 +195,24 @@ def _install_multicolor_gate_overlays(stage) -> None:
 
 
 def main() -> None:
-    radius_m = 12.0
-    gravity_mps2 = 9.81
     mass_kg = 0.6076
     pitch_up_deg = float(args.camera_pitch_up_deg)
     laps = 3
-    omega_radps = args.speed_mps / radius_m
-    bank_rad = -math.atan2(args.speed_mps**2 / radius_m, gravity_mps2)
-    collective_accel = math.hypot(gravity_mps2, args.speed_mps**2 / radius_m)
+    reference = Circular12Reference(
+        Circular12ReferenceConfig(
+            radius_m=12.0,
+            center_x_m=0.0,
+            center_y_m=12.0,
+            height_m=float(args.body_height_m),
+            speed_mps=float(args.speed_mps),
+            gravity_mps2=9.81,
+        )
+    )
+    radius_m = reference.cfg.radius_m
+    gravity_mps2 = reference.cfg.gravity_mps2
+    omega_radps = reference.omega_radps
+    bank_rad = reference.bank_rad
+    collective_accel = reference.collective_accel_mps2
     duration_s = laps * 2.0 * math.pi / omega_radps
     frame_count = math.ceil(duration_s * args.fps) + 1
 
@@ -252,24 +266,28 @@ def main() -> None:
     try:
         for frame_idx in range(frame_count):
             t_s = min(frame_idx / args.fps, duration_s)
-            angle = -math.pi / 2.0 + omega_radps * t_s
+            reference_state = reference.sample_time(t_s)
+            angle = reference_state.phase_rad
             yaw = angle + math.pi / 2.0
-            pos = torch.tensor(
-                [[radius_m * math.cos(angle), 12.0 + radius_m * math.sin(angle), args.body_height_m]],
+            pos = torch.as_tensor(
+                reference_state.position_w,
                 dtype=torch.float32,
                 device=device,
-            )
+            ).view(1, 3)
             orientation = math_utils.quat_from_euler_xyz(
                 torch.tensor([bank_rad], device=device),
                 torch.tensor([0.0], device=device),
                 torch.tensor([yaw], device=device),
             )
-            velocity = torch.tensor(
-                [[-args.speed_mps * math.sin(angle), args.speed_mps * math.cos(angle),
-                  0.0, 0.0, 0.0, omega_radps]],
+            velocity = torch.zeros(
+                (1, 6), dtype=torch.float32, device=device
+            )
+            velocity[0, :3] = torch.as_tensor(
+                reference_state.velocity_w,
                 dtype=torch.float32,
                 device=device,
             )
+            velocity[0, 5] = float(omega_radps)
             robot.write_root_pose_to_sim(torch.cat((pos, orientation), dim=-1))
             robot.write_root_velocity_to_sim(velocity)
             raw.scene.write_data_to_sim()
