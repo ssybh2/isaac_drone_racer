@@ -8,9 +8,14 @@ near-complete body tumbling relative to the coordinated Circular-12 reference.
 from __future__ import annotations
 
 import argparse
+import sys
 import csv
 import json
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import numpy as np
 from isaaclab.app import AppLauncher
