@@ -41,6 +41,24 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--vertical-position-std-floor",
+    type=float,
+    default=None,
+    help=(
+        "Optional minimum normalization scale in metres for pz and all four "
+        "gate-corner z components. Applied on top of --observation-std-floor."
+    ),
+)
+parser.add_argument(
+    "--vertical-velocity-std-floor",
+    type=float,
+    default=None,
+    help=(
+        "Optional minimum normalization scale in m/s for vz. Applied on top "
+        "of --observation-std-floor."
+    ),
+)
+parser.add_argument(
     "--standardized-observation-clip",
     type=float,
     default=None,
@@ -55,6 +73,13 @@ parser.add_argument("--device", default="cuda:0")
 args = parser.parse_args()
 if args.observation_std_floor <= 0.0:
     parser.error("--observation-std-floor must be positive")
+for name in (
+    "vertical_position_std_floor",
+    "vertical_velocity_std_floor",
+):
+    value = getattr(args, name)
+    if value is not None and value <= 0.0:
+        parser.error(f"--{name.replace('_', '-')} must be positive")
 if (
     args.standardized_observation_clip is not None
     and args.standardized_observation_clip <= 0.0
@@ -155,6 +180,18 @@ def main() -> None:
     obs_std = raw_obs_std.clamp_min(
         float(args.observation_std_floor)
     )
+    if args.vertical_position_std_floor is not None:
+        vertical_position_indices = (2, 17, 20, 23, 26)
+        for index in vertical_position_indices:
+            obs_std[index] = torch.clamp_min(
+                obs_std[index],
+                float(args.vertical_position_std_floor),
+            )
+    if args.vertical_velocity_std_floor is not None:
+        obs_std[5] = torch.clamp_min(
+            obs_std[5],
+            float(args.vertical_velocity_std_floor),
+        )
     model = Circular12BCPolicy(
         Circular12BCConfig(
             standardized_observation_clip=(
@@ -234,6 +271,16 @@ def main() -> None:
         "episodes": int(np.unique(data["episode_id"]).size),
         "target_speed_mps": target_speed_mps,
         "observation_std_floor": float(args.observation_std_floor),
+        "vertical_position_std_floor": (
+            float(args.vertical_position_std_floor)
+            if args.vertical_position_std_floor is not None
+            else None
+        ),
+        "vertical_velocity_std_floor": (
+            float(args.vertical_velocity_std_floor)
+            if args.vertical_velocity_std_floor is not None
+            else None
+        ),
         "standardized_observation_clip": (
             float(args.standardized_observation_clip)
             if args.standardized_observation_clip is not None
