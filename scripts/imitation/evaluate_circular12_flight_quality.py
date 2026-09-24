@@ -509,6 +509,9 @@ def main() -> None:
             if not done:
                 continue
 
+            estimator_terminal = getattr(
+                raw, "last_episode_diagnostic", None
+            )
             row = {
                 "episode": episode + 1,
                 "steps": ep_step,
@@ -649,6 +652,38 @@ def main() -> None:
                     np.max(np.asarray(obs_dim_absz), axis=0).tolist()
                     if obs_dim_absz else [float("nan")] * 31
                 ),
+                "estimator_gate_attempts": (
+                    int(estimator_terminal.get("gate_attempts", 0))
+                    if isinstance(estimator_terminal, dict) else 0
+                ),
+                "estimator_gate_updates": (
+                    int(estimator_terminal.get("gate_updates", 0))
+                    if isinstance(estimator_terminal, dict) else 0
+                ),
+                "estimator_gate_rejects": (
+                    int(estimator_terminal.get("gate_rejects", 0))
+                    if isinstance(estimator_terminal, dict) else 0
+                ),
+                "estimator_gate_acceptance_rate": (
+                    float(estimator_terminal.get("gate_acceptance_rate", 0.0))
+                    if isinstance(estimator_terminal, dict) else float("nan")
+                ),
+                "estimator_gate_reject_reason_counts": (
+                    estimator_terminal.get("gate_reject_reason_counts", {})
+                    if isinstance(estimator_terminal, dict) else {}
+                ),
+                "estimator_gate_reject_stage_counts": (
+                    estimator_terminal.get("gate_reject_stage_counts", {})
+                    if isinstance(estimator_terminal, dict) else {}
+                ),
+                "estimator_terminal_position_error_m": (
+                    float(estimator_terminal.get("position_error_m", float("nan")))
+                    if isinstance(estimator_terminal, dict) else float("nan")
+                ),
+                "estimator_terminal_velocity_error_mps": (
+                    float(estimator_terminal.get("velocity_error_mps", float("nan")))
+                    if isinstance(estimator_terminal, dict) else float("nan")
+                ),
             }
             rows.append(row)
             if args.controller == "bc":
@@ -680,7 +715,9 @@ def main() -> None:
                     " "
                     f"est_p={row['estimator_position_rmse_m']:.3f}m "
                     f"est_v={row['estimator_velocity_rmse_mps']:.3f}m/s "
-                    f"est_R={row['estimator_orientation_rmse_deg']:.2f}deg"
+                    f"est_R={row['estimator_orientation_rmse_deg']:.2f}deg "
+                    f"gate_upd={row['estimator_gate_updates']}/"
+                    f"{row['estimator_gate_attempts']}"
                     if np.isfinite(row["estimator_position_rmse_m"])
                     else ""
                 ),
@@ -842,6 +879,27 @@ def main() -> None:
                 )
                 if any(
                     np.isfinite(row["estimator_orientation_final_error_deg"])
+                    for row in rows
+                )
+                else float("nan")
+            ),
+            "estimator_gate_attempts_mean": float(
+                np.mean([row["estimator_gate_attempts"] for row in rows])
+            ),
+            "estimator_gate_updates_mean": float(
+                np.mean([row["estimator_gate_updates"] for row in rows])
+            ),
+            "estimator_gate_rejects_mean": float(
+                np.mean([row["estimator_gate_rejects"] for row in rows])
+            ),
+            "estimator_gate_acceptance_rate_mean": (
+                float(
+                    np.nanmean(
+                        [row["estimator_gate_acceptance_rate"] for row in rows]
+                    )
+                )
+                if any(
+                    np.isfinite(row["estimator_gate_acceptance_rate"])
                     for row in rows
                 )
                 else float("nan")
