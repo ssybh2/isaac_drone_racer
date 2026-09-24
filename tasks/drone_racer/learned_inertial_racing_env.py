@@ -1546,9 +1546,29 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 if candidate_index < self._gate_track_layout.num_gates:
                     identified_gate_index = int(candidate_index)
 
-            # Always score every mapped gate. Gate identity contributes only a
-            # bounded preference after the geometric scores are known.
-            for gate_index in range(self._gate_track_layout.num_gates):
+            # Production scores every mapped gate. The optional evaluation-only
+            # oracle restricts this to the simulator-truth active gate so we can
+            # isolate association failure from detector/reprojection/EKF failure.
+            truth_association_oracle = bool(
+                getattr(
+                    self.cfg,
+                    "gate_debug_force_truth_active_gate_association",
+                    False,
+                )
+            )
+            expected_gate = diagnostic.get("expected_active_gate_index")
+            if (
+                truth_association_oracle
+                and expected_gate is not None
+                and 0 <= int(expected_gate) < self._gate_track_layout.num_gates
+            ):
+                gate_indices_to_score = (int(expected_gate),)
+            else:
+                gate_indices_to_score = range(
+                    self._gate_track_layout.num_gates
+                )
+
+            for gate_index in gate_indices_to_score:
                 T_wg = self._gate_track_layout.gate_pose(gate_index)
                 all_points_w = T_wg.transform_points(
                     self._gate_geometry.object_points_g
@@ -1634,9 +1654,24 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
             None if not identity_candidates else identity_candidates[0]
         )
 
-        association_mode = "all_map"
+        truth_association_oracle = bool(
+            getattr(
+                self.cfg,
+                "gate_debug_force_truth_active_gate_association",
+                False,
+            )
+        )
+        expected_gate = diagnostic.get("expected_active_gate_index")
+        association_mode = (
+            "truth_active_gate_oracle"
+            if truth_association_oracle and expected_gate is not None
+            else "all_map"
+        )
         selected_candidate = global_best
-        if identity_best is not None:
+        if (
+            association_mode != "truth_active_gate_oracle"
+            and identity_best is not None
+        ):
             identity_rmse = float(identity_best[0])
             global_rmse = float(global_best[0])
             diagnostic["gate_identity_preferred_rmse_px"] = identity_rmse
@@ -1696,8 +1731,11 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
                 int(gate_index) == int(expected_gate)
             )
 
-        if association_rmse > float(
-            self.cfg.gate_reprojection_association_max_rmse_px
+        if (
+            association_mode != "truth_active_gate_oracle"
+            and association_rmse > float(
+                self.cfg.gate_reprojection_association_max_rmse_px
+            )
         ):
             self._gate_reject_count += 1
             diagnostic["reject_stage"] = "association"
