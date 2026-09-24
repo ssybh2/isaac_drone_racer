@@ -24,7 +24,7 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
     "--task",
-    default="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0",
+    default="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ExpertValidation-v0",
 )
 parser.add_argument(
     "--controller",
@@ -102,6 +102,10 @@ def main() -> None:
     )
     env_cfg.scene.num_envs = 1
     env_cfg.seed = int(args.seed)
+    if getattr(env_cfg.events, "reset_base", None) is not None:
+        env_cfg.events.reset_base.params["target_speed_mps"] = float(
+            args.target_speed_mps
+        )
     env = gym.make(args.task, cfg=env_cfg)
     raw = env.unwrapped
     wrapped = SkrlVecEnvWrapper(env, ml_framework="torch")
