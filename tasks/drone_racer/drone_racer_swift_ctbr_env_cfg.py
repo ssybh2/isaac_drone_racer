@@ -1178,6 +1178,39 @@ class DroneRacerSwiftCTBRGTCircular12ImitationNoiseRobustEnvCfg(
 
 
 @configclass
+class DroneRacerSwiftCTBRGTCircular12ExpertValidationEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg
+):
+    """Single-env clean free-flight validation/demo task for the CTBR expert.
+
+    Unlike PPO training, this task does not use random predecessor-gate resets.
+    It initializes exactly once onto a coordinated circular state immediately
+    before Gate 1. The expert must then sustain the flight through physics.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.episode_length_s = 20.0
+        self.commands.target.randomise_start = None
+        self.commands.target.debug_vis = False
+        self.events.push_robot = None
+        self.events.reset_base = EventTerm(
+            func=mdp.reset_circular12_coordinated_state,
+            mode="reset",
+            params={
+                "target_speed_mps": 14.0,
+                "radius_m": 12.0,
+                "center_xy": (0.0, 12.0),
+                "height_m": 2.07,
+                "phase_rad": -7.0 * 3.141592653589793 / 12.0,
+                "gravity_mps2": 9.81,
+                "asset_cfg_name": "robot",
+            },
+        )
+
+
+@configclass
 class SwiftBlend25PolicyCfg(ObsGroup):
     platform_state = ObsTerm(
         func=mdp.blended_inertial_swift_state,
