@@ -1,9 +1,10 @@
 seed: 1
 
-# BC/DAgger-initialized PPO. Keep the same 31D -> 256^3 ELU -> 4D CTBR actor
-# contract, but use a smaller learning rate and exploration envelope.
+# BC/DAgger-initialized PPO. Preserve the validated 31D -> 256^3 ELU -> 4D
+# CTBR actor while learning an independent critic. Stage-A is deliberately
+# conservative so PPO cannot erase the zero-tumble BC manifold.
 models:
-  separate: False
+  separate: True
 
   policy:
     class: GaussianMixin
@@ -12,10 +13,10 @@ models:
     clip_log_std: True
     min_log_std: -20.0
     # Stage-A begins from a validated zero-tumble BC. Keep exploration
-    # deliberately local: std <= 0.05 so PPO cannot immediately erase the
+    # deliberately local: std <= 0.02 so PPO cannot immediately erase the
     # collision-free behavior with large stochastic CTBR commands.
-    max_log_std: -2.995732273553991
-    initial_log_std: -2.995732273553991
+    max_log_std: -3.912023005428146
+    initial_log_std: -3.912023005428146
     network:
       - name: net
         input: STATES
@@ -40,15 +41,15 @@ memory:
 agent:
   class: PPO
   rollouts: 24
-  learning_epochs: 5
+  learning_epochs: 2
   mini_batches: 4
   discount_factor: 0.99
   lambda: 0.95
-  learning_rate: 5.0e-05
+  learning_rate: 1.0e-05
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
-    kl_threshold: 0.01
-    max_lr: 1.0e-04
+    kl_threshold: 0.0051
+    max_lr: 1.0e-05
 
   state_preprocessor: RunningStandardScaler
   state_preprocessor_kwargs: null
@@ -58,11 +59,11 @@ agent:
   random_timesteps: 0
   learning_starts: 0
   grad_norm_clip: 1.0
-  ratio_clip: 0.15
+  ratio_clip: 0.05
   value_clip: 0.2
   clip_predicted_values: True
-  entropy_loss_scale: 0.001
-  value_loss_scale: 1.0
+  entropy_loss_scale: 0.0
+  value_loss_scale: 0.5
   kl_threshold: 0.0
   rewards_shaper_scale: 0.6
   time_limit_bootstrap: False
