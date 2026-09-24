@@ -237,7 +237,9 @@ SWIFT_CTBR_GT_RACING_TASKS = {
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-StableHeading-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-StableMultiGate-v0",
-    "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0",
+    # ImitationFineTune has its own stricter audit below (5e-5 LR, 0.15 PPO
+    # clip, local exploration). Do not also apply the baseline GT-racing audit,
+    # whose 1e-4 / 0.2 contract intentionally differs.
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV2-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV3-v0",
