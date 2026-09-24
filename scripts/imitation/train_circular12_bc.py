@@ -59,6 +59,17 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--previous-action-std-floor",
+    type=float,
+    default=None,
+    help=(
+        "Optional minimum normalization scale for the four previous CTBR "
+        "action components. Their physical range is [-1, 1], so this avoids "
+        "amplifying small student/expert action-history differences solely "
+        "because expert demonstrations have very low action variance."
+    ),
+)
+parser.add_argument(
     "--standardized-observation-clip",
     type=float,
     default=None,
@@ -76,6 +87,7 @@ if args.observation_std_floor <= 0.0:
 for name in (
     "vertical_position_std_floor",
     "vertical_velocity_std_floor",
+    "previous_action_std_floor",
 ):
     value = getattr(args, name)
     if value is not None and value <= 0.0:
@@ -192,6 +204,11 @@ def main() -> None:
             obs_std[5],
             float(args.vertical_velocity_std_floor),
         )
+    if args.previous_action_std_floor is not None:
+        obs_std[27:31] = torch.clamp_min(
+            obs_std[27:31],
+            float(args.previous_action_std_floor),
+        )
     model = Circular12BCPolicy(
         Circular12BCConfig(
             standardized_observation_clip=(
@@ -279,6 +296,11 @@ def main() -> None:
         "vertical_velocity_std_floor": (
             float(args.vertical_velocity_std_floor)
             if args.vertical_velocity_std_floor is not None
+            else None
+        ),
+        "previous_action_std_floor": (
+            float(args.previous_action_std_floor)
+            if args.previous_action_std_floor is not None
             else None
         ),
         "standardized_observation_clip": (
