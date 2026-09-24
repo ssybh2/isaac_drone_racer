@@ -1293,11 +1293,37 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend75Color20Cfg(
 
 
 @configclass
+class SwiftEstimatorTruthMissionPolicyCfg(ObsGroup):
+    """Stage E: estimator platform state with truth-only mission gate index."""
+
+    platform_state = ObsTerm(func=mdp.learned_inertial_swift_state)
+    next_gate_corners = ObsTerm(
+        func=mdp.learned_truth_next_gate_corners_relative_w,
+        params={"command_name": "target"},
+    )
+    previous_action = ObsTerm(func=mdp.last_action)
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
+
+@configclass
+class SwiftEstimatorTruthMissionObservationsCfg:
+    policy: SwiftEstimatorTruthMissionPolicyCfg = (
+        SwiftEstimatorTruthMissionPolicyCfg()
+    )
+    critic = None
+
+
+@configclass
 class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionColor20Cfg(
     DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg
 ):
     """Stage E: estimator p/v/R with truth-only mission gate progression."""
-    observations: SwiftBlend100ObservationsCfg = SwiftBlend100ObservationsCfg()
+    observations: SwiftEstimatorTruthMissionObservationsCfg = (
+        SwiftEstimatorTruthMissionObservationsCfg()
+    )
 
 
 def _configure_color20_gate_updates(cfg) -> None:

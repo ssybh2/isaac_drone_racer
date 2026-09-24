@@ -67,3 +67,17 @@ def test_stage_c_noise_robustness_task_is_registered():
     assert "SwiftGTNoisePolicyCfg" in cfg
     assert "noisy_gt_swift_state" in obs
     assert "_circular12_noisy_gt_cache" in obs
+
+
+def test_stage_e_uses_pure_estimator_platform_state_not_alpha_one_blend():
+    cfg = (
+        ROOT / "tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py"
+    ).read_text()
+    assert "class SwiftEstimatorTruthMissionPolicyCfg" in cfg
+    assert "platform_state = ObsTerm(func=mdp.learned_inertial_swift_state)" in cfg
+    assert "func=mdp.learned_truth_next_gate_corners_relative_w" in cfg
+
+    observations = (
+        ROOT / "tasks/drone_racer/mdp/learned_inertial_observations.py"
+    ).read_text()
+    assert "def learned_truth_next_gate_corners_relative_w" in observations

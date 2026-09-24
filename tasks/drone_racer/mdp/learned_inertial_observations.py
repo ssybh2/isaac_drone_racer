@@ -373,3 +373,54 @@ def noisy_gt_next_gate_corners_relative_w(
     ).reshape(env.num_envs, 4, 3)
     corners_w = corners_w + gate_center_w.unsqueeze(1)
     return (corners_w - p.unsqueeze(1)).reshape(env.num_envs, 12)
+
+
+def learned_truth_next_gate_corners_relative_w(
+    env: ManagerBasedRLEnv,
+    command_name: str = "target",
+) -> torch.Tensor:
+    """Estimator-relative gate corners driven by truth-only mission progression.
+
+    This Stage-E diagnostic does not read simulator root pose. GT is used only
+    to choose which known-map gate is currently the truth mission target.
+    """
+    state = getattr(env, "learned_inertial_state", None)
+    if state is None:
+        return torch.zeros(env.num_envs, 12, device=env.device)
+
+    command = env.command_manager.get_term(command_name)
+    if not hasattr(command, "gt_next_gate_idx"):
+        raise AttributeError(
+            "truth-mission estimator observation requires gt_next_gate_idx"
+        )
+
+    gate_indices = command.gt_next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(env.num_envs, device=env.device)
+    track_data = command.track.data
+    gate_center_w = track_data.object_com_pos_w[env_ids, gate_indices]
+    gate_quat_w = track_data.object_quat_w[env_ids, gate_indices]
+    half = float(command.gate_size) / 2.0
+
+    local_corners = torch.tensor(
+        [
+            [0.0, -half, -half],
+            [0.0, +half, -half],
+            [0.0, +half, +half],
+            [0.0, -half, +half],
+        ],
+        dtype=torch.float32,
+        device=env.device,
+    ).unsqueeze(0).expand(env.num_envs, -1, -1)
+
+    q = gate_quat_w.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 4)
+    corners_w = math_utils.quat_apply(
+        q, local_corners.reshape(-1, 3)
+    ).reshape(env.num_envs, 4, 3)
+    corners_w = corners_w + gate_center_w.unsqueeze(1)
+
+    p_est = torch.as_tensor(
+        state.position_w_b,
+        dtype=torch.float32,
+        device=env.device,
+    ).view(1, 1, 3)
+    return (corners_w - p_est).reshape(env.num_envs, 12)

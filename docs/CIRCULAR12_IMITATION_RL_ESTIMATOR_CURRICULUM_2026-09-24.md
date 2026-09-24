@@ -208,10 +208,12 @@ Task:
 
 `Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-EstStateTruthMission-Color20-v0`
 
-This stage explicitly fails closed before estimator initialization. The
-100%-estimator observation raises instead of silently falling back to simulator
-GT. Partial 25/50/75% stages may use GT only during the estimator startup
-transient, before the first estimator state exists.
+This stage uses the production estimator platform-state function directly;
+it does not compute an alpha=1 blend and therefore does not read simulator
+root pose for actor p/v/R. Before estimator initialization it returns the
+existing fail-closed zero estimator state rather than GT. GT is used only for
+the truth mission gate index in this diagnostic stage. Partial 25/50/75%
+stages remain explicit GT/estimator blends.
 
 ### Stage F - estimator state + estimator mission
 
