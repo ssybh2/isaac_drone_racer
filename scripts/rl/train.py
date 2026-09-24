@@ -24,6 +24,21 @@ parser.add_argument(
 )
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint to resume training.")
 parser.add_argument(
+    "--imitation_bc_checkpoint",
+    type=str,
+    default=None,
+    help=(
+        "Initialize the Circular-12 256^3 ELU CTBR actor and observation "
+        "scaler from a behavior-cloning checkpoint before PPO fine-tuning."
+    ),
+)
+parser.add_argument(
+    "--imitation_bc_action_std",
+    type=float,
+    default=0.05,
+    help="Initial Gaussian exploration std after BC -> PPO transfer.",
+)
+parser.add_argument(
     "--fake_sensor_profile",
     type=str,
     choices=["clean", "mild", "nominal", "mixed", "stress"],
@@ -190,6 +205,7 @@ from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import tasks  # noqa: F401
+from utils.imitation_initialization import initialize_skrl_policy_from_bc
 from utils.training_overrides import (
     apply_post_load_training_overrides,
     cap_running_scaler_count,
@@ -764,6 +780,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # get checkpoint path (to resume training)
     resume_path = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None
+    if args_cli.imitation_bc_checkpoint is not None and resume_path is not None:
+        raise ValueError(
+            "--imitation_bc_checkpoint and --checkpoint are mutually exclusive"
+        )
+    if (
+        args_cli.imitation_bc_checkpoint is not None
+        and args_cli.task
+        != "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0"
+    ):
+        raise ValueError(
+            "--imitation_bc_checkpoint is only valid for the Circular12 "
+            "imitation fine-tune task"
+        )
     if (
         args_cli.post_load_learning_rate is not None
         or args_cli.post_load_max_action_std is not None
@@ -815,6 +844,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
     runner = Runner(env, agent_cfg)
+
+    if args_cli.imitation_bc_checkpoint is not None:
+        bc_metadata = initialize_skrl_policy_from_bc(
+            runner.agent,
+            args_cli.imitation_bc_checkpoint,
+            action_std=float(args_cli.imitation_bc_action_std),
+        )
+        dump_yaml(
+            os.path.join(log_dir, "params", "bc_initialization.yaml"),
+            bc_metadata,
+        )
+        print("[INFO] Initialized PPO actor from Circular-12 BC checkpoint")
+        print_dict(bc_metadata, nesting=4)
 
     # load checkpoint (if specified)
     if resume_path:
