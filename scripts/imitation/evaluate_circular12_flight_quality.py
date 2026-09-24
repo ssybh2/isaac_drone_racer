@@ -161,6 +161,7 @@ def main() -> None:
         "gate_corners": [],
         "previous_action": [],
     }
+    obs_dim_absz: list[np.ndarray] = []
     obs_clip_fraction: list[float] = []
     inverted_samples = 0
     inversion_events = 0
@@ -207,6 +208,9 @@ def main() -> None:
                     "gate_corners": slice(15, 27),
                     "previous_action": slice(27, 31),
                 }
+                obs_dim_absz.append(
+                    standardized.detach().abs().cpu().numpy().reshape(-1).astype(np.float64)
+                )
                 for group_name, group_slice in group_slices.items():
                     obs_group_zmax[group_name].append(
                         float(
@@ -384,6 +388,14 @@ def main() -> None:
                     if bc_expert_action_abs_components
                     else {}
                 ),
+                "obs_dim_absz_p95": (
+                    np.percentile(np.asarray(obs_dim_absz), 95, axis=0).tolist()
+                    if obs_dim_absz else [float("nan")] * 31
+                ),
+                "obs_dim_absz_max": (
+                    np.max(np.asarray(obs_dim_absz), axis=0).tolist()
+                    if obs_dim_absz else [float("nan")] * 31
+                ),
             }
             rows.append(row)
             print(
@@ -414,6 +426,7 @@ def main() -> None:
                 "gate_corners": [],
                 "previous_action": [],
             }
+            obs_dim_absz = []
             obs_clip_fraction = []
             inverted_samples = 0
             inversion_events = 0
@@ -540,6 +553,26 @@ def main() -> None:
                 )
                 for name in ("thrust", "p", "q", "r")
             },
+            "obs_dimension_names": [
+                "px", "py", "pz",
+                "vx", "vy", "vz",
+                "R00", "R01", "R02",
+                "R10", "R11", "R12",
+                "R20", "R21", "R22",
+                "gate0_x", "gate0_y", "gate0_z",
+                "gate1_x", "gate1_y", "gate1_z",
+                "gate2_x", "gate2_y", "gate2_z",
+                "gate3_x", "gate3_y", "gate3_z",
+                "prev_thrust", "prev_p", "prev_q", "prev_r",
+            ],
+            "obs_dim_absz_p95_mean": np.nanmean(
+                np.asarray([row["obs_dim_absz_p95"] for row in rows], dtype=np.float64),
+                axis=0,
+            ).tolist(),
+            "obs_dim_absz_max": np.nanmax(
+                np.asarray([row["obs_dim_absz_max"] for row in rows], dtype=np.float64),
+                axis=0,
+            ).tolist(),
         }
 
         with (out_dir / "episodes.csv").open("w", newline="") as f:
