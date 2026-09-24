@@ -11,6 +11,7 @@ import argparse
 import sys
 import csv
 import json
+from collections import deque
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -139,6 +140,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
     instability_snapshots: list[dict] = []
+    terminal_traces: list[dict] = []
     obs_dimension_names = [
         "px", "py", "pz",
         "vx", "vy", "vz",
@@ -182,6 +184,7 @@ def main() -> None:
     gross_active = False
     warning_snapshot = None
     tumble_snapshot = None
+    terminal_trace = deque(maxlen=80)
 
     try:
         while episode < int(args.episodes):
@@ -371,6 +374,35 @@ def main() -> None:
                 action.detach().abs().cpu().numpy().reshape(-1).tolist()
             )
 
+            if args.controller == "bc":
+                terminal_trace.append(
+                    {
+                        "step": int(ep_step),
+                        "time_s": float(ep_step * raw.step_dt),
+                        "gates_so_far": int(ep_gates),
+                        "attitude_error_deg": float(np.degrees(att_err)),
+                        "body_rate_b_radps": (
+                            robot.data.root_ang_vel_b[0]
+                            .detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "body_rate_norm_radps": float(
+                            torch.linalg.vector_norm(
+                                robot.data.root_ang_vel_b[0]
+                            ).item()
+                        ),
+                        "bc_action": (
+                            action[0].detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "expert_action": (
+                            expert.action[0].detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "bc_expert_action_mae": float(
+                            (action - expert.action).abs().mean().item()
+                        ),
+                        "obs_zmax": float(standardized.abs().max().item()),
+                    }
+                )
+
             obs, _, terminated, truncated, _ = wrapped.step(action)
             ep_step += 1
             done = bool(terminated.reshape(-1)[0].item()) or bool(
@@ -486,6 +518,16 @@ def main() -> None:
                 ),
             }
             rows.append(row)
+            if args.controller == "bc":
+                terminal_traces.append(
+                    {
+                        "episode": int(episode + 1),
+                        "termination": row["termination"],
+                        "gates": int(ep_gates),
+                        "trace_dt_s": float(raw.step_dt),
+                        "trace": list(terminal_trace),
+                    }
+                )
             instability_snapshots.append(
                 {
                     "episode": int(episode + 1),
@@ -533,6 +575,7 @@ def main() -> None:
             gross_active = False
             warning_snapshot = None
             tumble_snapshot = None
+            terminal_trace.clear()
 
         total_inversions = int(
             sum(row["inversion_events"] for row in rows)
@@ -673,6 +716,10 @@ def main() -> None:
         (out_dir / "instability_snapshots.json").write_text(
             json.dumps(instability_snapshots, indent=2) + "\n"
         )
+        if args.controller == "bc":
+            (out_dir / "terminal_traces.json").write_text(
+                json.dumps(terminal_traces, indent=2) + "\n"
+            )
         print(json.dumps(summary, indent=2), flush=True)
         print(
             f"[flight-quality] instability snapshots: "
