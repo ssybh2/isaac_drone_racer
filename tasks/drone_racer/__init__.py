@@ -752,6 +752,10 @@ _register_circular12_imitation_estimator_task(
     "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg",
 )
 _register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-GTShadow-Coordinated14-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowCoordinated14Color20Cfg",
+)
+_register_circular12_imitation_estimator_task(
     "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-Blend25-Color20-v0",
     "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend25Color20Cfg",
 )
