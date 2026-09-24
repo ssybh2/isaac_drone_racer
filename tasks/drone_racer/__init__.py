@@ -676,6 +676,22 @@ gym.register(
 )
 
 
+gym.register(
+    id="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationResidualNoise-v0",
+    entry_point=f"{__name__}.swift_ctbr_racing_env:SwiftCTBRRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerSwiftCTBRGTCircular12ImitationResidualNoiseEnvCfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_circular12_imitation_cfg.yaml"
+        ),
+    },
+)
+
+
 def _register_circular12_imitation_estimator_task(
     task_id: str,
     cfg_name: str,

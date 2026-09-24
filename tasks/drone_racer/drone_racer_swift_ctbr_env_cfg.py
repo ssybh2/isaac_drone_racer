@@ -1345,3 +1345,55 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor
             "artifacts/imo_tcn/model_v7_circular12_racing.pt"
         )
         self.learned_apply_displacement_updates = True
+
+
+@configclass
+class SwiftImitationResidualNoisePolicyCfg(ObsGroup):
+    """Stage C actor input: GT corrupted by estimator-scale residuals."""
+
+    platform_state = ObsTerm(
+        func=mdp.swift_gt_state_with_residual_noise,
+        params={
+            "position_std_m": 0.08,
+            "velocity_std_mps": 0.06,
+            "attitude_std_deg": 0.5,
+        },
+    )
+    next_gate_corners = ObsTerm(
+        func=mdp.swift_gt_next_gate_corners_relative_noisy_w,
+        params={
+            "command_name": "target",
+            "position_std_m": 0.08,
+            "velocity_std_mps": 0.06,
+            "attitude_std_deg": 0.5,
+        },
+    )
+    previous_action = ObsTerm(func=mdp.last_action)
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
+
+@configclass
+class SwiftImitationResidualNoiseObservationsCfg:
+    policy: SwiftImitationResidualNoisePolicyCfg = (
+        SwiftImitationResidualNoisePolicyCfg()
+    )
+    critic = None
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12ImitationResidualNoiseEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg
+):
+    """Stage C: vectorized GT PPO with estimator-scale observation residuals.
+
+    The bootstrap standard deviations are explicit placeholders. Replace them
+    with residual statistics measured under the new non-tumbling GTShadow
+    trajectory before the final robustness fine-tune.
+    """
+
+    observations: SwiftImitationResidualNoiseObservationsCfg = (
+        SwiftImitationResidualNoiseObservationsCfg()
+    )
