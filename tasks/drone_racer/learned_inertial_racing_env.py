@@ -99,6 +99,13 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         self._imu_gyro_bias_b = np.zeros(3, dtype=np.float64)
         self._last_imu_accel_b_meas = None
         self._last_imu_gyro_b_meas = None
+        # Isaac Lab 2.1 IMU acceleration is a finite difference of link
+        # velocity. An instantaneous reset to a non-zero coordinated velocity
+        # therefore corrupts exactly the first IMU sample with the reset jump.
+        # Drop that sample from propagation; the sensor updates its internal
+        # previous-velocity buffer when the sample is read, so the next sample
+        # is physical again.
+        self._discard_first_imu_sample_after_reset = True
         self._debug_truth_motion_history = {}
         self._debug_truth_rotation_history = {}
         self._learned_delta_velocity_network_bias_mps = np.asarray(
@@ -548,6 +555,14 @@ class LearnedInertialRacingEnv(ManagerBasedRLEnv):
         imu = self.scene["imu"]
         accel_ideal = _np(imu.data.lin_acc_b[0]).astype(np.float64)
         gyro_ideal = _np(imu.data.ang_vel_b[0]).astype(np.float64)
+
+        if bool(
+            getattr(self, "_discard_first_imu_sample_after_reset", False)
+        ):
+            self._discard_first_imu_sample_after_reset = False
+            self._lio.sync_timestamp_without_propagation(timestamp_s)
+            self.learned_inertial_state = self._lio.state()
+            return
 
         # Biases evolve as random walks; white noise is sampled independently
         # per simulated IMU sample. Defaults are all zero, reproducing the
