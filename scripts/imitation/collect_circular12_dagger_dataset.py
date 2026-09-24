@@ -12,7 +12,7 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
     "--task",
-    default="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-v0",
+    default="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0",
 )
 parser.add_argument("--student", type=Path, required=True)
 parser.add_argument("--episodes", type=int, default=10)
