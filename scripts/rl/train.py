@@ -219,7 +219,10 @@ from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import tasks  # noqa: F401
-from utils.imitation_initialization import initialize_skrl_policy_from_bc
+from utils.imitation_initialization import (
+    freeze_skrl_observation_normalization,
+    initialize_skrl_policy_from_bc,
+)
 from utils.training_overrides import (
     apply_post_load_training_overrides,
     cap_running_scaler_count,
@@ -237,9 +240,9 @@ SWIFT_CTBR_GT_RACING_TASKS = {
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-StableHeading-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-StableMultiGate-v0",
-    # ImitationFineTune has its own stricter audit below (5e-5 LR, 0.15 PPO
-    # clip, local exploration). Do not also apply the baseline GT-racing audit,
-    # whose 1e-4 / 0.2 contract intentionally differs.
+    # ImitationFineTune has its own stricter audit below. Do not also apply the
+    # baseline GT-racing audit, whose from-scratch PPO contract intentionally
+    # differs from the BC-preserving Stage-A curriculum.
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV2-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV3-v0",
@@ -407,7 +410,7 @@ def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
     agent = agent_cfg["agent"]
     expected = {
         "rollouts": 24,
-        "learning_epochs": 5,
+        "learning_epochs": 2,
         "mini_batches": 4,
     }
     for key, value in expected.items():
@@ -428,7 +431,7 @@ def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
     print("[INFO] Swift CTBR GT racing contract:")
     print(f"  num_envs                   : {env.unwrapped.num_envs}")
     print(f"  action_space               : [{low:.1f}, {high:.1f}]^4")
-    print("  actor / critic             : shared 256x256x256 ELU")
+    print("  actor / critic             : separate 256x256x256 ELU")
     print(f"  policy_mean                : {policy_cfg['output']}")
     print(f"  rollouts                   : {agent['rollouts']}")
     print(f"  learning_epochs            : {agent['learning_epochs']}")
@@ -470,8 +473,11 @@ def _audit_swift_ctbr_imitation_cfg(env, agent_cfg: dict) -> None:
         )
 
     models = agent_cfg["models"]
-    if bool(models.get("separate", True)):
-        raise RuntimeError("imitation PPO must keep the shared actor/critic model")
+    if not bool(models.get("separate", False)):
+        raise RuntimeError(
+            "imitation PPO must keep actor and critic separate so value loss "
+            "cannot overwrite the validated BC actor trunk"
+        )
     for name in ("policy", "value"):
         cfg = models[name]
         network = cfg.get("network", [])
@@ -502,11 +508,13 @@ def _audit_swift_ctbr_imitation_cfg(env, agent_cfg: dict) -> None:
                 f"imitation PPO requires {key}={expected}, got {agent[key]}"
             )
     expected_float = {
-        "learning_rate": 5.0e-5,
+        "learning_rate": 1.0e-5,
         "discount_factor": 0.99,
-        "ratio_clip": 0.15,
-        "entropy_loss_scale": 0.001,
+        "ratio_clip": 0.05,
+        "entropy_loss_scale": 0.0,
         "rewards_shaper_scale": 0.6,
+        "value_loss_scale": 0.5,
+        "kl_threshold": 0.005,
     }
     for key, expected in expected_float.items():
         if abs(float(agent[key]) - expected) > 1.0e-12:
@@ -970,6 +978,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             args_cli.imitation_bc_checkpoint,
             action_std=float(args_cli.imitation_bc_action_std),
         )
+        bc_metadata.update(
+            freeze_skrl_observation_normalization(runner.agent)
+        )
         dump_yaml(
             os.path.join(log_dir, "params", "bc_initialization.yaml"),
             bc_metadata,
@@ -998,6 +1009,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # parameters, so legacy checkpoints remain state-dict compatible.
         runner.agent.load(resume_path)
 
+        imitation_freeze_metadata = {}
+        if args_cli.task in IMITATION_TRAINING_TASKS:
+            imitation_freeze_metadata = freeze_skrl_observation_normalization(
+                runner.agent
+            )
+
         migration_metadata = {}
         if args_cli.recalibrate_legacy_actor:
             migration_metadata = _migrate_legacy_learned_inertial_checkpoint(
@@ -1021,11 +1038,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         )
         if args_cli.task == LEARNED_INERTIAL_RL_TASK:
             _audit_loaded_policy_std(runner.agent, max_std=continuation_std)
-        if continuation_metadata or migration_metadata:
+        if (
+            continuation_metadata
+            or migration_metadata
+            or imitation_freeze_metadata
+        ):
             continuation_metadata = {
                 "source_checkpoint": resume_path,
                 "legacy_actor_recalibrated": bool(args_cli.recalibrate_legacy_actor),
                 **migration_metadata,
+                **imitation_freeze_metadata,
                 **continuation_metadata,
             }
             dump_yaml(
