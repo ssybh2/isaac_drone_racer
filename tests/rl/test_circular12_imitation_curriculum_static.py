@@ -27,3 +27,25 @@ def test_imitation_task_keeps_tight_ctbr_authority_and_20deg_camera():
     assert "body_rate_max_radps = (4.0, 4.0, 2.0)" in cfg
     assert "pitch_up_deg=20.0" in cfg
     assert "circular12_color20_h207_gateid_kprcnn_v1" in cfg
+
+
+def test_train_auto_enables_camera_for_learned_inertial_curriculum():
+    train = (ROOT / "scripts/rl/train.py").read_text()
+    assert 'CAMERA_REQUIRED_TASK_PREFIXES' in train
+    assert '"Isaac-Drone-Racer-Learned-Inertial-"' in train
+
+
+def test_full_estimator_blend_does_not_fallback_to_gt():
+    obs = (
+        ROOT / "tasks/drone_racer/mdp/learned_inertial_observations.py"
+    ).read_text()
+    assert "if float(blend_alpha) >= 1.0 - 1.0e-12" in obs
+    assert "q_identity[:, 0] = 1.0" in obs
+
+
+def test_imitation_ppo_is_covered_by_gt_racing_contract_audit():
+    train = (ROOT / "scripts/rl/train.py").read_text()
+    assert (
+        '"Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-'
+        'ImitationFineTune-v0"'
+    ) in train
