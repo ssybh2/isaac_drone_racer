@@ -152,7 +152,15 @@ def main() -> None:
     attitude_error: list[float] = []
     action_abs: list[float] = []
     bc_expert_action_mae: list[float] = []
+    bc_expert_action_abs_components: list[np.ndarray] = []
     obs_zmax: list[float] = []
+    obs_group_zmax: dict[str, list[float]] = {
+        "position": [],
+        "velocity": [],
+        "rotation": [],
+        "gate_corners": [],
+        "previous_action": [],
+    }
     obs_clip_fraction: list[float] = []
     inverted_samples = 0
     inversion_events = 0
@@ -178,12 +186,35 @@ def main() -> None:
                     standardized = (
                         obs - bc.observation_mean
                     ) / bc.observation_std
+                action_abs_error = (action - expert.action).abs()
                 bc_expert_action_mae.append(
-                    float((action - expert.action).abs().mean().item())
+                    float(action_abs_error.mean().item())
+                )
+                bc_expert_action_abs_components.append(
+                    action_abs_error.detach()
+                    .cpu()
+                    .numpy()
+                    .reshape(-1)
+                    .astype(np.float64)
                 )
                 obs_zmax.append(
                     float(standardized.abs().max().item())
                 )
+                group_slices = {
+                    "position": slice(0, 3),
+                    "velocity": slice(3, 6),
+                    "rotation": slice(6, 15),
+                    "gate_corners": slice(15, 27),
+                    "previous_action": slice(27, 31),
+                }
+                for group_name, group_slice in group_slices.items():
+                    obs_group_zmax[group_name].append(
+                        float(
+                            standardized[
+                                :, group_slice
+                            ].abs().max().item()
+                        )
+                    )
                 clip = bc.cfg.standardized_observation_clip
                 if clip is not None:
                     obs_clip_fraction.append(
@@ -325,6 +356,34 @@ def main() -> None:
                     float(np.percentile(obs_clip_fraction, 95))
                     if obs_clip_fraction else 0.0
                 ),
+                **{
+                    f"obs_{group_name}_zmax_p95": (
+                        float(np.percentile(values, 95))
+                        if values else float("nan")
+                    )
+                    for group_name, values in obs_group_zmax.items()
+                },
+                **{
+                    f"obs_{group_name}_zmax_max": (
+                        float(np.max(values))
+                        if values else float("nan")
+                    )
+                    for group_name, values in obs_group_zmax.items()
+                },
+                **(
+                    {
+                        f"bc_expert_action_{name}_mae": float(
+                            np.asarray(
+                                bc_expert_action_abs_components
+                            )[:, index].mean()
+                        )
+                        for index, name in enumerate(
+                            ("thrust", "p", "q", "r")
+                        )
+                    }
+                    if bc_expert_action_abs_components
+                    else {}
+                ),
             }
             rows.append(row)
             print(
@@ -346,7 +405,15 @@ def main() -> None:
             attitude_error = []
             action_abs = []
             bc_expert_action_mae = []
+            bc_expert_action_abs_components = []
             obs_zmax = []
+            obs_group_zmax = {
+                "position": [],
+                "velocity": [],
+                "rotation": [],
+                "gate_corners": [],
+                "previous_action": [],
+            }
             obs_clip_fraction = []
             inverted_samples = 0
             inversion_events = 0
@@ -425,6 +492,54 @@ def main() -> None:
                     [row["obs_clip_fraction_p95"] for row in rows]
                 )
             ),
+            **{
+                f"obs_{group_name}_zmax_p95_mean": float(
+                    np.nanmean(
+                        [
+                            row[f"obs_{group_name}_zmax_p95"]
+                            for row in rows
+                        ]
+                    )
+                )
+                for group_name in (
+                    "position",
+                    "velocity",
+                    "rotation",
+                    "gate_corners",
+                    "previous_action",
+                )
+            },
+            **{
+                f"obs_{group_name}_zmax_max": float(
+                    np.nanmax(
+                        [
+                            row[f"obs_{group_name}_zmax_max"]
+                            for row in rows
+                        ]
+                    )
+                )
+                for group_name in (
+                    "position",
+                    "velocity",
+                    "rotation",
+                    "gate_corners",
+                    "previous_action",
+                )
+            },
+            **{
+                f"bc_expert_action_{name}_mae_mean": float(
+                    np.nanmean(
+                        [
+                            row.get(
+                                f"bc_expert_action_{name}_mae",
+                                float("nan"),
+                            )
+                            for row in rows
+                        ]
+                    )
+                )
+                for name in ("thrust", "p", "q", "r")
+            },
         }
 
         with (out_dir / "episodes.csv").open("w", newline="") as f:
