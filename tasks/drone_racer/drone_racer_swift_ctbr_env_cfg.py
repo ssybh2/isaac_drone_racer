@@ -1194,6 +1194,11 @@ class DroneRacerSwiftCTBRGTCircular12ExpertValidationEnvCfg(
         self.episode_length_s = 20.0
         self.commands.target.randomise_start = None
         self.commands.target.debug_vis = False
+        # A missed gate is still a miss for scoring, but keeping that gate as
+        # the actor target after its plane is already behind the vehicle creates
+        # a stale observation that the circular expert itself does not follow.
+        # Advance the control target so safety recovery remains well-posed.
+        self.commands.target.advance_target_on_miss = True
         self.events.push_robot = None
         self.events.reset_base = EventTerm(
             func=mdp.reset_circular12_coordinated_state,
