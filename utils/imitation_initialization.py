@@ -60,6 +60,12 @@ def initialize_skrl_policy_from_bc(
         checkpoint, map_location=agent.policy.device
     )
     model = model.to(agent.policy.device).eval()
+    if model.cfg.standardized_observation_clip is not None:
+        raise RuntimeError(
+            "BC checkpoint uses standardized-observation clipping, but the "
+            "current skrl warm-start path does not yet reproduce that input "
+            "contract. Keep PPO disabled until equivalent clipping is added."
+        )
     bc_layers = model.linear_layers()
     if len(bc_layers) != 4:
         raise RuntimeError("Circular12 BC checkpoint must contain four Linear layers")
