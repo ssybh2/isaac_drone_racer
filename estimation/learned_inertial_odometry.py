@@ -1061,6 +1061,22 @@ class LearnedInertialOdometry:
             raise ValueError("unobservable basis has incompatible shape")
         return np.diag(N.T @ np.linalg.pinv(self.P) @ N)
 
+    def sync_timestamp_without_propagation(self, timestamp_s: float) -> None:
+        """Advance the estimator clock without integrating an IMU sample.
+
+        Isaac Lab 2.1 computes IMU linear acceleration by finite-differencing
+        velocity. After an instantaneous episode reset to a non-zero known
+        velocity, the first IMU sample contains the reset velocity jump rather
+        than physical acceleration. Discarding that one sample while advancing
+        the estimator clock prevents a spurious delta-v from entering the EKF.
+        """
+        t = float(timestamp_s)
+        if not np.isfinite(t) or t < self.timestamp_s:
+            raise ValueError(
+                "synchronized timestamp must be finite and non-decreasing"
+            )
+        self.timestamp_s = t
+
     def propagate(self, *, gyro_b, accel_b, timestamp_s: float) -> None:
         t = float(timestamp_s)
         dt = t - self.timestamp_s
