@@ -1135,6 +1135,49 @@ class DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg(
 
 
 @configclass
+class SwiftGTNoisePolicyCfg(ObsGroup):
+    """Stage C: GT state corrupted by configurable estimator-like residuals."""
+
+    platform_state = ObsTerm(
+        func=mdp.noisy_gt_swift_state,
+        params={
+            "position_std_m": 0.08,
+            "velocity_std_mps": 0.08,
+            "attitude_std_deg": 1.0,
+        },
+    )
+    next_gate_corners = ObsTerm(
+        func=mdp.noisy_gt_next_gate_corners_relative_w,
+        params={
+            "command_name": "target",
+            "position_std_m": 0.08,
+            "velocity_std_mps": 0.08,
+            "attitude_std_deg": 1.0,
+        },
+    )
+    previous_action = ObsTerm(func=mdp.last_action)
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
+
+@configclass
+class SwiftGTNoiseObservationsCfg:
+    policy: SwiftGTNoisePolicyCfg = SwiftGTNoisePolicyCfg()
+    critic = None
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12ImitationNoiseRobustEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg
+):
+    """Stage C: vectorized PPO robustness to estimator-like observation error."""
+
+    observations: SwiftGTNoiseObservationsCfg = SwiftGTNoiseObservationsCfg()
+
+
+@configclass
 class SwiftBlend25PolicyCfg(ObsGroup):
     platform_state = ObsTerm(
         func=mdp.blended_inertial_swift_state,
