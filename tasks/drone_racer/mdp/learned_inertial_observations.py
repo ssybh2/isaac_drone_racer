@@ -257,3 +257,119 @@ def blended_truth_next_gate_corners_relative_w(
     ).reshape(env.num_envs, 4, 3)
     corners_w = corners_w + gate_center_w.unsqueeze(1)
     return (corners_w - p.unsqueeze(1)).reshape(env.num_envs, 12)
+
+
+
+def _noisy_gt_components(
+    env: ManagerBasedRLEnv,
+    *,
+    position_std_m: float,
+    velocity_std_mps: float,
+    attitude_std_deg: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return one internally consistent noisy-GT sample per control step.
+
+    This is Stage C robustness training only. It deliberately uses simulator
+    truth plus synthetic residuals and must never be confused with the final
+    no-GT estimator observation path.
+    """
+    if min(position_std_m, velocity_std_mps, attitude_std_deg) < 0.0:
+        raise ValueError("GT-noise standard deviations must be non-negative")
+
+    step = int(getattr(env, "common_step_counter", -1))
+    key = (
+        step,
+        float(position_std_m),
+        float(velocity_std_mps),
+        float(attitude_std_deg),
+    )
+    cached = getattr(env, "_circular12_noisy_gt_cache", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+
+    robot = env.scene["robot"]
+    p_gt = robot.data.root_pos_w
+    v_gt = robot.data.root_lin_vel_w
+    q_gt = robot.data.root_quat_w
+
+    p = p_gt + float(position_std_m) * torch.randn_like(p_gt)
+    v = v_gt + float(velocity_std_mps) * torch.randn_like(v_gt)
+
+    sigma_rad = float(attitude_std_deg) * torch.pi / 180.0
+    rotvec = sigma_rad * torch.randn(
+        env.num_envs, 3, dtype=q_gt.dtype, device=q_gt.device
+    )
+    angle = torch.linalg.vector_norm(rotvec, dim=-1, keepdim=True)
+    axis = rotvec / angle.clamp_min(1.0e-8)
+    half = 0.5 * angle
+    dq = torch.cat(
+        (torch.cos(half), axis * torch.sin(half)),
+        dim=-1,
+    )
+    tiny = angle.squeeze(-1) < 1.0e-8
+    if torch.any(tiny):
+        dq[tiny] = torch.tensor(
+            [1.0, 0.0, 0.0, 0.0],
+            dtype=q_gt.dtype,
+            device=q_gt.device,
+        )
+    q = math_utils.quat_mul(q_gt, dq)
+    q = q / torch.linalg.vector_norm(q, dim=-1, keepdim=True).clamp_min(1.0e-8)
+
+    result = (p, v, q)
+    env._circular12_noisy_gt_cache = (key, result)
+    return result
+
+
+def noisy_gt_swift_state(
+    env: ManagerBasedRLEnv,
+    position_std_m: float = 0.08,
+    velocity_std_mps: float = 0.08,
+    attitude_std_deg: float = 1.0,
+) -> torch.Tensor:
+    """31D-policy platform state with configurable synthetic estimator residuals."""
+    p, v, q = _noisy_gt_components(
+        env,
+        position_std_m=position_std_m,
+        velocity_std_mps=velocity_std_mps,
+        attitude_std_deg=attitude_std_deg,
+    )
+    R = math_utils.matrix_from_quat(q).reshape(env.num_envs, 9)
+    return torch.cat((p, v, R), dim=-1)
+
+
+def noisy_gt_next_gate_corners_relative_w(
+    env: ManagerBasedRLEnv,
+    command_name: str = "target",
+    position_std_m: float = 0.08,
+    velocity_std_mps: float = 0.08,
+    attitude_std_deg: float = 1.0,
+) -> torch.Tensor:
+    """Truth mission gate geometry relative to the same noisy position sample."""
+    p, _, _ = _noisy_gt_components(
+        env,
+        position_std_m=position_std_m,
+        velocity_std_mps=velocity_std_mps,
+        attitude_std_deg=attitude_std_deg,
+    )
+    command = env.command_manager.get_term(command_name)
+    gate_pose_w = command.command
+    gate_center_w = gate_pose_w[:, :3]
+    gate_quat_w = gate_pose_w[:, 3:7]
+    half = float(command.gate_size) / 2.0
+    local_corners = torch.tensor(
+        [
+            [0.0, -half, -half],
+            [0.0, +half, -half],
+            [0.0, +half, +half],
+            [0.0, -half, +half],
+        ],
+        dtype=p.dtype,
+        device=env.device,
+    ).unsqueeze(0).expand(env.num_envs, -1, -1)
+    q = gate_quat_w.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 4)
+    corners_w = math_utils.quat_apply(
+        q, local_corners.reshape(-1, 3)
+    ).reshape(env.num_envs, 4, 3)
+    corners_w = corners_w + gate_center_w.unsqueeze(1)
+    return (corners_w - p.unsqueeze(1)).reshape(env.num_envs, 12)
