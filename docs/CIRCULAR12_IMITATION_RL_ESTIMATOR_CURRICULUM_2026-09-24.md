@@ -59,7 +59,7 @@ This matches the demonstration and imitation-PPO tasks.
 ### Audit the expert in free flight
 
 ```bash
-./.conda-env/bin/python   scripts/imitation/evaluate_circular12_imitation_policy.py   --episodes 10   --target-speed-mps 14   --output-dir artifacts/imitation/expert_audit_14   --device cuda:0   --headless
+./.conda-env/bin/python   scripts/imitation/evaluate_circular12_flight_quality.py   --episodes 10   --target-speed-mps 14   --output-dir artifacts/imitation/expert_audit_14   --device cuda:0   --headless
 ```
 
 Do not continue to BC until the expert itself flies without inversion/tumble
@@ -102,7 +102,7 @@ python scripts/imitation/train_circular12_bc.py   --dataset artifacts/imitation/
 Evaluate the student:
 
 ```bash
-./.conda-env/bin/python   scripts/imitation/evaluate_circular12_imitation_policy.py   --student artifacts/imitation/bc_dagger_14_r1.pt   --episodes 20   --target-speed-mps 14   --output-dir artifacts/imitation/bc_dagger_14_r1_audit   --device cuda:0   --headless
+./.conda-env/bin/python   scripts/imitation/evaluate_circular12_flight_quality.py   --student artifacts/imitation/bc_dagger_14_r1.pt   --episodes 20   --target-speed-mps 14   --output-dir artifacts/imitation/bc_dagger_14_r1_audit   --device cuda:0   --headless
 ```
 
 Repeat DAgger until inversion entries are zero and recovery is reliable.
