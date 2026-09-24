@@ -1484,6 +1484,21 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowCoordinated14
 
 
 @configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowCoordinated14Color20OracleAssociationCfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowCoordinated14Color20Cfg
+):
+    """Evaluation-only oracle gate association; GT actor remains in control.
+
+    Detector pixels and the SC-EKF reprojection update remain real. Only the
+    mapped-gate association is fixed to the simulator-truth active gate index.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.gate_debug_force_truth_active_gate_association = True
+
+
+@configclass
 class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionCoordinated14Color20Cfg(
     DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionColor20Cfg
 ):
