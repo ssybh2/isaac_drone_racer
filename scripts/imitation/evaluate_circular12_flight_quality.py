@@ -153,6 +153,7 @@ def main() -> None:
     action_abs: list[float] = []
     bc_expert_action_mae: list[float] = []
     obs_zmax: list[float] = []
+    obs_clip_fraction: list[float] = []
     inverted_samples = 0
     inversion_events = 0
     gross_excursion_events = 0
@@ -183,6 +184,16 @@ def main() -> None:
                 obs_zmax.append(
                     float(standardized.abs().max().item())
                 )
+                clip = bc.cfg.standardized_observation_clip
+                if clip is not None:
+                    obs_clip_fraction.append(
+                        float(
+                            (standardized.abs() > float(clip))
+                            .float()
+                            .mean()
+                            .item()
+                        )
+                    )
             else:
                 with torch.inference_mode():
                     outputs = runner.agent.act(
@@ -306,6 +317,14 @@ def main() -> None:
                     float(np.max(obs_zmax))
                     if obs_zmax else float("nan")
                 ),
+                "obs_clip_fraction_mean": (
+                    float(np.mean(obs_clip_fraction))
+                    if obs_clip_fraction else 0.0
+                ),
+                "obs_clip_fraction_p95": (
+                    float(np.percentile(obs_clip_fraction, 95))
+                    if obs_clip_fraction else 0.0
+                ),
             }
             rows.append(row)
             print(
@@ -328,6 +347,7 @@ def main() -> None:
             action_abs = []
             bc_expert_action_mae = []
             obs_zmax = []
+            obs_clip_fraction = []
             inverted_samples = 0
             inversion_events = 0
             gross_excursion_events = 0
@@ -394,6 +414,16 @@ def main() -> None:
             ),
             "obs_zmax_max": float(
                 np.nanmax([row["obs_zmax_max"] for row in rows])
+            ),
+            "obs_clip_fraction_mean": float(
+                np.mean(
+                    [row["obs_clip_fraction_mean"] for row in rows]
+                )
+            ),
+            "obs_clip_fraction_p95_mean": float(
+                np.mean(
+                    [row["obs_clip_fraction_p95"] for row in rows]
+                )
             ),
         }
 
