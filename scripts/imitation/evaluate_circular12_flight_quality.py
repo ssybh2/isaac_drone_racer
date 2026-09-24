@@ -151,6 +151,8 @@ def main() -> None:
     height_error: list[float] = []
     attitude_error: list[float] = []
     action_abs: list[float] = []
+    bc_expert_action_mae: list[float] = []
+    obs_zmax: list[float] = []
     inverted_samples = 0
     inversion_events = 0
     gross_excursion_events = 0
@@ -172,6 +174,15 @@ def main() -> None:
             elif args.controller == "bc":
                 with torch.inference_mode():
                     action = bc(obs)
+                    standardized = (
+                        obs - bc.observation_mean
+                    ) / bc.observation_std
+                bc_expert_action_mae.append(
+                    float((action - expert.action).abs().mean().item())
+                )
+                obs_zmax.append(
+                    float(standardized.abs().max().item())
+                )
             else:
                 with torch.inference_mode():
                     outputs = runner.agent.act(
@@ -275,6 +286,26 @@ def main() -> None:
                 "action_saturation_fraction": float(
                     np.mean(np.asarray(action_abs) > 0.95)
                 ),
+                "bc_expert_action_mae_mean": (
+                    float(np.mean(bc_expert_action_mae))
+                    if bc_expert_action_mae else float("nan")
+                ),
+                "bc_expert_action_mae_p95": (
+                    float(np.percentile(bc_expert_action_mae, 95))
+                    if bc_expert_action_mae else float("nan")
+                ),
+                "obs_zmax_mean": (
+                    float(np.mean(obs_zmax))
+                    if obs_zmax else float("nan")
+                ),
+                "obs_zmax_p95": (
+                    float(np.percentile(obs_zmax, 95))
+                    if obs_zmax else float("nan")
+                ),
+                "obs_zmax_max": (
+                    float(np.max(obs_zmax))
+                    if obs_zmax else float("nan")
+                ),
             }
             rows.append(row)
             print(
@@ -295,6 +326,8 @@ def main() -> None:
             height_error = []
             attitude_error = []
             action_abs = []
+            bc_expert_action_mae = []
+            obs_zmax = []
             inverted_samples = 0
             inversion_events = 0
             gross_excursion_events = 0
@@ -345,6 +378,22 @@ def main() -> None:
             ),
             "speed_mean_mps": float(
                 np.mean([row["speed_mean_mps"] for row in rows])
+            ),
+            "bc_expert_action_mae_mean": float(
+                np.nanmean(
+                    [row["bc_expert_action_mae_mean"] for row in rows]
+                )
+            ),
+            "bc_expert_action_mae_p95_mean": float(
+                np.nanmean(
+                    [row["bc_expert_action_mae_p95"] for row in rows]
+                )
+            ),
+            "obs_zmax_p95_mean": float(
+                np.nanmean([row["obs_zmax_p95"] for row in rows])
+            ),
+            "obs_zmax_max": float(
+                np.nanmax([row["obs_zmax_max"] for row in rows])
             ),
         }
 
