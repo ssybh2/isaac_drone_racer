@@ -1546,6 +1546,24 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor
 
 
 @configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionLegacyCoordinated14Color20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20Cfg
+):
+    """Strict no-truth-index A/B with training-compatible mission semantics.
+
+    Estimator p/v/R and estimator-driven mission progression are actor-visible.
+    Simulator truth is retained only for reward/evaluation bookkeeping. The
+    historical training gate-crossing semantics are preserved so the only
+    control-path change from Stage E is removal of the truth-only mission index.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _configure_circular12_coordinated14_known_start(self)
+        self.commands.target.mission_crossing_mode = "legacy_training"
+
+
+@configclass
 class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20V7Cfg(
     DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20Cfg
 ):
