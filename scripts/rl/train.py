@@ -410,7 +410,7 @@ def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
     agent = agent_cfg["agent"]
     expected = {
         "rollouts": 24,
-        "learning_epochs": 2,
+        "learning_epochs": 5,
         "mini_batches": 4,
     }
     for key, value in expected.items():
@@ -431,7 +431,7 @@ def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
     print("[INFO] Swift CTBR GT racing contract:")
     print(f"  num_envs                   : {env.unwrapped.num_envs}")
     print(f"  action_space               : [{low:.1f}, {high:.1f}]^4")
-    print("  actor / critic             : separate 256x256x256 ELU")
+    print("  actor / critic             : shared 256x256x256 ELU")
     print(f"  policy_mean                : {policy_cfg['output']}")
     print(f"  rollouts                   : {agent['rollouts']}")
     print(f"  learning_epochs            : {agent['learning_epochs']}")
@@ -499,7 +499,7 @@ def _audit_swift_ctbr_imitation_cfg(env, agent_cfg: dict) -> None:
     agent = agent_cfg["agent"]
     expected_int = {
         "rollouts": 24,
-        "learning_epochs": 5,
+        "learning_epochs": 2,
         "mini_batches": 4,
     }
     for key, expected in expected_int.items():
@@ -522,10 +522,17 @@ def _audit_swift_ctbr_imitation_cfg(env, agent_cfg: dict) -> None:
                 f"imitation PPO requires {key}={expected}, got {agent[key]}"
             )
 
+    max_std = math.exp(float(policy_cfg["max_log_std"]))
+    if max_std > 0.0200001:
+        raise RuntimeError(
+            f"imitation PPO action std cap must stay <= 0.02, got {max_std}"
+        )
+
     print("[INFO] Circular-12 imitation PPO contract:")
     print(f"  num_envs                   : {env.unwrapped.num_envs}")
     print(f"  CTBR rate limits           : {rate_limit}")
-    print("  actor / critic             : shared 256x256x256 ELU")
+    print("  actor / critic             : separate 256x256x256 ELU")
+    print(f"  configured std cap         : {max_std:.6f}")
     print(f"  learning_rate              : {agent['learning_rate']}")
     print(f"  PPO clip / entropy         : {agent['ratio_clip']} / {agent['entropy_loss_scale']}")
 
