@@ -1138,6 +1138,33 @@ class DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg(
     def __post_init__(self) -> None:
         super().__post_init__()
         self.actions.control_action.body_rate_max_radps = (4.0, 4.0, 2.0)
+
+        # Stage-A PPO must begin on the same physically coordinated 14 m/s
+        # distribution that produced the validated zero-tumble BC/DAgger
+        # checkpoint. The legacy GT-racing reset starts from zero velocity with
+        # up to +/-45 deg attitude perturbations, which is intentionally outside
+        # this first fine-tuning curriculum stage.
+        self.commands.target.randomise_start = None
+        self.events.reset_base = EventTerm(
+            func=mdp.reset_circular12_coordinated_state,
+            mode="reset",
+            params={
+                "target_speed_mps": 14.0,
+                "radius_m": 12.0,
+                "center_xy": (0.0, 12.0),
+                "height_m": 2.07,
+                "phase_rad": -7.0 * 3.141592653589793 / 12.0,
+                "gravity_mps2": 9.81,
+                "phase_jitter_rad": 5.0 * 3.141592653589793 / 180.0,
+                "radial_jitter_m": 0.20,
+                "height_jitter_m": 0.10,
+                "speed_jitter_mps": 0.50,
+                "attitude_jitter_rad": 3.0 * 3.141592653589793 / 180.0,
+                "angular_rate_jitter_radps": 0.10,
+                "asset_cfg_name": "robot",
+            },
+        )
+
         # PPO exploration can occasionally miss a gate even when initialized
         # from the validated zero-tumble BC. Keep the miss recorded for the
         # racing reward, but advance the actor-visible target so a single miss
