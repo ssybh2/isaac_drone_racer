@@ -183,6 +183,16 @@ def _blended_platform_components(
 
     state = getattr(env, "learned_inertial_state", None)
     if state is None:
+        # Partial blend stages deliberately retain GT until the estimator has
+        # produced its first state. The 100% estimator stage must never
+        # silently leak simulator truth: match learned_inertial_swift_state's
+        # fail-closed semantics until the estimator is initialized.
+        if float(blend_alpha) >= 1.0 - 1.0e-12:
+            p_zero = torch.zeros_like(p_gt)
+            v_zero = torch.zeros_like(v_gt)
+            q_identity = torch.zeros_like(q_gt)
+            q_identity[:, 0] = 1.0
+            return p_zero, v_zero, q_identity
         return p_gt, v_gt, q_gt
 
     p_est = torch.as_tensor(
