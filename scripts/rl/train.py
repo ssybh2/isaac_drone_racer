@@ -146,10 +146,10 @@ args_cli, hydra_args = parser.parse_known_args()
 # The deployment-faithful learned-inertial task always requires its onboard
 # RTX camera even in headless training. Keep this task-specific requirement
 # explicit so forgetting --enable_cameras cannot silently disable perception.
-if args_cli.task in (
-    "Isaac-Drone-Racer-Learned-Inertial-RL-v0",
-    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-v0",
-):
+CAMERA_REQUIRED_TASK_PREFIXES = (
+    "Isaac-Drone-Racer-Learned-Inertial-",
+)
+if args_cli.task is not None and args_cli.task.startswith(CAMERA_REQUIRED_TASK_PREFIXES):
     args_cli.enable_cameras = True
 
 # always enable cameras to record video
@@ -223,6 +223,7 @@ SWIFT_CTBR_GT_RACING_TASKS = {
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-StableHeading-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-StableMultiGate-v0",
+    "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAware-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV2-v0",
     "Isaac-Drone-Racer-Swift-CTBR-GT-PerceptionAwareV3-v0",
