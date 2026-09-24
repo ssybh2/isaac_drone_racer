@@ -23,10 +23,32 @@ parser.add_argument("--student", type=Path, required=True)
 parser.add_argument("--episodes", type=int, default=10)
 parser.add_argument("--target-speed-mps", type=float, default=14.0)
 parser.add_argument(
+    "--mixing-mode",
+    choices=["bernoulli", "safety"],
+    default="safety",
+    help=(
+        "DAgger execution policy. 'bernoulli' reproduces per-step random "
+        "expert mixing; 'safety' lets the student fly continuously until a "
+        "state-quality threshold is crossed, then keeps the expert in control "
+        "until the trajectory has recovered."
+    ),
+)
+parser.add_argument(
     "--expert-prob",
     type=float,
     default=0.25,
-    help="Probability of executing the expert action; labels are always expert.",
+    help="Bernoulli-mode probability of executing the expert action.",
+)
+parser.add_argument("--safety-radial-error-m", type=float, default=0.35)
+parser.add_argument("--safety-height-error-m", type=float, default=0.20)
+parser.add_argument("--safety-speed-error-mps", type=float, default=1.50)
+parser.add_argument("--safety-attitude-error-deg", type=float, default=15.0)
+parser.add_argument("--safety-body-rate-radps", type=float, default=2.50)
+parser.add_argument(
+    "--recovery-hold-steps",
+    type=int,
+    default=25,
+    help="Consecutive safe expert-controlled steps required before returning control to the student.",
 )
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("--seed", type=int, default=1)
@@ -34,6 +56,17 @@ AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 if not 0.0 <= args.expert_prob <= 1.0:
     parser.error("--expert-prob must be in [0, 1]")
+if args.recovery_hold_steps < 1:
+    parser.error("--recovery-hold-steps must be positive")
+for name in (
+    "safety_radial_error_m",
+    "safety_height_error_m",
+    "safety_speed_error_mps",
+    "safety_attitude_error_deg",
+    "safety_body_rate_radps",
+):
+    if float(getattr(args, name)) <= 0.0:
+        parser.error(f"--{name.replace('_', '-')} must be positive")
 
 simulation_app = AppLauncher(args).app
 
@@ -94,11 +127,18 @@ def main() -> None:
     student_actions: list[np.ndarray] = []
     executed_actions: list[np.ndarray] = []
     expert_executed: list[bool] = []
+    radial_error_m: list[float] = []
+    height_error_m: list[float] = []
+    speed_error_mps: list[float] = []
+    attitude_error_deg: list[float] = []
+    body_rate_radps: list[float] = []
     episode_ids: list[int] = []
     episode_steps: list[int] = []
 
     episode = 0
     step = 0
+    expert_recovery_active = False
+    recovered_safe_steps = 0
     try:
         while episode < int(args.episodes):
             robot = raw.scene["robot"]
@@ -110,13 +150,63 @@ def main() -> None:
             )
             with torch.inference_mode():
                 student_action = student(obs)
-            use_expert = bool(
+            radius_now = torch.linalg.vector_norm(
+                p_w[:, :2]
+                - torch.tensor(
+                    [[0.0, 12.0]], dtype=p_w.dtype, device=p_w.device
+                ),
+                dim=-1,
+            )
+            radial_err = torch.abs(radius_now - 12.0)
+            height_err = torch.abs(p_w[:, 2] - 2.07)
+            speed_err = torch.abs(
+                torch.linalg.vector_norm(v_w[:, :2], dim=-1)
+                - float(args.target_speed_mps)
+            )
+            attitude_err = torch.rad2deg(
+                torch.linalg.vector_norm(
+                    expert.attitude_error_rotvec_b, dim=-1
+                )
+            )
+            body_rate = torch.linalg.vector_norm(
+                robot.data.root_ang_vel_b, dim=-1
+            )
+
+            unsafe = bool(
                 (
-                    torch.rand(
-                        (), generator=generator, device=raw.device
-                    ) < float(args.expert_prob)
+                    (radial_err[0] > float(args.safety_radial_error_m))
+                    | (height_err[0] > float(args.safety_height_error_m))
+                    | (speed_err[0] > float(args.safety_speed_error_mps))
+                    | (
+                        attitude_err[0]
+                        > float(args.safety_attitude_error_deg)
+                    )
+                    | (
+                        body_rate[0]
+                        > float(args.safety_body_rate_radps)
+                    )
                 ).item()
             )
+
+            if args.mixing_mode == "bernoulli":
+                use_expert = bool(
+                    (
+                        torch.rand(
+                            (), generator=generator, device=raw.device
+                        ) < float(args.expert_prob)
+                    ).item()
+                )
+            else:
+                if unsafe:
+                    expert_recovery_active = True
+                    recovered_safe_steps = 0
+                elif expert_recovery_active:
+                    recovered_safe_steps += 1
+                    if recovered_safe_steps >= int(args.recovery_hold_steps):
+                        expert_recovery_active = False
+                        recovered_safe_steps = 0
+                use_expert = expert_recovery_active
+
             executed = expert.action if use_expert else student_action
 
             observations.append(
@@ -132,6 +222,11 @@ def main() -> None:
                 executed.detach().cpu().numpy().reshape(-1).astype(np.float32)
             )
             expert_executed.append(use_expert)
+            radial_error_m.append(float(radial_err[0].item()))
+            height_error_m.append(float(height_err[0].item()))
+            speed_error_mps.append(float(speed_err[0].item()))
+            attitude_error_deg.append(float(attitude_err[0].item()))
+            body_rate_radps.append(float(body_rate[0].item()))
             episode_ids.append(episode)
             episode_steps.append(step)
 
@@ -144,6 +239,8 @@ def main() -> None:
                 continue
             episode += 1
             step = 0
+            expert_recovery_active = False
+            recovered_safe_steps = 0
 
             save_dataset(
                 args.output,
@@ -155,6 +252,21 @@ def main() -> None:
                     "expert_executed": np.asarray(
                         expert_executed, dtype=np.bool_
                     ),
+                    "radial_error_m": np.asarray(
+                        radial_error_m, dtype=np.float32
+                    ),
+                    "height_error_m": np.asarray(
+                        height_error_m, dtype=np.float32
+                    ),
+                    "speed_error_mps": np.asarray(
+                        speed_error_mps, dtype=np.float32
+                    ),
+                    "attitude_error_deg": np.asarray(
+                        attitude_error_deg, dtype=np.float32
+                    ),
+                    "body_rate_radps": np.asarray(
+                        body_rate_radps, dtype=np.float32
+                    ),
                     "episode_id": np.asarray(
                         episode_ids, dtype=np.int32
                     ),
@@ -164,17 +276,38 @@ def main() -> None:
                     "target_speed_mps": np.asarray(
                         float(args.target_speed_mps), dtype=np.float32
                     ),
+                    "mixing_mode": np.asarray(str(args.mixing_mode)),
                     "expert_probability": np.asarray(
                         float(args.expert_prob), dtype=np.float32
                     ),
+                    "safety_radial_error_m": np.asarray(
+                        float(args.safety_radial_error_m), dtype=np.float32
+                    ),
+                    "safety_height_error_m": np.asarray(
+                        float(args.safety_height_error_m), dtype=np.float32
+                    ),
+                    "safety_speed_error_mps": np.asarray(
+                        float(args.safety_speed_error_mps), dtype=np.float32
+                    ),
+                    "safety_attitude_error_deg": np.asarray(
+                        float(args.safety_attitude_error_deg), dtype=np.float32
+                    ),
+                    "safety_body_rate_radps": np.asarray(
+                        float(args.safety_body_rate_radps), dtype=np.float32
+                    ),
+                    "recovery_hold_steps": np.asarray(
+                        int(args.recovery_hold_steps), dtype=np.int32
+                    ),
                     "schema_version": np.asarray(
-                        "circular12_dagger_dataset_v1"
+                        "circular12_dagger_dataset_v2"
                     ),
                 },
             )
             print(
                 f"[dagger] episode {episode}/{args.episodes} "
-                f"samples={len(observations)} output={args.output}",
+                f"samples={len(observations)} "
+                f"expert_fraction={float(np.mean(expert_executed)):.3f} "
+                f"mode={args.mixing_mode} output={args.output}",
                 flush=True,
             )
     finally:
