@@ -138,3 +138,112 @@ def learned_next_gate_corners_relative_w(
     relative_w = corners_w - p_w
     return relative_w.reshape(env.num_envs, 12)
 
+
+
+def _quat_slerp_wxyz(
+    q0: torch.Tensor,
+    q1: torch.Tensor,
+    alpha: float,
+) -> torch.Tensor:
+    """Shortest-arc batched quaternion SLERP for the GT->estimator curriculum."""
+    if not 0.0 <= float(alpha) <= 1.0:
+        raise ValueError("blend alpha must be in [0, 1]")
+    q0 = q0 / torch.linalg.vector_norm(q0, dim=-1, keepdim=True).clamp_min(1.0e-8)
+    q1 = q1 / torch.linalg.vector_norm(q1, dim=-1, keepdim=True).clamp_min(1.0e-8)
+    dot = torch.sum(q0 * q1, dim=-1, keepdim=True)
+    q1 = torch.where(dot < 0.0, -q1, q1)
+    dot = torch.abs(dot).clamp(0.0, 1.0)
+
+    blend = torch.full_like(dot, float(alpha))
+    linear = dot > 0.9995
+    theta = torch.acos(dot.clamp_max(1.0 - 1.0e-7))
+    sin_theta = torch.sin(theta).clamp_min(1.0e-7)
+    s0 = torch.sin((1.0 - blend) * theta) / sin_theta
+    s1 = torch.sin(blend * theta) / sin_theta
+    spherical = s0 * q0 + s1 * q1
+    lerped = (1.0 - blend) * q0 + blend * q1
+    result = torch.where(linear, lerped, spherical)
+    return result / torch.linalg.vector_norm(
+        result, dim=-1, keepdim=True
+    ).clamp_min(1.0e-8)
+
+
+def _blended_platform_components(
+    env: ManagerBasedRLEnv,
+    blend_alpha: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return curriculum p/v/q. GT is used only by explicit blend tasks."""
+    if not 0.0 <= float(blend_alpha) <= 1.0:
+        raise ValueError("blend_alpha must be in [0, 1]")
+
+    robot = env.scene["robot"]
+    p_gt = robot.data.root_pos_w
+    v_gt = robot.data.root_lin_vel_w
+    q_gt = robot.data.root_quat_w
+
+    state = getattr(env, "learned_inertial_state", None)
+    if state is None:
+        return p_gt, v_gt, q_gt
+
+    p_est = torch.as_tensor(
+        state.position_w_b, dtype=p_gt.dtype, device=env.device
+    ).view(1, 3)
+    v_est = torch.as_tensor(
+        state.linear_velocity_w_b, dtype=v_gt.dtype, device=env.device
+    ).view(1, 3)
+    q_est = torch.as_tensor(
+        state.orientation_w_b_wxyz, dtype=q_gt.dtype, device=env.device
+    ).view(1, 4)
+
+    alpha = float(blend_alpha)
+    p = (1.0 - alpha) * p_gt + alpha * p_est
+    v = (1.0 - alpha) * v_gt + alpha * v_est
+    q = _quat_slerp_wxyz(q_gt, q_est, alpha)
+    return p, v, q
+
+
+def blended_inertial_swift_state(
+    env: ManagerBasedRLEnv,
+    blend_alpha: float,
+) -> torch.Tensor:
+    """Swift [p,v,R] with p/v lerp and attitude SLERP."""
+    p, v, q = _blended_platform_components(env, blend_alpha)
+    R = math_utils.matrix_from_quat(q).reshape(env.num_envs, 9)
+    return torch.cat((p, v, R), dim=-1)
+
+
+def blended_truth_next_gate_corners_relative_w(
+    env: ManagerBasedRLEnv,
+    blend_alpha: float,
+    command_name: str = "target",
+) -> torch.Tensor:
+    """Truth mission gate with corner vectors relative to blended position."""
+    p, _, _ = _blended_platform_components(env, blend_alpha)
+    command = env.command_manager.get_term(command_name)
+    if not hasattr(command, "gt_next_gate_idx"):
+        raise AttributeError(
+            "blended truth-mission observation requires gt_next_gate_idx"
+        )
+
+    gate_indices = command.gt_next_gate_idx.to(dtype=torch.long)
+    env_ids = torch.arange(env.num_envs, device=env.device)
+    track_data = command.track.data
+    gate_center_w = track_data.object_com_pos_w[env_ids, gate_indices]
+    gate_quat_w = track_data.object_quat_w[env_ids, gate_indices]
+    half = float(command.gate_size) / 2.0
+    local_corners = torch.tensor(
+        [
+            [0.0, -half, -half],
+            [0.0, +half, -half],
+            [0.0, +half, +half],
+            [0.0, -half, +half],
+        ],
+        dtype=p.dtype,
+        device=env.device,
+    ).unsqueeze(0).expand(env.num_envs, -1, -1)
+    q = gate_quat_w.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 4)
+    corners_w = math_utils.quat_apply(
+        q, local_corners.reshape(-1, 3)
+    ).reshape(env.num_envs, 4, 3)
+    corners_w = corners_w + gate_center_w.unsqueeze(1)
+    return (corners_w - p.unsqueeze(1)).reshape(env.num_envs, 12)
