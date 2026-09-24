@@ -1135,26 +1135,6 @@ class DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg(
 
 
 @configclass
-class DroneRacerSwiftCTBRGTCircular12ExpertDemoEnvCfg(
-    DroneRacerSwiftCTBRGTCircular12ExpertValidationEnvCfg
-):
-    """Expert demonstration task with mild recoverable reset perturbations."""
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        self.events.reset_base.params.update(
-            {
-                "phase_jitter_rad": 5.0 * 3.141592653589793 / 180.0,
-                "radial_jitter_m": 0.20,
-                "height_jitter_m": 0.10,
-                "speed_jitter_mps": 0.50,
-                "attitude_jitter_rad": 3.0 * 3.141592653589793 / 180.0,
-                "angular_rate_jitter_radps": 0.10,
-            }
-        )
-
-
-@configclass
 class SwiftGTNoisePolicyCfg(ObsGroup):
     """Stage C: GT state corrupted by configurable estimator-like residuals."""
 
@@ -1227,6 +1207,26 @@ class DroneRacerSwiftCTBRGTCircular12ExpertValidationEnvCfg(
                 "gravity_mps2": 9.81,
                 "asset_cfg_name": "robot",
             },
+        )
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12ExpertDemoEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12ExpertValidationEnvCfg
+):
+    """Expert demonstration task with mild recoverable reset perturbations."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.events.reset_base.params.update(
+            {
+                "phase_jitter_rad": 5.0 * 3.141592653589793 / 180.0,
+                "radial_jitter_m": 0.20,
+                "height_jitter_m": 0.10,
+                "speed_jitter_mps": 0.50,
+                "attitude_jitter_rad": 3.0 * 3.141592653589793 / 180.0,
+                "angular_rate_jitter_radps": 0.10,
+            }
         )
 
 
