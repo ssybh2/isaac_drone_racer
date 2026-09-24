@@ -71,6 +71,12 @@ def reset_circular12_coordinated_state(
     height_m: float = 2.07,
     phase_rad: float = -7.0 * torch.pi / 12.0,
     gravity_mps2: float = 9.81,
+    phase_jitter_rad: float = 0.0,
+    radial_jitter_m: float = 0.0,
+    height_jitter_m: float = 0.0,
+    speed_jitter_mps: float = 0.0,
+    attitude_jitter_rad: float = 0.0,
+    angular_rate_jitter_radps: float = 0.0,
     asset_cfg_name: str = "robot",
 ):
     """Reset once onto a physically consistent coordinated Circular-12 state.
@@ -92,9 +98,29 @@ def reset_circular12_coordinated_state(
     dtype = asset.data.root_pos_w.dtype
     device = asset.device
 
+    def _sym_jitter(scale: float) -> torch.Tensor:
+        if float(scale) <= 0.0:
+            return torch.zeros(n, dtype=dtype, device=device)
+        return (
+            2.0 * torch.rand(n, dtype=dtype, device=device) - 1.0
+        ) * float(scale)
+
     phase = torch.full(
         (n,), float(phase_rad), dtype=dtype, device=device
+    ) + _sym_jitter(float(phase_jitter_rad))
+    radius = (
+        torch.full((n,), float(radius_m), dtype=dtype, device=device)
+        + _sym_jitter(float(radial_jitter_m))
+    ).clamp_min(0.5 * float(radius_m))
+    height = (
+        torch.full((n,), float(height_m), dtype=dtype, device=device)
+        + _sym_jitter(float(height_jitter_m))
     )
+    speed = (
+        torch.full((n,), float(target_speed_mps), dtype=dtype, device=device)
+        + _sym_jitter(float(speed_jitter_mps))
+    ).clamp_min(0.5 * float(target_speed_mps))
+
     c = torch.cos(phase)
     s = torch.sin(phase)
     tangent = torch.stack(
@@ -103,36 +129,53 @@ def reset_circular12_coordinated_state(
 
     positions = torch.stack(
         (
-            float(center_xy[0]) + float(radius_m) * c,
-            float(center_xy[1]) + float(radius_m) * s,
-            torch.full_like(c, float(height_m)),
+            float(center_xy[0]) + radius * c,
+            float(center_xy[1]) + radius * s,
+            height,
         ),
         dim=-1,
     )
     positions = positions + env.scene.env_origins[env_ids]
 
-    speed = float(target_speed_mps)
-    omega = speed / float(radius_m)
+    omega = speed / radius
     bank = -torch.atan2(
-        torch.tensor(
-            speed * speed / float(radius_m),
-            dtype=dtype,
-            device=device,
-        ),
-        torch.tensor(float(gravity_mps2), dtype=dtype, device=device),
+        speed * speed / radius,
+        torch.full_like(speed, float(gravity_mps2)),
     )
     yaw = phase + torch.pi / 2.0
     quat = math_utils.quat_from_euler_xyz(
-        bank.expand_as(phase),
+        bank,
         torch.zeros_like(phase),
         yaw,
     )
+    if float(attitude_jitter_rad) > 0.0:
+        delta = torch.stack(
+            (
+                _sym_jitter(float(attitude_jitter_rad)),
+                _sym_jitter(float(attitude_jitter_rad)),
+                _sym_jitter(float(attitude_jitter_rad)),
+            ),
+            dim=-1,
+        )
+        dq = math_utils.quat_from_euler_xyz(
+            delta[:, 0], delta[:, 1], delta[:, 2]
+        )
+        quat = math_utils.quat_mul(quat, dq)
 
     velocity = torch.zeros((n, 6), dtype=dtype, device=device)
-    velocity[:, :3] = speed * tangent
+    velocity[:, :3] = speed.unsqueeze(-1) * tangent
     # Isaac root angular velocity is world-frame. A steady coordinated circle
     # rotates the body frame about world +Z at speed/radius.
     velocity[:, 5] = omega
+    if float(angular_rate_jitter_radps) > 0.0:
+        velocity[:, 3:6] += torch.stack(
+            (
+                _sym_jitter(float(angular_rate_jitter_radps)),
+                _sym_jitter(float(angular_rate_jitter_radps)),
+                _sym_jitter(float(angular_rate_jitter_radps)),
+            ),
+            dim=-1,
+        )
 
     asset.write_root_pose_to_sim(
         torch.cat((positions, quat), dim=-1), env_ids=env_ids
