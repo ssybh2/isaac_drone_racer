@@ -29,17 +29,10 @@ from assets.five_in_drone import FIVE_IN_DRONE  # isort:skip
 @configclass
 class DroneRacerSceneCfg(InteractiveSceneCfg):
 
-    # Local procedural ground. Isaac Lab 2.1 GroundPlaneCfg defaults to a
-    # Nucleus/S3 USD, which makes otherwise self-contained experiments fail
-    # when the Omniverse asset server is unreachable. A static 0.1-m cuboid
-    # with its top surface at z=0 is collision-equivalent for drone racing.
+    # ground plane
     ground = AssetBaseCfg(
         prim_path="/World/Ground",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.05)),
-        spawn=sim_utils.CuboidCfg(
-            size=(200.0, 200.0, 0.1),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-        ),
+        spawn=sim_utils.GroundPlaneCfg(),
     )
 
     # track
