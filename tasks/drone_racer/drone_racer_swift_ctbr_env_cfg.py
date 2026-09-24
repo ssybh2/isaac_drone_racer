@@ -1423,6 +1423,69 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionC
     )
 
 
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionCoordinated14Color20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionColor20Cfg
+):
+    """Strict BC A/B: replace only GT p/v/R with estimator p/v/R at 14 m/s.
+
+    The physical vehicle and estimator start from the same deterministic,
+    pre-declared coordinated Circular-12 state. Mission progression remains
+    truth-only and the global gate map is unchanged, so closed-loop degradation
+    can be attributed to estimator state error rather than reset OOD or gate-ID
+    association. Learned displacement fusion remains disabled through the
+    inherited IMU-only/Color20 estimator stack.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.num_envs = 1
+        self.episode_length_s = 20.0
+        self.commands.target.randomise_start = None
+        self.commands.target.advance_target_on_miss = True
+        self.commands.target.debug_vis = False
+        self.events.push_robot = None
+
+        # Nominal coordinated Circular-12 state:
+        # phase=-105 deg, r=12 m, center=(0, 12), h=2.07 m, speed=14 m/s.
+        # This is task-definition knowledge, not a runtime simulator-truth read.
+        self.scene.robot.init_state.pos = (
+            -3.1058285412302475,
+            0.4088900845311798,
+            2.07,
+        )
+        self.scene.robot.init_state.rot = (
+            0.8628651271905666,
+            -0.4882895508025350,
+            0.06428453890898132,
+            -0.11359834907570406,
+        )
+        self.scene.robot.init_state.lin_vel = (
+            13.522961568046956,
+            -3.6234666314352886,
+            0.0,
+        )
+        self.scene.robot.init_state.ang_vel = (
+            0.0,
+            0.0,
+            1.1666666666666667,
+        )
+
+        self.events.reset_base = EventTerm(
+            func=mdp.reset_circular12_coordinated_state,
+            mode="reset",
+            params={
+                "target_speed_mps": 14.0,
+                "radius_m": 12.0,
+                "center_xy": (0.0, 12.0),
+                "height_m": 2.07,
+                "phase_rad": -7.0 * 3.141592653589793 / 12.0,
+                "gravity_mps2": 9.81,
+                "asset_cfg_name": "robot",
+            },
+        )
+
+
 def _configure_color20_gate_updates(cfg) -> None:
     cfg.scene.tiled_camera = stage2_reference_camera_cfg(pitch_up_deg=20.0)
     cfg.gate_camera_pitch_up_deg = 20.0
