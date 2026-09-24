@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from imitation.bc_policy import Circular12BCPolicy
+from imitation.bc_policy import Circular12BCConfig, Circular12BCPolicy
 from imitation.dataset import concatenate_datasets, load_dataset
 
 
@@ -40,11 +40,26 @@ parser.add_argument(
         "nearly constant state/action dimensions."
     ),
 )
+parser.add_argument(
+    "--standardized-observation-clip",
+    type=float,
+    default=None,
+    help=(
+        "Optional symmetric clamp applied after normalization and before the "
+        "BC network, e.g. 5.0 for [-5, +5] sigma. The same clamp is stored "
+        "inside the checkpoint and used during inference."
+    ),
+)
 parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--device", default="cuda:0")
 args = parser.parse_args()
 if args.observation_std_floor <= 0.0:
     parser.error("--observation-std-floor must be positive")
+if (
+    args.standardized_observation_clip is not None
+    and args.standardized_observation_clip <= 0.0
+):
+    parser.error("--standardized-observation-clip must be positive")
 
 
 def _dataset_target_speed(
@@ -141,6 +156,13 @@ def main() -> None:
         float(args.observation_std_floor)
     )
     model = Circular12BCPolicy(
+        Circular12BCConfig(
+            standardized_observation_clip=(
+                float(args.standardized_observation_clip)
+                if args.standardized_observation_clip is not None
+                else None
+            )
+        ),
         observation_mean=obs_mean,
         observation_std=obs_std,
     ).to(device)
@@ -212,6 +234,11 @@ def main() -> None:
         "episodes": int(np.unique(data["episode_id"]).size),
         "target_speed_mps": target_speed_mps,
         "observation_std_floor": float(args.observation_std_floor),
+        "standardized_observation_clip": (
+            float(args.standardized_observation_clip)
+            if args.standardized_observation_clip is not None
+            else None
+        ),
         "raw_observation_std_min": float(raw_obs_std.min().item()),
         "effective_observation_std_min": float(obs_std.min().item()),
         "floored_observation_dimensions": int(
