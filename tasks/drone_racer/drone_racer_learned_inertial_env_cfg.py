@@ -279,6 +279,11 @@ class DroneRacerLearnedInertialEnvCfg(DroneRacerSwiftPerceptionEnvCfg):
     # truth alongside Gate-PnP measurements so detector/PnP/association quality
     # can be diagnosed. Truth is never fed into the estimator update itself.
     gate_debug_gt_diagnostics: bool = False
+    # Evaluation-only association oracle. When enabled, detected image corners
+    # are paired only with the simulator-truth active gate index. The detector
+    # pixels, reprojection model, EKF Jacobian/NIS gate, and state update remain
+    # unchanged. This must never be enabled in deployment tasks.
+    gate_debug_force_truth_active_gate_association: bool = False
 
     # Deployment rule: simulator GT is used only once at reset to provide the
     # known fixed initial pose. It is never read by policy observations or
