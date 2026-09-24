@@ -426,8 +426,20 @@ class EstimatedStateGateTargetingCommand(GateTargetingCommand):
         active_gate_w = torch.cat((gate_positions, gate_orientations), dim=1)
 
         estimated_pos_w = self._estimated_position_w()
+        mission_crossing_mode = str(
+            getattr(self.cfg, "mission_crossing_mode", "gate_frame")
+        )
+        if mission_crossing_mode == "legacy_training":
+            mission_crossing_fn = self._legacy_gt_gate_crossing
+        elif mission_crossing_mode == "gate_frame":
+            mission_crossing_fn = self._gate_crossing
+        else:
+            raise ValueError(
+                "mission_crossing_mode must be 'legacy_training' or "
+                f"'gate_frame', got {mission_crossing_mode!r}"
+            )
         self._mission_gate_passed, self._mission_gate_missed = (
-            self._gate_crossing(
+            mission_crossing_fn(
                 self._prev_estimated_pos_w,
                 estimated_pos_w,
                 active_gate_w,
@@ -684,3 +696,7 @@ class EstimatedStateGateTargetingCommandCfg(GateTargetingCommandCfg):
     """Deployment-faithful gate mission state for learned-inertial RL."""
 
     class_type: type = EstimatedStateGateTargetingCommand
+    # "gate_frame" is the physically correct deployment semantics.
+    # "legacy_training" reproduces GateTargetingCommand's historical
+    # yaw-plane + world-axis opening test, used only for strict policy A/B.
+    mission_crossing_mode: str = "gate_frame"
