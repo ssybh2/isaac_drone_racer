@@ -1058,3 +1058,247 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVis
         self.gate_reprojection_association_max_rmse_px = 80.0
         self.gate_reprojection_huber_delta_sigma = 2.5
         self.gate_reprojection_max_normalized_nis = 25.0
+
+
+# ---------------------------------------------------------------------------
+# Circular-12 imitation -> PPO -> estimator replacement curriculum
+# ---------------------------------------------------------------------------
+
+@configclass
+class SwiftCTBRGTImitationFineTuneRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
+    """Racing reward with a decaying non-tumbling expert action anchor."""
+
+    ang_vel_l2 = None
+    lookat_next = None
+
+    expert_anchor = RewTerm(
+        func=mdp.circular12_expert_anchor_l2,
+        weight=-1.0,
+        params={
+            "target_speed_mps": 17.712658128452922,
+            "start_scale": 4.0,
+            "end_scale": 0.25,
+            "anneal_steps": 24000,
+            "action_name": "control_action",
+        },
+    )
+    coordinated_attitude = RewTerm(
+        func=mdp.circular12_coordinated_attitude_l2,
+        weight=-4.0,
+        params={"target_speed_mps": 17.712658128452922},
+    )
+    coordinated_body_rate = RewTerm(
+        func=mdp.circular12_coordinated_body_rate_l2,
+        weight=-0.5,
+        params={"target_speed_mps": 17.712658128452922},
+    )
+    radius_error = RewTerm(
+        func=mdp.circular12_radius_error_l2,
+        weight=-1.0,
+        params={"radius_m": 12.0, "center_xy": (0.0, 12.0)},
+    )
+    height_error = RewTerm(
+        func=mdp.circular12_height_error_l2,
+        weight=-2.0,
+        params={"height_m": 2.07},
+    )
+    speed_error = RewTerm(
+        func=mdp.circular12_speed_error_l2,
+        weight=-0.2,
+        params={"target_speed_mps": 17.712658128452922},
+    )
+    body_rate_command = RewTerm(
+        func=mdp.swift_ctbr_body_rate_command_l2,
+        weight=-0.005,
+        params={"action_name": "control_action"},
+    )
+    command_smoothness = RewTerm(
+        func=mdp.swift_ctbr_command_delta_l2,
+        weight=-0.002,
+        params={"action_name": "control_action"},
+    )
+
+
+@configclass
+class DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg(
+    DroneRacerSwiftCTBRGTCircular12RacingEnvCfg
+):
+    """BC/DAgger warm-started PPO with tighter CTBR authority."""
+
+    rewards: SwiftCTBRGTImitationFineTuneRewardsCfg = (
+        SwiftCTBRGTImitationFineTuneRewardsCfg()
+    )
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.actions.control_action.body_rate_max_radps = (4.0, 4.0, 2.0)
+
+
+@configclass
+class SwiftBlend25PolicyCfg(ObsGroup):
+    platform_state = ObsTerm(
+        func=mdp.blended_inertial_swift_state,
+        params={"blend_alpha": 0.25},
+    )
+    next_gate_corners = ObsTerm(
+        func=mdp.blended_truth_next_gate_corners_relative_w,
+        params={"blend_alpha": 0.25, "command_name": "target"},
+    )
+    previous_action = ObsTerm(func=mdp.last_action)
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
+
+@configclass
+class SwiftBlend50PolicyCfg(SwiftBlend25PolicyCfg):
+    platform_state = ObsTerm(
+        func=mdp.blended_inertial_swift_state,
+        params={"blend_alpha": 0.50},
+    )
+    next_gate_corners = ObsTerm(
+        func=mdp.blended_truth_next_gate_corners_relative_w,
+        params={"blend_alpha": 0.50, "command_name": "target"},
+    )
+
+
+@configclass
+class SwiftBlend75PolicyCfg(SwiftBlend25PolicyCfg):
+    platform_state = ObsTerm(
+        func=mdp.blended_inertial_swift_state,
+        params={"blend_alpha": 0.75},
+    )
+    next_gate_corners = ObsTerm(
+        func=mdp.blended_truth_next_gate_corners_relative_w,
+        params={"blend_alpha": 0.75, "command_name": "target"},
+    )
+
+
+@configclass
+class SwiftBlend100PolicyCfg(SwiftBlend25PolicyCfg):
+    platform_state = ObsTerm(
+        func=mdp.blended_inertial_swift_state,
+        params={"blend_alpha": 1.00},
+    )
+    next_gate_corners = ObsTerm(
+        func=mdp.blended_truth_next_gate_corners_relative_w,
+        params={"blend_alpha": 1.00, "command_name": "target"},
+    )
+
+
+@configclass
+class SwiftBlend25ObservationsCfg:
+    policy: SwiftBlend25PolicyCfg = SwiftBlend25PolicyCfg()
+    critic = None
+
+
+@configclass
+class SwiftBlend50ObservationsCfg:
+    policy: SwiftBlend50PolicyCfg = SwiftBlend50PolicyCfg()
+    critic = None
+
+
+@configclass
+class SwiftBlend75ObservationsCfg:
+    policy: SwiftBlend75PolicyCfg = SwiftBlend75PolicyCfg()
+    critic = None
+
+
+@configclass
+class SwiftBlend100ObservationsCfg:
+    policy: SwiftBlend100PolicyCfg = SwiftBlend100PolicyCfg()
+    critic = None
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTShadowColor20VisionV1Cfg
+):
+    """Stage B: GT actor; IMU + SC-EKF + Color20 run only in shadow."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.actions.control_action.body_rate_max_radps = (4.0, 4.0, 2.0)
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend25Color20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg
+):
+    """Stage D25: 25% estimator platform state, truth mission progression."""
+    observations: SwiftBlend25ObservationsCfg = SwiftBlend25ObservationsCfg()
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend50Color20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg
+):
+    """Stage D50: 50% estimator platform state, truth mission progression."""
+    observations: SwiftBlend50ObservationsCfg = SwiftBlend50ObservationsCfg()
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend75Color20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg
+):
+    """Stage D75: 75% estimator platform state, truth mission progression."""
+    observations: SwiftBlend75ObservationsCfg = SwiftBlend75ObservationsCfg()
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionColor20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg
+):
+    """Stage E: estimator p/v/R with truth-only mission gate progression."""
+    observations: SwiftBlend100ObservationsCfg = SwiftBlend100ObservationsCfg()
+
+
+def _configure_color20_gate_updates(cfg) -> None:
+    cfg.scene.tiled_camera = stage2_reference_camera_cfg(pitch_up_deg=20.0)
+    cfg.gate_camera_pitch_up_deg = 20.0
+    cfg.swift_detector_checkpoint = (
+        "artifacts/racing_vision/"
+        "circular12_color20_h207_gateid_kprcnn_v1/"
+        "torchvision_keypointrcnn_multigate_best.pt"
+    )
+    cfg.swift_visibility_checkpoint = None
+    cfg.swift_detection_threshold = 0.35
+    cfg.swift_keypoint_confidence_threshold = 0.35
+    cfg.gate_measurement_model = "direct_reprojection"
+    cfg.gate_reprojection_use_checkpoint_sigma = True
+    cfg.gate_reprojection_min_visible_corners = 2
+    cfg.gate_reprojection_association_max_rmse_px = 80.0
+    cfg.gate_identity_min_confidence = 0.50
+    cfg.gate_identity_preferred_max_rmse_px = 15.0
+    cfg.gate_identity_preference_margin_px = 4.0
+    cfg.gate_reprojection_huber_delta_sigma = 2.5
+    cfg.gate_reprojection_max_normalized_nis = 25.0
+    cfg.gate_debug_gt_diagnostics = True
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyCfg
+):
+    """Stage F: estimator state + estimated mission, learned-motion fusion OFF."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.actions.control_action.body_rate_max_radps = (4.0, 4.0, 2.0)
+        self.learned_apply_displacement_updates = False
+        _configure_color20_gate_updates(self)
+
+
+@configclass
+class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20V7Cfg(
+    DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20Cfg
+):
+    """Optional last stage: enable V7 only after its shadow/offline audit passes."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.learned_motion_checkpoint = (
+            "artifacts/imo_tcn/model_v7_circular12_racing.pt"
+        )
+        self.learned_apply_displacement_updates = True
