@@ -102,7 +102,15 @@ python scripts/imitation/train_circular12_bc.py   --dataset artifacts/imitation/
 Evaluate the student:
 
 ```bash
-./.conda-env/bin/python   scripts/imitation/evaluate_circular12_flight_quality.py   --student artifacts/imitation/bc_dagger_14_r1.pt   --episodes 20   --target-speed-mps 14   --output-dir artifacts/imitation/bc_dagger_14_r1_audit   --device cuda:0   --headless
+./.conda-env/bin/python scripts/imitation/evaluate_circular12_flight_quality.py \
+  --controller bc \
+  --checkpoint artifacts/imitation/bc_dagger_14_r1.pt \
+  --episodes 20 \
+  --target-speed-mps 14 \
+  --output-dir artifacts/imitation/bc_dagger_14_r1_audit \
+  --device cuda:0 \
+  --headless \
+  --fail-on-tumble
 ```
 
 Repeat DAgger until inversion entries are zero and recovery is reliable.
@@ -150,23 +158,37 @@ Task:
 
 `Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-GTShadow-Color20-v0`
 
-Actor remains on GT while IMU + SC-EKF + Color20 run in shadow.
+Actor remains on GT while IMU + SC-EKF + Color20 run in shadow. V7 is also
+evaluated online in shadow, but learned-motion fusion remains disabled.
 
 ### Stage C - GT plus estimator-like residual noise
 
 Task:
 
-`Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationNoiseRobust-v0`
+`Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationResidualNoise-v0`
 
 Default synthetic residuals are deliberately configurable:
 
 ```text
 position std = 0.08 m
-velocity std = 0.08 m/s
-attitude std = 1.0 deg
+velocity std = 0.06 m/s
+attitude std = 0.5 deg
 ```
 
 Replace these with measured estimator residuals once Stage B data are available.
+
+Stage C continuation command (use the qualified Stage A PPO checkpoint):
+
+```bash
+./.conda-env/bin/python scripts/rl/train.py \
+  --task Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationResidualNoise-v0 \
+  --checkpoint "$IMITATION_PPO" \
+  --num_envs 4096 \
+  --max_iterations 1000 \
+  --seed 1 \
+  --device cuda:0 \
+  --headless
+```
 
 ### Stage D - continuous GT -> estimator blend
 
@@ -186,8 +208,10 @@ Task:
 
 `Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-EstStateTruthMission-Color20-v0`
 
-This stage explicitly fails closed before estimator initialization; it must not
-fall back to simulator GT.
+This stage explicitly fails closed before estimator initialization. The
+100%-estimator observation raises instead of silently falling back to simulator
+GT. Partial 25/50/75% stages may use GT only during the estimator startup
+transient, before the first estimator state exists.
 
 ### Stage F - estimator state + estimator mission
 

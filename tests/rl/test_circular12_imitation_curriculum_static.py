@@ -8,6 +8,7 @@ def test_imitation_training_and_estimator_curriculum_are_registered():
     registry = (ROOT / "tasks/drone_racer/__init__.py").read_text()
     expected = [
         "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0",
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationResidualNoise-v0",
         "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-GTShadow-Color20-v0",
         "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-Blend25-Color20-v0",
         "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-Blend50-Color20-v0",

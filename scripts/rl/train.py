@@ -235,6 +235,10 @@ LEARNED_INERTIAL_SWIFT_CTBR_TASK = (
 IMITATION_FINE_TUNE_TASK = (
     "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0"
 )
+IMITATION_TRAINING_TASKS = {
+    IMITATION_FINE_TUNE_TASK,
+    "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationResidualNoise-v0",
+}
 
 
 def _audit_learned_inertial_bounded_cfg(env, agent_cfg: dict) -> None:
@@ -419,7 +423,7 @@ def _audit_swift_ctbr_gt_racing_cfg(env, agent_cfg: dict) -> None:
 
 def _audit_swift_ctbr_imitation_cfg(env, agent_cfg: dict) -> None:
     """Fail closed on the BC/DAgger -> PPO fine-tune contract."""
-    if args_cli.task != IMITATION_FINE_TUNE_TASK:
+    if args_cli.task not in IMITATION_TRAINING_TASKS:
         return
 
     action_space = env.unwrapped.single_action_space

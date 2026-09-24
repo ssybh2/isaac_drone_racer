@@ -1263,6 +1263,9 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg(
     def __post_init__(self) -> None:
         super().__post_init__()
         self.actions.control_action.body_rate_max_radps = (4.0, 4.0, 2.0)
+        # V7 remains non-actuating here, but collect online prediction-vs-truth
+        # evidence on the new stable trajectory before any learned fusion.
+        self.learned_debug_online_truth_audit = True
 
 
 @configclass
