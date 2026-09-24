@@ -1066,7 +1066,13 @@ class DroneRacerLearnedInertialSwiftCTBRCircular12KnownStartGTPolicyMultiGateVis
 
 @configclass
 class SwiftCTBRGTImitationFineTuneRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
-    """Racing reward with a decaying non-tumbling expert action anchor."""
+    """Stage-A 14 m/s PPO reward with a decaying non-tumbling expert anchor.
+
+    Keep the first PPO stage exactly on the validated BC/DAgger operating
+    point. Faster 16 and 17.7 m/s stages must be explicit later curriculum
+    steps because the 31-D actor observation does not contain a target-speed
+    command.
+    """
 
     ang_vel_l2 = None
     lookat_next = None
@@ -1075,7 +1081,7 @@ class SwiftCTBRGTImitationFineTuneRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
         func=mdp.circular12_expert_anchor_l2,
         weight=-1.0,
         params={
-            "target_speed_mps": 17.712658128452922,
+            "target_speed_mps": 14.0,
             "start_scale": 4.0,
             "end_scale": 0.25,
             "anneal_steps": 24000,
@@ -1085,12 +1091,12 @@ class SwiftCTBRGTImitationFineTuneRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
     coordinated_attitude = RewTerm(
         func=mdp.circular12_coordinated_attitude_l2,
         weight=-4.0,
-        params={"target_speed_mps": 17.712658128452922},
+        params={"target_speed_mps": 14.0},
     )
     coordinated_body_rate = RewTerm(
         func=mdp.circular12_coordinated_body_rate_l2,
         weight=-0.5,
-        params={"target_speed_mps": 17.712658128452922},
+        params={"target_speed_mps": 14.0},
     )
     radius_error = RewTerm(
         func=mdp.circular12_radius_error_l2,
@@ -1105,7 +1111,7 @@ class SwiftCTBRGTImitationFineTuneRewardsCfg(SwiftCTBRGTRacingRewardsCfg):
     speed_error = RewTerm(
         func=mdp.circular12_speed_error_l2,
         weight=-0.2,
-        params={"target_speed_mps": 17.712658128452922},
+        params={"target_speed_mps": 14.0},
     )
     body_rate_command = RewTerm(
         func=mdp.swift_ctbr_body_rate_command_l2,
