@@ -14,6 +14,16 @@ class Circular12BCConfig:
     observation_dim: int = 31
     action_dim: int = 4
     hidden_dims: tuple[int, ...] = (256, 256, 256)
+    standardized_observation_clip: float | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.standardized_observation_clip is not None
+            and self.standardized_observation_clip <= 0.0
+        ):
+            raise ValueError(
+                "standardized_observation_clip must be positive when set"
+            )
 
 
 class Circular12BCPolicy(nn.Module):
@@ -61,6 +71,9 @@ class Circular12BCPolicy(nn.Module):
         standardized = (
             observation - self.observation_mean
         ) / self.observation_std
+        if self.cfg.standardized_observation_clip is not None:
+            clip = float(self.cfg.standardized_observation_clip)
+            standardized = standardized.clamp(-clip, clip)
         return torch.tanh(self.net(standardized))
 
     def linear_layers(self) -> list[nn.Linear]:
