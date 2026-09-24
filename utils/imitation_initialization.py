@@ -143,10 +143,15 @@ def initialize_skrl_policy_from_bc(
 
     policy = agent.policy
     trunk = getattr(policy, "net_container", None)
+    # skrl names the head differently for shared and separate generated
+    # models: shared.py uses policy_layer, while gaussian.py uses output_layer.
     head = getattr(policy, "policy_layer", None)
+    if not isinstance(head, torch.nn.Linear):
+        head = getattr(policy, "output_layer", None)
     if trunk is None or not isinstance(head, torch.nn.Linear):
         raise RuntimeError(
-            "BC warm-start expects generated skrl net_container + policy_layer"
+            "BC warm-start expects generated skrl net_container plus a "
+            "Linear policy_layer/output_layer"
         )
     trunk_linears = [
         module for module in trunk.modules()
