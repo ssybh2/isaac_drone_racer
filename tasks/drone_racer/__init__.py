@@ -638,3 +638,76 @@ gym.register(
         ),
     },
 )
+
+
+# ---------------------------------------------------------------------------
+# Circular-12 imitation -> RL -> estimator replacement curriculum
+# ---------------------------------------------------------------------------
+
+gym.register(
+    id="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ImitationFineTune-v0",
+    entry_point=f"{__name__}.swift_ctbr_racing_env:SwiftCTBRRacingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_racer_swift_ctbr_env_cfg:"
+            "DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg"
+        ),
+        "skrl_cfg_entry_point": (
+            f"{agents.__name__}:skrl_swift_ctbr_gt_circular12_imitation_cfg.yaml"
+        ),
+    },
+)
+
+
+def _register_circular12_imitation_estimator_task(
+    task_id: str,
+    cfg_name: str,
+) -> None:
+    gym.register(
+        id=task_id,
+        entry_point=(
+            f"{__name__}.learned_inertial_racing_env:"
+            "LearnedInertialRacingEnv"
+        ),
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": (
+                f"{__name__}.drone_racer_swift_ctbr_env_cfg:" + cfg_name
+            ),
+            "skrl_cfg_entry_point": (
+                f"{agents.__name__}:"
+                "skrl_swift_ctbr_gt_circular12_imitation_cfg.yaml"
+            ),
+        },
+    )
+
+
+_register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-GTShadow-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationGTShadowColor20Cfg",
+)
+_register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-Blend25-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend25Color20Cfg",
+)
+_register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-Blend50-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend50Color20Cfg",
+)
+_register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-Blend75-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationBlend75Color20Cfg",
+)
+_register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-EstStateTruthMission-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstStateTruthMissionColor20Cfg",
+)
+_register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-EstimatorMission-Color20-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20Cfg",
+)
+_register_circular12_imitation_estimator_task(
+    "Isaac-Drone-Racer-Learned-Inertial-Swift-CTBR-Circular12-Imitation-EstimatorMission-Color20-V7-v0",
+    "DroneRacerLearnedInertialSwiftCTBRCircular12ImitationEstimatorMissionColor20V7Cfg",
+)
