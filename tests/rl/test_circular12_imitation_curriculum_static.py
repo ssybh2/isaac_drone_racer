@@ -49,3 +49,20 @@ def test_imitation_ppo_is_covered_by_gt_racing_contract_audit():
         '"Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-'
         'ImitationFineTune-v0"'
     ) in train
+
+
+def test_stage_c_noise_robustness_task_is_registered():
+    registry = (ROOT / "tasks/drone_racer/__init__.py").read_text()
+    cfg = (
+        ROOT / "tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py"
+    ).read_text()
+    obs = (
+        ROOT / "tasks/drone_racer/mdp/learned_inertial_observations.py"
+    ).read_text()
+    assert (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-"
+        "ImitationNoiseRobust-v0"
+    ) in registry
+    assert "SwiftGTNoisePolicyCfg" in cfg
+    assert "noisy_gt_swift_state" in obs
+    assert "_circular12_noisy_gt_cache" in obs
