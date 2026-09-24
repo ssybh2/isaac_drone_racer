@@ -39,6 +39,15 @@ parser.add_argument(
     help="Initial Gaussian exploration std after BC -> PPO transfer.",
 )
 parser.add_argument(
+    "--imitation_bc_transfer_only_path",
+    type=str,
+    default=None,
+    help=(
+        "Save the BC-initialized skrl PPO checkpoint and exit before any PPO "
+        "updates. Use this to verify BC -> skrl behavioral equivalence."
+    ),
+)
+parser.add_argument(
     "--fake_sensor_profile",
     type=str,
     choices=["clean", "mild", "nominal", "mixed", "stress"],
@@ -888,6 +897,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "imitation fine-tune task"
         )
     if (
+        args_cli.imitation_bc_transfer_only_path is not None
+        and args_cli.imitation_bc_checkpoint is None
+    ):
+        raise ValueError(
+            "--imitation_bc_transfer_only_path requires "
+            "--imitation_bc_checkpoint"
+        )
+    if (
         args_cli.post_load_learning_rate is not None
         or args_cli.post_load_max_action_std is not None
         or args_cli.recalibrate_legacy_actor
@@ -952,6 +969,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         )
         print("[INFO] Initialized PPO actor from Circular-12 BC checkpoint")
         print_dict(bc_metadata, nesting=4)
+
+        if args_cli.imitation_bc_transfer_only_path is not None:
+            output_path = os.path.abspath(
+                os.path.expanduser(args_cli.imitation_bc_transfer_only_path)
+            )
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            runner.agent.save(output_path)
+            print(
+                "[INFO] Saved BC -> skrl transfer-only checkpoint: "
+                f"{output_path}"
+            )
+            env.close()
+            return
 
     # load checkpoint (if specified)
     if resume_path:
