@@ -11,7 +11,10 @@ models:
     clip_mean_actions: False
     clip_log_std: True
     min_log_std: -20.0
-    max_log_std: -1.6094379124341003
+    # Stage-A begins from a validated zero-tumble BC. Keep exploration
+    # deliberately local: std <= 0.05 so PPO cannot immediately erase the
+    # collision-free behavior with large stochastic CTBR commands.
+    max_log_std: -2.995732273553991
     initial_log_std: -2.995732273553991
     network:
       - name: net
