@@ -143,26 +143,32 @@ def initialize_skrl_policy_from_bc(
 
     policy = agent.policy
     trunk = getattr(policy, "net_container", None)
-    # skrl names the head differently for shared and separate generated
-    # models: shared.py uses policy_layer, while gaussian.py uses output_layer.
-    head = getattr(policy, "policy_layer", None)
-    if not isinstance(head, torch.nn.Linear):
-        head = getattr(policy, "output_layer", None)
-    if trunk is None or not isinstance(head, torch.nn.Linear):
-        raise RuntimeError(
-            "BC warm-start expects generated skrl net_container plus a "
-            "Linear policy_layer/output_layer"
-        )
+    if trunk is None:
+        raise RuntimeError("BC warm-start expects generated skrl net_container")
+
     trunk_linears = [
         module for module in trunk.modules()
         if isinstance(module, torch.nn.Linear)
     ]
-    if len(trunk_linears) != 3:
-        raise RuntimeError(
-            f"expected 3 actor trunk Linear layers, got {len(trunk_linears)}"
-        )
 
-    destination = [*trunk_linears, head]
+    # skrl generated models use two layouts:
+    # - shared actor/value: 3 trunk Linear layers + policy_layer head
+    # - separate Gaussian actor: all 4 actor Linear layers live directly in
+    #   net_container (the output layer is embedded in the Sequential)
+    head = getattr(policy, "policy_layer", None)
+    if not isinstance(head, torch.nn.Linear):
+        head = getattr(policy, "output_layer", None)
+
+    if len(trunk_linears) == 4 and not isinstance(head, torch.nn.Linear):
+        destination = trunk_linears
+    elif len(trunk_linears) == 3 and isinstance(head, torch.nn.Linear):
+        destination = [*trunk_linears, head]
+    else:
+        raise RuntimeError(
+            "unsupported skrl actor topology for BC warm-start: "
+            f"net_container Linear count={len(trunk_linears)}, "
+            f"explicit head={type(head).__name__ if head is not None else None}"
+        )
     source_shapes = [tuple(layer.weight.shape) for layer in bc_layers]
     destination_shapes = [tuple(layer.weight.shape) for layer in destination]
     if source_shapes != destination_shapes:
