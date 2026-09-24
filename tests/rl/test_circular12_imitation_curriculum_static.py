@@ -81,3 +81,19 @@ def test_stage_e_uses_pure_estimator_platform_state_not_alpha_one_blend():
         ROOT / "tasks/drone_racer/mdp/learned_inertial_observations.py"
     ).read_text()
     assert "def learned_truth_next_gate_corners_relative_w" in observations
+
+
+def test_expert_validation_uses_coordinated_reference_reset():
+    registry = (ROOT / "tasks/drone_racer/__init__.py").read_text()
+    cfg = (
+        ROOT / "tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py"
+    ).read_text()
+    events = (ROOT / "tasks/drone_racer/mdp/events.py").read_text()
+    assert (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-"
+        "ExpertValidation-v0"
+    ) in registry
+    assert "DroneRacerSwiftCTBRGTCircular12ExpertValidationEnvCfg" in cfg
+    assert "reset_circular12_coordinated_state" in events
+    assert "velocity[:, 5] = omega" in events
+    assert "self.commands.target.randomise_start = None" in cfg
