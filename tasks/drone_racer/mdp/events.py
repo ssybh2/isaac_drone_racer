@@ -123,7 +123,7 @@ def reset_circular12_coordinated_state(
     )
     yaw = phase + torch.pi / 2.0
     quat = math_utils.quat_from_euler_xyz(
-        torch.full_like(phase, bank),
+        bank.expand_as(phase),
         torch.zeros_like(phase),
         yaw,
     )
@@ -143,6 +143,6 @@ def reset_circular12_coordinated_state(
     # history from the pre-reset pose.
     try:
         command = env.command_manager.get_term("target")
-        command.prev_robot_pos_w = asset.data.root_pos_w.clone()
+        command.prev_robot_pos_w = positions.clone()
     except (AttributeError, KeyError):
         pass
