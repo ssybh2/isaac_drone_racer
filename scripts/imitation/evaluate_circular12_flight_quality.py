@@ -138,6 +138,19 @@ def main() -> None:
     out_dir = args.output_dir.expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
+    instability_snapshots: list[dict] = []
+    obs_dimension_names = [
+        "px", "py", "pz",
+        "vx", "vy", "vz",
+        "R00", "R01", "R02",
+        "R10", "R11", "R12",
+        "R20", "R21", "R22",
+        "gate0_x", "gate0_y", "gate0_z",
+        "gate1_x", "gate1_y", "gate1_z",
+        "gate2_x", "gate2_y", "gate2_z",
+        "gate3_x", "gate3_y", "gate3_z",
+        "prev_thrust", "prev_p", "prev_q", "prev_r",
+    ]
     obs, _ = wrapped.reset()
     command = raw.command_manager.get_term("target")
     prev_gate = int(command.next_gate_idx[0].item())
@@ -168,6 +181,8 @@ def main() -> None:
     gross_excursion_events = 0
     inverted_active = False
     gross_active = False
+    warning_snapshot = None
+    tumble_snapshot = None
 
     try:
         while episode < int(args.episodes):
@@ -279,6 +294,79 @@ def main() -> None:
             inverted_active = inverted_now
             gross_active = gross_now
             inverted_samples += int(inverted_now)
+
+            if args.controller == "bc":
+                body_rate_now = float(
+                    torch.linalg.vector_norm(
+                        robot.data.root_ang_vel_b[0]
+                    ).item()
+                )
+                action_mae_now = float(
+                    (action - expert.action).abs().mean().item()
+                )
+                signed_z = (
+                    standardized.detach()
+                    .cpu()
+                    .numpy()
+                    .reshape(-1)
+                    .astype(np.float64)
+                )
+                abs_z = np.abs(signed_z)
+
+                def make_snapshot(kind: str) -> dict:
+                    top_indices = np.argsort(-abs_z)[:8]
+                    return {
+                        "kind": kind,
+                        "episode": int(episode + 1),
+                        "step": int(ep_step),
+                        "time_s": float(ep_step * raw.step_dt),
+                        "gates_so_far": int(ep_gates),
+                        "attitude_error_deg": float(np.degrees(att_err)),
+                        "inverted": bool(inverted_now),
+                        "gross": bool(gross_now),
+                        "body_rate_b_radps": (
+                            robot.data.root_ang_vel_b[0]
+                            .detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "body_rate_norm_radps": body_rate_now,
+                        "position_w_m": (
+                            p_w[0].detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "velocity_w_mps": (
+                            v_w[0].detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "bc_action": (
+                            action[0].detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "expert_action": (
+                            expert.action[0].detach().cpu().numpy().astype(np.float64).tolist()
+                        ),
+                        "bc_expert_action_mae": action_mae_now,
+                        "obs_zmax": float(abs_z.max()),
+                        "top_ood_dimensions": [
+                            {
+                                "index": int(index),
+                                "name": obs_dimension_names[int(index)],
+                                "z": float(signed_z[index]),
+                                "abs_z": float(abs_z[index]),
+                                "raw_observation": float(
+                                    obs[0, index].detach().cpu().item()
+                                ),
+                            }
+                            for index in top_indices
+                        ],
+                    }
+
+                warning_now = (
+                    np.degrees(att_err) > 30.0
+                    or body_rate_now > 2.5
+                    or action_mae_now > 0.25
+                    or float(abs_z.max()) > 6.0
+                )
+                if warning_snapshot is None and warning_now:
+                    warning_snapshot = make_snapshot("warning")
+                if tumble_snapshot is None and (inverted_now or gross_now):
+                    tumble_snapshot = make_snapshot("tumble")
 
             action_abs.extend(
                 action.detach().abs().cpu().numpy().reshape(-1).tolist()
@@ -398,6 +486,15 @@ def main() -> None:
                 ),
             }
             rows.append(row)
+            instability_snapshots.append(
+                {
+                    "episode": int(episode + 1),
+                    "termination": row["termination"],
+                    "gates": int(ep_gates),
+                    "warning_snapshot": warning_snapshot,
+                    "tumble_snapshot": tumble_snapshot,
+                }
+            )
             print(
                 "[flight-quality] "
                 f"ep={episode + 1:02d}/{args.episodes} "
@@ -433,6 +530,8 @@ def main() -> None:
             gross_excursion_events = 0
             inverted_active = False
             gross_active = False
+            warning_snapshot = None
+            tumble_snapshot = None
             prev_gate = int(command.next_gate_idx[0].item())
 
         total_inversions = int(
@@ -553,18 +652,7 @@ def main() -> None:
                 )
                 for name in ("thrust", "p", "q", "r")
             },
-            "obs_dimension_names": [
-                "px", "py", "pz",
-                "vx", "vy", "vz",
-                "R00", "R01", "R02",
-                "R10", "R11", "R12",
-                "R20", "R21", "R22",
-                "gate0_x", "gate0_y", "gate0_z",
-                "gate1_x", "gate1_y", "gate1_z",
-                "gate2_x", "gate2_y", "gate2_z",
-                "gate3_x", "gate3_y", "gate3_z",
-                "prev_thrust", "prev_p", "prev_q", "prev_r",
-            ],
+            "obs_dimension_names": obs_dimension_names,
             "obs_dim_absz_p95_mean": np.nanmean(
                 np.asarray([row["obs_dim_absz_p95"] for row in rows], dtype=np.float64),
                 axis=0,
@@ -582,7 +670,15 @@ def main() -> None:
         (out_dir / "summary.json").write_text(
             json.dumps(summary, indent=2) + "\n"
         )
+        (out_dir / "instability_snapshots.json").write_text(
+            json.dumps(instability_snapshots, indent=2) + "\n"
+        )
         print(json.dumps(summary, indent=2), flush=True)
+        print(
+            f"[flight-quality] instability snapshots: "
+            f"{out_dir / 'instability_snapshots.json'}",
+            flush=True,
+        )
 
         if args.fail_on_tumble and not summary["zero_tumble_gate"]:
             raise RuntimeError(
