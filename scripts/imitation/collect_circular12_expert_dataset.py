@@ -18,7 +18,7 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
     "--task",
-    default="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ExpertValidation-v0",
+    default="Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ExpertDemo-v0",
 )
 parser.add_argument("--episodes", type=int, default=20)
 parser.add_argument("--target-speed-mps", type=float, default=14.0)
