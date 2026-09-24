@@ -1138,6 +1138,12 @@ class DroneRacerSwiftCTBRGTCircular12ImitationFineTuneEnvCfg(
     def __post_init__(self) -> None:
         super().__post_init__()
         self.actions.control_action.body_rate_max_radps = (4.0, 4.0, 2.0)
+        # PPO exploration can occasionally miss a gate even when initialized
+        # from the validated zero-tumble BC. Keep the miss recorded for the
+        # racing reward, but advance the actor-visible target so a single miss
+        # cannot create the stale-behind-gate observation failure mode already
+        # eliminated during the imitation stage.
+        self.commands.target.advance_target_on_miss = True
 
 
 @configclass
