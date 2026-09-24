@@ -97,3 +97,25 @@ def test_expert_validation_uses_coordinated_reference_reset():
     assert "reset_circular12_coordinated_state" in events
     assert "velocity[:, 5] = omega" in events
     assert "self.commands.target.randomise_start = None" in cfg
+
+
+def test_expert_demo_uses_mild_reset_perturbations():
+    registry = (ROOT / "tasks/drone_racer/__init__.py").read_text()
+    cfg = (
+        ROOT / "tasks/drone_racer/drone_racer_swift_ctbr_env_cfg.py"
+    ).read_text()
+    events = (ROOT / "tasks/drone_racer/mdp/events.py").read_text()
+    assert (
+        "Isaac-Drone-Racer-Swift-CTBR-GT-Circular12-ExpertDemo-v0"
+    ) in registry
+    assert "DroneRacerSwiftCTBRGTCircular12ExpertDemoEnvCfg" in cfg
+    for token in (
+        '"phase_jitter_rad"',
+        '"radial_jitter_m"',
+        '"height_jitter_m"',
+        '"speed_jitter_mps"',
+        '"attitude_jitter_rad"',
+        '"angular_rate_jitter_radps"',
+    ):
+        assert token in cfg
+    assert "def _sym_jitter" in events
