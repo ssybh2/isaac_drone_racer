@@ -30,9 +30,21 @@ parser.add_argument("--epochs", type=int, default=120)
 parser.add_argument("--batch-size", type=int, default=1024)
 parser.add_argument("--learning-rate", type=float, default=3.0e-4)
 parser.add_argument("--weight-decay", type=float, default=1.0e-5)
+parser.add_argument(
+    "--observation-std-floor",
+    type=float,
+    default=1.0e-4,
+    help=(
+        "Minimum per-dimension observation standard deviation used for "
+        "normalization. Raising this reduces extreme OOD amplification on "
+        "nearly constant state/action dimensions."
+    ),
+)
 parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--device", default="cuda:0")
 args = parser.parse_args()
+if args.observation_std_floor <= 0.0:
+    parser.error("--observation-std-floor must be positive")
 
 
 def _dataset_target_speed(
@@ -122,9 +134,12 @@ def main() -> None:
     )
 
     obs_mean = torch.from_numpy(observation[train_mask].mean(axis=0))
-    obs_std = torch.from_numpy(
+    raw_obs_std = torch.from_numpy(
         observation[train_mask].std(axis=0)
-    ).clamp_min(1.0e-4)
+    )
+    obs_std = raw_obs_std.clamp_min(
+        float(args.observation_std_floor)
+    )
     model = Circular12BCPolicy(
         observation_mean=obs_mean,
         observation_std=obs_std,
@@ -196,6 +211,12 @@ def main() -> None:
         "samples": int(observation.shape[0]),
         "episodes": int(np.unique(data["episode_id"]).size),
         "target_speed_mps": target_speed_mps,
+        "observation_std_floor": float(args.observation_std_floor),
+        "raw_observation_std_min": float(raw_obs_std.min().item()),
+        "effective_observation_std_min": float(obs_std.min().item()),
+        "floored_observation_dimensions": int(
+            (raw_obs_std < float(args.observation_std_floor)).sum().item()
+        ),
         "best_epoch": int(
             min(history, key=lambda row: row["val_rmse"])["epoch"]
         ),
