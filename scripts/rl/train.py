@@ -40,7 +40,7 @@ parser.add_argument(
 parser.add_argument(
     "--imitation_bc_action_std",
     type=float,
-    default=0.05,
+    default=0.01,
     help="Initial Gaussian exploration std after BC -> PPO transfer.",
 )
 parser.add_argument(
