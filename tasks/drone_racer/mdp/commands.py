@@ -183,8 +183,15 @@ class GateTargetingCommand(CommandTerm):
             torch.any(torch.abs(self.robot.data.root_pos_w - self.next_gate_w[:, :3]) > (self.gate_size / 2), dim=1)
         )
 
-        # Update next gate target for the envs that passed the gate
-        self.next_gate_idx[self._gate_passed] += 1
+        # Advance the actor-visible control target after a valid pass.
+        # For safety-oriented imitation tasks we may also advance after a miss:
+        # the miss remains recorded in _gate_missed and is never counted as a
+        # successful gate, but the controller is not forced to keep targeting
+        # a gate that is already behind the vehicle.
+        advance_target = self._gate_passed
+        if self.cfg.advance_target_on_miss:
+            advance_target = advance_target | self._gate_missed
+        self.next_gate_idx[advance_target] += 1
         self.next_gate_idx = self.next_gate_idx % self.num_gates
 
         self.prev_robot_pos_w = self.robot.data.root_pos_w
@@ -634,6 +641,14 @@ class GateTargetingCommandCfg(CommandTermCfg):
 
     gate_size: float = 1.5
     """Size of the gate in meters. This is used to determine if the drone has passed through the gate."""
+
+    advance_target_on_miss: bool = False
+    """If True, advance only the actor-visible target after crossing a gate
+    plane outside the opening. The miss flag remains true, so scoring can
+    still treat the event as a miss rather than a pass. This prevents a
+    safety controller from repeatedly targeting a gate that is already
+    behind the vehicle.
+    """
 
     target_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
     """The configuration for the goal pose visualization marker. Defaults to FRAME_MARKER_CFG."""
